@@ -8,8 +8,9 @@
 
 **A platform-independent RIPscrip-compatible drawing library in pure C99.**
 
-![RIPlib Demo Output](docs/demo_output.png)
-*Demo output: rounded rectangle, BGI Triplex stroke font, filled circle, FPU bezier curve*
+[![RIPlib Diagnostic Harness on RP2350 DVI Hardware](https://img.youtube.com/vi/IAHWylT1gd8/0.jpg)](https://youtu.be/IAHWylT1gd8)
+
+*31-page diagnostic harness running on RP2350 HSTX → DVI at 720×480 60fps. Click to watch.*
 
 RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a full RIPscrip protocol parser supporting **all protocol versions**: v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, and v3.1 (A2GSPU extensions). It renders to any `uint8_t*` framebuffer with zero platform dependencies.
 
