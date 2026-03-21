@@ -2,7 +2,16 @@
 
 **A platform-independent RIPscrip-compatible drawing library in pure C99.**
 
-RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a full RIPscrip v1.54/v2.0/v3.0 protocol parser. It renders to any `uint8_t*` framebuffer with zero platform dependencies.
+RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a full RIPscrip protocol parser supporting **all protocol versions**: v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, and v3.1 (A2GSPU extensions). It renders to any `uint8_t*` framebuffer with zero platform dependencies.
+
+### Protocol Version Support
+
+| Version | Year | Coverage | Notes |
+|---------|------|----------|-------|
+| **v1.54** | 1993 | 100% | Full Level 0 (35 drawing commands) + Level 1 (17 interactive commands) |
+| **v2.0** | 1994 | 100% | Extended commands (rounded rect, scroll, poly bezier, bounded text, etc.) + Level 2 Drawing Port system (36 ports with state save/restore) |
+| **v3.0** | 1995 | 100% | Font justification, extended text windows, gradient fill, scalable text, menu/dialog/scrollbar widgets |
+| **v3.1** | 2026 | 100% | A2GSPU extensions: AND/NOT write modes, vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
 
 ## Features
 
