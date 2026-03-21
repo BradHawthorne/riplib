@@ -10,7 +10,7 @@ specification — see `docs/spec/` for the current complete reference.
 |----------|---------|------|-------------|
 | `RIPSCRIP_v154.DOC` | v1.54 | 1993 | Original specification. Defines Level 0 + Level 1 commands, MegaNum encoding, frame format. Binary .DOC format. |
 | `RIPSCRIP_v2A4.PRN` | v2.0 Rev 2.A4 | ~1995-96 | Extended specification. Defines Drawing Ports, extended commands, coordinate systems, data tables. Plain text. |
-| `ripscrip-v3-RE-notes.md` | v3.0 | 2026 | Reverse engineering analysis of RIPSCRIP.DLL (592KB, Oct 1997). Contains DLL deviation analysis, v2.A4 spec errata, dropped commands, and driver bugs NOT covered in the v3.1 spec. Working notes — partially unrefactored but the deviation/errata sections are authoritative. |
+| *(v3.0 RE notes)* | v3.0 | 2026 | Retired — all relevant content rolled into `docs/spec/11-dll-deviations.md`. Original RE working notes preserved in the a2gspu repo at `C:/RIPtel/protocol/`. |
 
 ## Copyright
 
