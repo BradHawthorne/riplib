@@ -160,6 +160,88 @@ Palette slot switching:
      0x04 = save alternate, 0x08 = restore alternate).
 
 
+---------------------------------------------------------------------
+11.5  RESURRECTED DEAD CODE (v3.1)
+---------------------------------------------------------------------
+
+The following features existed as code in the DLL (parsed, stored)
+but never produced visible output. They were effectively dead code.
+v3.1 activates them with working implementations.
+
+§DEAD.1 — Font attribute rendering (|f command):
+     The DLL parsed font_attrib bits (bold, italic, underline,
+     shadow) from the RIP_FONT_ATTRIB command and stored them
+     in the GFXSTYLE structure. However, the BGI stroke font
+     renderer never read or applied these bits. All text rendered
+     identically regardless of attribute settings.
+     v3.1: All four attributes are now rendered. Bold uses
+     double-stroke offset, italic uses FPU shear, underline
+     draws at baseline, shadow draws dimmed offset copy.
+
+§DEAD.2 — BGI stroke font loading:
+     The DLL loaded CHR font files into memory and parsed their
+     headers. However, the CHR binary parser had bugs in table
+     ordering (width table and stroke offset table were often
+     reversed in third-party implementations) and '+' marker
+     detection (assumed byte 0, but bgi2c-generated data has
+     '+' at ~byte 38). In practice, fonts silently failed to
+     load and all text fell back to the bitmap font.
+     v3.1: Complete parser rewrite — scans for '+' with
+     validation, correct 16-byte header, offsets-before-widths
+     table order. All 10 BGI fonts load and render correctly.
+
+§DEAD.3 — AND and NOT write modes:
+     The DLL's write mode handler accepted mode values 0-4 on
+     the wire but only implemented COPY (0), XOR (1), and OR (2)
+     internally. AND and NOT were parsed and stored but the
+     pixel-write paths only had switch cases for three modes.
+     v3.1: All five modes implemented in every pixel-write path
+     (line, rect, fill, text, copy operations).
+
+§DEAD.4 — Vertical text direction:
+     The DLL accepted direction=1 in font style commands and
+     stored the value, but the rendering produced backwards
+     text (bottom-to-top) that was unreadable in English.
+     The feature was documented but functionally broken — no
+     BBS used it because the output was unusable.
+     v3.1: Corrected to top-to-bottom with proper screen-CW
+     glyph rotation. Added direction=2 (CCW) as a new option.
+
+§DEAD.5 — Drawing Port alpha and compositing flags:
+     The DLL's port structure had fields for opacity, compositing
+     mode, and z-order, but these were never read by the rendering
+     pipeline. Ports were always rendered at full opacity with
+     simple overwrite compositing.
+     v3.1: Port flags command (|2F) sets alpha, comp_mode, and
+     zorder per-port. These feed into the windowed compositor
+     for layered desktop rendering.
+
+§DEAD.6 — Fill patterns 9-11 (INTERLEAVE, WIDE_DOT, CLOSE_DOT):
+     The BGI specification defines 13 fill patterns (0-12), but
+     most implementations only provided 8 built-in patterns.
+     Patterns 9-11 were mapped to approximate alternatives
+     (checker, light diagonal) rather than their correct bitmaps.
+     v3.1: All three patterns implemented with their correct
+     8×8 bitmaps per the Borland BGI specification.
+
+§DEAD.7 — Patterned flood fill:
+     The DLL's flood fill command accepted a fill pattern setting
+     but the flood fill algorithm always filled with a solid color.
+     The GDI brush for patterned fill was created but never applied
+     to the ExtFloodFill call in the border-color codepath.
+     v3.1: Two-pass algorithm — solid fill first (for boundary
+     tracking), then pattern application over the filled region.
+
+§DEAD.8 — Text justification rendering:
+     The DLL parsed horizontal and vertical justification flags
+     from the font style command and stored them in GFXSTYLE.
+     However, the text rendering paths did not read these fields
+     — all text rendered left-aligned at the draw cursor position.
+     v3.1: Justification applied via string width measurement
+     and cursor offset before rendering. Center, right, top,
+     bottom, and baseline justification all functional.
+
+
 =====================================================================
 ==                    END OF SEGMENT 11                             ==
 ==           DLL Deviations, Errata & Known Bugs                   ==
