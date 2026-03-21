@@ -25,6 +25,12 @@ endif()
 
 # ── Optional: build example ─────────────────────────────────────────
 option(RIPLIB_BUILD_EXAMPLES "Build example programs" OFF)
+option(RIPLIB_BUILD_TESTS "Build test suite" OFF)
+
 if(RIPLIB_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(RIPLIB_BUILD_TESTS)
+    add_subdirectory(tests)
 endif()

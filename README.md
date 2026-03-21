@@ -13,6 +13,28 @@
 
 RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a full RIPscrip protocol parser supporting **all protocol versions**: v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, and v3.1 (A2GSPU extensions). It renders to any `uint8_t*` framebuffer with zero platform dependencies.
 
+### Comparison
+
+| Feature | Original BGI | SDL_bgi | WinBGIm | **RIPlib** |
+|---------|-------------|---------|---------|-----------|
+| Line/Rect/Circle/Ellipse | Yes | Yes | Yes | **Yes** |
+| Rounded Rectangle | No | No | No | **Yes** |
+| Bezier Curves | No | No | No | **Yes (FPU)** |
+| Polygon Fill | Basic | Basic | Basic | **Scanline** |
+| Flood Fill | Solid | Solid | Solid | **Patterned** |
+| Fill Patterns | 8 | 8 | 8 | **13** |
+| Write Modes | 3 (COPY/XOR/OR) | 3 | 3 | **5 (+AND/NOT)** |
+| Stroke Fonts | 10 CHR (buggy parsers) | Partial | No | **10 CHR (correct parser)** |
+| Font Scaling | 1-10 integer | 1-10 | N/A | **1-10 + attributes** |
+| Font Attributes | No | No | No | **Bold/Italic/Underline/Shadow** |
+| Vertical Text | Bottom-to-top (backwards) | Same | N/A | **Top-to-bottom (corrected)** |
+| Alpha/Transparency | No | Yes (SDL) | No | **Per-port (v3.1)** |
+| Multiple Windows | No | Yes (SDL) | No | **36 Drawing Ports** |
+| Mouse Regions | No | Yes (SDL) | Yes | **Yes + hit testing** |
+| Protocol Parser | No | No | No | **Full RIPscrip v1.54-v3.1** |
+| Platform | DOS only | SDL2/SDL3 | Windows | **Any C99 + framebuffer** |
+| Dependencies | DOS/BIOS | SDL2 | Win32 | **None** |
+
 ### Protocol Version Support
 
 | Version | Year | Coverage | Notes |
