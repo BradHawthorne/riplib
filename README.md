@@ -1,6 +1,15 @@
 # RIPlib
 
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+![Language: C99](https://img.shields.io/badge/Language-C99-blue.svg)
+![Build: CMake](https://img.shields.io/badge/Build-CMake-red.svg)
+![Platform: Any](https://img.shields.io/badge/Platform-Independent-orange.svg)
+![Protocol: RIPscrip v3.1](https://img.shields.io/badge/RIPscrip-v3.1-purple.svg)
+
 **A platform-independent RIPscrip-compatible drawing library in pure C99.**
+
+![RIPlib Demo Output](docs/demo_output.png)
+*Demo output: rounded rectangle, BGI Triplex stroke font, filled circle, FPU bezier curve*
 
 RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a full RIPscrip protocol parser supporting **all protocol versions**: v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, and v3.1 (A2GSPU extensions). It renders to any `uint8_t*` framebuffer with zero platform dependencies.
 
