@@ -415,6 +415,7 @@ void rip_init(rip_state_t *s) {
  * so a pending $QUERY$ round-trip that was interrupted by a protocol switch
  * resumes correctly when RIPscrip is reactivated. */
 void rip_activate(rip_state_t *s) {
+    if (!s) return;
     g_rip_state = s;
 
     /* Restore BBS-customized palette (or EGA defaults on first activation).
@@ -441,6 +442,7 @@ void rip_activate(rip_state_t *s) {
  * Codex FIX 5: Clears query_pending / query_var_name so an unanswered
  * $QUERY$ from the disconnected session cannot affect the next session. */
 void rip_session_reset(rip_state_t *s) {
+    if (!s) return;
     g_rip_state = s;
 
     /* Reclaim all PSRAM arena allocations (clipboard pixels, cached icon

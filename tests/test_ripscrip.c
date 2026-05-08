@@ -873,6 +873,111 @@ static void test_l1_audio_pushes_marker(void) {
         FAIL("1A did not push CMD_PLAY_SOUND marker");
 }
 
+static void test_null_safety_public_entrypoints(void) {
+    TEST("public entrypoints are NULL-safe");
+    /* These would have crashed before L11/L12.  Just call them and
+     * ensure we get back without dereferencing a NULL state. */
+    rip_init_first(NULL);
+    rip_activate(NULL);
+    rip_session_reset(NULL);
+    rip_save_palette(NULL);
+    rip_mouse_event_state(NULL, 0, 0, true);
+    rip_file_upload_begin_state(NULL, 5);
+    rip_file_upload_byte_state(NULL, 0xAA);
+    rip_file_upload_end_state(NULL);
+    PASS();  /* Reaching this line means none crashed. */
+}
+
+static void test_fuzz_random_bytes_no_crash(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint32_t lcg = 0xDEADBEEFu;
+
+    TEST("rip_process survives 16K random adversarial bytes");
+    init_fixture(&s, &ctx);
+    /* Feed 16K LCG-random bytes and ensure the parser stays sane. */
+    for (int i = 0; i < 16384; i++) {
+        lcg = lcg * 1103515245u + 12345u;
+        uint8_t b = (uint8_t)(lcg >> 16);
+        rip_process(&s, &ctx, b);
+    }
+    /* After the storm, a clean !|X command should still work. */
+    feed_script(&s, &ctx, "\r\n!|X0505|");
+    /* Pixel may or may not draw depending on residual state, but no
+     * crash and the FSM should accept new input.  The test passes by
+     * not crashing. */
+    PASS();
+    (void)s;
+}
+
+static void test_command_with_no_args(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("commands with too few args are silently dropped");
+    init_fixture(&s, &ctx);
+    /* RIP_LINE needs 8 chars; feed only 4.  Must not crash, must not
+     * draw a partial line, and the parser must accept the next command. */
+    feed_script(&s, &ctx, "!|L0000|!|X0606|");
+    /* X0606 = (6, scale_y(6)=6) — pixel must draw. */
+    if (draw_get_pixel(6, 6) != 0)
+        PASS();
+    else
+        FAIL("parser stuck after short-arg command");
+}
+
+static void test_bang_pipe_with_no_command_letter(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("!| followed by | (empty command) is recovered from");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!||!|X0707|");
+    if (draw_get_pixel(7, 8) != 0)  /* scale_y(7) = 8 */
+        PASS();
+    else
+        FAIL("empty !|| sequence broke parser");
+}
+
+static void test_text_param_with_only_escape(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("text param ending in lone backslash doesn't UB");
+    init_fixture(&s, &ctx);
+    /* The trailing '\' has no escape successor.  unescape_text must
+     * leave it alone and we must not read past end. */
+    feed_script(&s, &ctx, "!|T\\|");
+    /* No crash means pass; nothing else to assert. */
+    PASS();
+    (void)s;
+}
+
+static void test_ridiculously_long_text(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("text longer than cmd_buf capacity is truncated, not overflowed");
+    init_fixture(&s, &ctx);
+    /* Build a text command with 300 'A' bytes — cmd_buf is 256. */
+    char buf[400];
+    int p = 0;
+    buf[p++] = '!';
+    buf[p++] = '|';
+    buf[p++] = 'T';
+    for (int i = 0; i < 300; i++) buf[p++] = 'A';
+    buf[p++] = '|';
+    buf[p] = '\0';
+    feed_script(&s, &ctx, buf);
+    /* Subsequent valid command must still work — cmd_len is reset by
+     * '|' regardless of overflow. */
+    feed_script(&s, &ctx, "!|X0808|");
+    if (draw_get_pixel(8, 9) != 0)  /* scale_y(8)=9 */
+        PASS();
+    else
+        FAIL("parser broken after over-long text param");
+}
+
 static void test_poly_bezier_renders_segment(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1679,6 +1784,12 @@ int main(void) {
     test_eval_if_le_3_5();
     test_eval_if_ne_strings();
     test_scroll_clears_only_source_rect();
+    test_null_safety_public_entrypoints();
+    test_fuzz_random_bytes_no_crash();
+    test_command_with_no_args();
+    test_bang_pipe_with_no_command_letter();
+    test_text_param_with_only_escape();
+    test_ridiculously_long_text();
     test_poly_bezier_renders_segment();
     test_bounded_text_wraps();
     test_polygon_all_outside_clip_no_draw();
