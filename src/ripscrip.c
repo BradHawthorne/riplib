@@ -1002,10 +1002,13 @@ static void rip_tw_putchar(rip_state_t *s, uint8_t ch) {
         rip_tw_putchar(s, '\n');
     }
 
-    /* Draw the character */
+    /* Draw the character.  L17: previously passed NULL font, which made
+     * draw_text early-return — every byte routed to the text window
+     * passthrough was invisible.  Use cp437_8x16 like every other
+     * bitmap-font draw site. */
     uint8_t tc = s->palette[s->draw_color & 0x0F];
     draw_text(s->tw_cur_x, s->tw_cur_y, (const char *)&ch, 1,
-              NULL, 16u, tc, 0xFF);
+              cp437_8x16, 16u, tc, 0xFF);
     s->tw_cur_x += char_w;
 
     /* Wrap if past right edge (non-wrap mode: just clip) */
@@ -2044,10 +2047,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         memcpy(s->app_vars[idx], display, (size_t)vlen);
                         s->app_vars[idx][vlen] = '\0';
                     } else {
+                        /* L17: same NULL-font silent-drop bug as L14/L16.
+                         * Render the prompt with cp437_8x16. */
                         if (dlen > 0) {
                             uint8_t tc = s->palette[s->draw_color & 0x0F];
                             draw_text(s->draw_x, s->draw_y, display, dlen,
-                                      NULL, 16, tc, 0xFF);
+                                      cp437_8x16, 16, tc, 0xFF);
                         }
                     }
                 }

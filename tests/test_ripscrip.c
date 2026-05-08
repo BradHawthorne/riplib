@@ -898,6 +898,51 @@ static void test_l1_audio_pushes_marker(void) {
         FAIL("1A did not push CMD_PLAY_SOUND marker");
 }
 
+static void test_text_window_passthrough_renders(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("text window passthrough renders a visible glyph (L17a)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|w0A0A1E1E10|");
+    if (!s.tw_active) { FAIL("setup: w did not activate text window"); return; }
+    /* After the '|' terminator the FSM is in RIP_ST_COMMAND, not IDLE.
+     * A bare '\r' returns it to IDLE so subsequent bytes route through
+     * the text-window passthrough. */
+    rip_process(&s, &ctx, '\r');
+    rip_process(&s, &ctx, 'A');
+    int hit = 0;
+    for (int y = 11; y < 28 && !hit; y++)
+        for (int x = 10; x < 18 && !hit; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) hit = 1;
+    if (hit)
+        PASS();
+    else
+        FAIL("text window passthrough produced no pixels (L17a regression)");
+}
+
+static void test_define_prompt_renders(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1D RIP_DEFINE prompt body renders (L17b)");
+    init_fixture(&s, &ctx);
+    /* 1D with non-$APPn$ variable name renders the default text via
+     * draw_text.  Format: flags:3 res:2 then "varname?prompt?DEFAULT". */
+    feed_script(&s, &ctx, "!|1D000  X?prompt?HELLO|");
+    /* Default value "HELLO" should be drawn at (s->draw_x, s->draw_y).
+     * draw_x/y are 0,0 by default.  Look for non-zero pixels in the
+     * top-left where the string would be rendered. */
+    int hit = 0;
+    for (int y = 0; y < 16 && !hit; y++)
+        for (int x = 0; x < 50 && !hit; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) hit = 1;
+    if (hit)
+        PASS();
+    else
+        FAIL("RIP_DEFINE prompt did not render (L17b regression)");
+}
+
 static void test_region_text_expands_variables(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1994,6 +2039,8 @@ int main(void) {
     test_eval_if_le_3_5();
     test_eval_if_ne_strings();
     test_scroll_clears_only_source_rect();
+    test_text_window_passthrough_renders();
+    test_define_prompt_renders();
     test_region_text_expands_variables();
     test_region_text_renders_bitmap();
     test_text_xy_ext_renders_via_shared_helper();
