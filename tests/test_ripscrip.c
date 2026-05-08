@@ -1845,6 +1845,109 @@ static void test_metadata_commands_store_state_and_vars(void) {
         FAIL("metadata command state or query variable mismatch");
 }
 
+static void test_user_var_overflow_returns_false(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    char cmd[64];
+
+    TEST("user var table rejects writes past RIP_USER_VAR_MAX (16)");
+    init_fixture(&s, &ctx);
+    /* Fill all 16 slots. */
+    for (int i = 0; i < RIP_USER_VAR_MAX; i++) {
+        snprintf(cmd, sizeof(cmd), "!|1D000  V%d=val|", i);
+        feed_script(&s, &ctx, cmd);
+    }
+    if (s.user_var_count != RIP_USER_VAR_MAX) {
+        FAIL("setup: expected 16 user vars after fill");
+        return;
+    }
+    /* Try one more — must NOT succeed and must NOT bump the count. */
+    feed_script(&s, &ctx, "!|1D000  EXTRA=val|");
+    if (s.user_var_count == RIP_USER_VAR_MAX)
+        PASS();
+    else
+        FAIL("17th user var was accepted past the table size");
+}
+
+static void test_user_var_name_with_dollar_normalizes(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("$NAME$ and NAME resolve to the same user-var slot");
+    init_fixture(&s, &ctx);
+    /* Set "$ZIP$=12345" — leading and trailing $ should be stripped. */
+    feed_script(&s, &ctx, "!|1D000  $ZIP$=12345|");
+    /* Query without $ wrappers in the name (they're added by the lookup). */
+    tx_reset();
+    feed_script(&s, &ctx, "!|1Q00000$ZIP$|");
+    if (tx_len == 5 && memcmp(tx_capture, "12345", 5) == 0)
+        PASS();
+    else
+        FAIL("dollar-wrapped user var name did not normalize");
+}
+
+static void test_user_var_name_with_invalid_char_rejected(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("user var name with non-alphanumeric char is rejected");
+    init_fixture(&s, &ctx);
+    /* "BAD-NAME=val" — '-' isn't alphanumeric or underscore. */
+    feed_script(&s, &ctx, "!|1D000  BAD-NAME=val|");
+    if (s.user_var_count == 0)
+        PASS();
+    else
+        FAIL("invalid var name was accepted");
+}
+
+static void test_filled_border_disabled_skips_rect_outline(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    int outline_pixel;
+    int interior_pixel;
+
+    TEST("N00 also disables outlines on filled rects via [");
+    init_fixture(&s, &ctx);
+    /* fill_pattern=1 (solid), fill_color=4 (red), draw_color=15 (white).
+     * filled_borders OFF.  Then [ filled-rect-ext.  Outline pixel must
+     * be the fill color, not the draw color. */
+    feed_script(&s, &ctx, "!|c0F|S0104|N00|");
+    /* [ rect with bx0=0A by0=0A bx1=0F by1=0F mode=00 p1=00 p2=00 */
+    feed_script(&s, &ctx, "!|[0A0A0F0F000000|");
+    /* Top-left corner (10, 11) should be fill-color (palette[4]=244) since
+     * outline was suppressed. */
+    outline_pixel = draw_get_pixel(10, 11);
+    interior_pixel = draw_get_pixel(12, 13);
+    if (outline_pixel == s.palette[4] && interior_pixel == s.palette[4])
+        PASS();
+    else
+        FAIL("rect outline drew despite N00");
+}
+
+static void test_filled_border_helper_always_sets_copy_mode(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint8_t pixel_at_top;
+
+    TEST("filled-border helper draws outline in COPY even when XOR active");
+    init_fixture(&s, &ctx);
+    /* Pre-fill the spot we'll draw the outline at, then set XOR. */
+    feed_script(&s, &ctx, "!|c0F|S0104|");
+    s.write_mode = DRAW_MODE_XOR;
+    draw_set_write_mode(DRAW_MODE_XOR);
+    /* Filled circle G — cx=20 cy=20 r=5 in EGA (encoded "0K0K05").
+     * After scaling: cx=20, cy=22, r=5.  Top of circle at (20, 17).
+     * The outline top pixel should be palette[15] (NOT XOR-ed back).
+     * If the helper forgot to switch to COPY, the outline would XOR
+     * with the underlying fill. */
+    feed_script(&s, &ctx, "!|G0K0K05|");
+    pixel_at_top = draw_get_pixel(20, 17);
+    if (pixel_at_top == s.palette[15])
+        PASS();
+    else
+        FAIL("filled-border outline used XOR instead of COPY");
+}
+
 static void test_filled_border_toggle_controls_outline(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2617,6 +2720,11 @@ int main(void) {
     test_set_one_palette_entry();
     test_group_markers_accepted();
     test_metadata_commands_store_state_and_vars();
+    test_user_var_overflow_returns_false();
+    test_user_var_name_with_dollar_normalizes();
+    test_user_var_name_with_invalid_char_rejected();
+    test_filled_border_disabled_skips_rect_outline();
+    test_filled_border_helper_always_sets_copy_mode();
     test_filled_border_toggle_controls_outline();
     test_back_color_visible_in_pattern_fill();
     test_erase_view_uses_back_color();
