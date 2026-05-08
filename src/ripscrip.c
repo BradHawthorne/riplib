@@ -58,6 +58,28 @@ static inline void clear_levels(rip_state_t *s) {
     s->is_level3 = false;
 }
 
+/* L15: write both s->vp_* and ports[active_port].vp_*.  The port table
+ * is the source of truth on port switch (port_load_state copies from
+ * the port back into rip_state_t), so viewport-setting commands ('v',
+ * '1V', '*') must touch both — otherwise a subsequent !|2s revert
+ * silently undoes the new viewport.  Also pushes the clip to the draw
+ * layer so subsequent primitives respect it immediately. */
+static inline void set_session_viewport(rip_state_t *s,
+                                        int16_t x0, int16_t y0,
+                                        int16_t x1, int16_t y1) {
+    s->vp_x0 = x0;
+    s->vp_y0 = y0;
+    s->vp_x1 = x1;
+    s->vp_y1 = y1;
+    if (s->active_port < RIP_MAX_PORTS) {
+        s->ports[s->active_port].vp_x0 = x0;
+        s->ports[s->active_port].vp_y0 = y0;
+        s->ports[s->active_port].vp_x1 = x1;
+        s->ports[s->active_port].vp_y1 = y1;
+    }
+    draw_set_clip(x0, y0, x1, y1);
+}
+
 /* BGI stroke fonts (parsed at init, indexed by BGI_FONT_* ID) */
 #define BGI_FONT_COUNT 11  /* 0=bitmap, 1-10=stroke */
 static bgi_font_t bgi_fonts[BGI_FONT_COUNT];
@@ -1912,13 +1934,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int16_t vx0 = mega2(p), vy0 = mega2(p + 2);
                 int16_t vx1 = mega2(p + 4), vy1 = mega2(p + 6);
                 clamp_ega_rect(&vx0, &vy0, &vx1, &vy1);
-                s->vp_x0 = vx0;
-                s->vp_y0 = scale_y(vy0);
-                s->vp_x1 = vx1;
-                s->vp_y1 = scale_y1(vy1);
+                set_session_viewport(s, vx0, scale_y(vy0),
+                                        vx1, scale_y1(vy1));
                 s->viewport_scale = (uint8_t)mega_digit(p[8]);
-                /* Fix: draw_set_clip takes corners, not width/height */
-                draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
             }
             break;
 
@@ -2239,9 +2257,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         s->tw_x1 = 639; s->tw_y1 = 349;
         s->tw_wrap = 0; s->tw_font_size = 0;
         s->tw_active = false;
-        s->vp_x0 = 0; s->vp_y0 = 0;
-        s->vp_x1 = 639; s->vp_y1 = 399;
-        draw_reset_clip();
+        /* Push viewport to both session state and active port (L15). */
+        set_session_viewport(s, 0, 0, 639, 399);
         /* Drawing state → defaults */
         s->draw_color = 15; /* white */
         s->draw_x = 0; s->draw_y = 0;
@@ -2324,11 +2341,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t vx0 = mega2(p), vy0 = mega2(p + 2);
             int16_t vx1 = mega2(p + 4), vy1 = mega2(p + 6);
             clamp_ega_rect(&vx0, &vy0, &vx1, &vy1);
-            s->vp_x0 = vx0;
-            s->vp_y0 = scale_y(vy0);
-            s->vp_x1 = vx1;
-            s->vp_y1 = scale_y1(vy1);
-            draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
+            set_session_viewport(s, vx0, scale_y(vy0),
+                                    vx1, scale_y1(vy1));
         }
         break;
 

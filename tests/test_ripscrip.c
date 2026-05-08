@@ -1283,6 +1283,28 @@ static void test_palette_save_apply_round_trip(void) {
         FAIL("palette save/apply did not round-trip");
 }
 
+static void test_viewport_persists_across_port_switch(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("'v' viewport survives a port-switch round-trip (L15)");
+    init_fixture(&s, &ctx);
+    /* Set viewport on port 0 to a non-default rect.
+     * !|v 00 0A 14 1E| → x0=0 y0=10 x1=20 y1=30 (EGA). */
+    feed_script(&s, &ctx, "!|v00000A14001E|");
+    int16_t after_v_y0 = s.vp_y0;
+    int16_t after_v_y1 = s.vp_y1;
+    /* Define & switch to port 1, then back to port 0. */
+    feed_script(&s, &ctx, "!|2P1000005050200|");
+    feed_script(&s, &ctx, "!|2s100|");
+    feed_script(&s, &ctx, "!|2s000|");
+    /* Viewport must still match what 'v' set, not pre-'v' defaults. */
+    if (s.vp_y0 == after_v_y0 && s.vp_y1 == after_v_y1)
+        PASS();
+    else
+        FAIL("viewport reverted on port switch (L15 regression)");
+}
+
 static void test_port_switch_preserves_color_and_pos(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1950,6 +1972,7 @@ int main(void) {
     test_session_reset_preserves_arena();
     test_reset_windows_full_defaults();
     test_palette_save_apply_round_trip();
+    test_viewport_persists_across_port_switch();
     test_port_switch_preserves_color_and_pos();
     test_preproc_depth_overflow();
     test_preproc_if_with_app_var();
