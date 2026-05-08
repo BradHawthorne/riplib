@@ -2116,6 +2116,89 @@ static void test_write_icon_replaces_cached_name(void) {
         FAIL("1W left stale pixels for an existing icon name");
 }
 
+static void test_runtime_icon_supersedes_flash(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint8_t *pixels;
+    rip_icon_t icon;
+
+    TEST("runtime cache lookup wins over a same-named flash entry");
+    init_fixture(&s, &ctx);
+    /* "AE5" exists in the flash table.  Cache a 1x1 runtime icon under
+     * the same name; lookup must return the runtime entry. */
+    pixels = (uint8_t *)psram_arena_alloc(&s.psram_arena, 1);
+    if (!pixels) { FAIL("setup: arena alloc"); return; }
+    pixels[0] = 0x42;
+    if (!rip_icon_cache_pixels_replace(&s.icon_state, "AE5", 3, pixels, 1, 1)) {
+        FAIL("setup: cache_pixels_replace"); return;
+    }
+    if (rip_icon_lookup(&s.icon_state, "AE5", 3, &icon) &&
+        icon.width == 1 && icon.height == 1 && icon.pixels[0] == 0x42)
+        PASS();
+    else
+        FAIL("flash entry was returned even though runtime entry exists");
+}
+
+static void test_clipboard_op_5_capture_op_6_paste(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1X op 5 (capture rect) and op 6 (paste) round-trip");
+    init_fixture(&s, &ctx);
+    draw_set_color(0x37);
+    draw_rect(2, 2, 2, 2, true);
+    /* op=05, x0=02 y0=02 x1=03 y1=03 = capture (2,2)-(3,3). */
+    feed_script(&s, &ctx, "!|1X0502020303|");
+    if (!s.clipboard.valid) { FAIL("op 5 did not capture"); return; }
+    /* Wipe and paste at (10, 10) with mode 00 (COPY). */
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|1X060A0A00|");
+    /* Paste lands at (10, scale_y(10)=11). */
+    if (draw_get_pixel(10, 11) == 0x37)
+        PASS();
+    else
+        FAIL("op 6 paste did not restore captured pixel");
+}
+
+static void test_save_icon_slot_out_of_range_is_noop(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("J with slot >= RIP_ICON_SLOT_MAX is a silent no-op");
+    init_fixture(&s, &ctx);
+    draw_set_color(0x55);
+    draw_rect(0, 0, 1, 1, true);
+    feed_script(&s, &ctx, "!|<00000000|");
+    /* slot 36 ("10" in MegaNum) is just past RIP_ICON_SLOT_MAX (36). */
+    feed_script(&s, &ctx, "!|J10|");
+    int any_valid = 0;
+    for (int i = 0; i < RIP_ICON_SLOT_MAX; i++)
+        if (s.icon_slot_valid[i]) { any_valid = 1; break; }
+    if (!any_valid)
+        PASS();
+    else
+        FAIL("J with out-of-range slot still wrote to the slot table");
+}
+
+static void test_stamp_icon_unset_slot_falls_back_to_clipboard(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("'.' with an unset slot falls back to current clipboard");
+    init_fixture(&s, &ctx);
+    draw_set_color(0x44);
+    draw_rect(2, 2, 1, 1, true);
+    feed_script(&s, &ctx, "!|<02020202|");
+    if (!s.clipboard.valid) { FAIL("setup: <"); return; }
+    /* Stamp slot 03 (never saved) at (20, 20).  Should use clipboard. */
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|.030K0K000000|");
+    if (draw_get_pixel(20, 22) == 0x44)
+        PASS();
+    else
+        FAIL("stamp did not fall back to clipboard for an unset slot");
+}
+
 static void test_save_and_stamp_icon_slot(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2374,6 +2457,10 @@ int main(void) {
     test_l1_clipboard_get_put_roundtrip();
     test_write_icon_caches_clipboard_for_load_icon();
     test_write_icon_replaces_cached_name();
+    test_runtime_icon_supersedes_flash();
+    test_clipboard_op_5_capture_op_6_paste();
+    test_save_icon_slot_out_of_range_is_noop();
+    test_stamp_icon_unset_slot_falls_back_to_clipboard();
     test_save_and_stamp_icon_slot();
     test_save_icon_slot_updates_load_alias();
     test_l1_text_block_lifecycle();
