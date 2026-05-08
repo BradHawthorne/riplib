@@ -47,6 +47,16 @@ static inline void psram_arena_reset(psram_arena_t *a) {
     a->used = 0;
 }
 
+/* Free the backing block.  On embedded the arena lives forever, so
+ * this is typically only used by tests/desktop tools to keep ASan and
+ * other leak detectors happy.  Safe to call multiple times. */
+static inline void psram_arena_destroy(psram_arena_t *a) {
+    if (a->base) free(a->base);
+    a->base = NULL;
+    a->size = 0;
+    a->used = 0;
+}
+
 /* ── Platform extern functions ──────────────────────────────────── */
 /* Implement these for your platform: */
 

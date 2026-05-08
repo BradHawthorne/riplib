@@ -72,6 +72,10 @@ static void init_fixture(rip_state_t *s, comp_context_t *ctx) {
     rip_init_first(s);
 }
 
+static void cleanup_fixture(rip_state_t *s) {
+    if (s) psram_arena_destroy(&s->psram_arena);
+}
+
 static uint64_t fnv1a64(const uint8_t *data, size_t len) {
     uint64_t hash = 14695981039346656037ull;
     for (size_t i = 0; i < len; i++) {
@@ -277,6 +281,7 @@ static int run_case(const char *name) {
                (unsigned long long)expect.frame_hash,
                (unsigned long long)actual_frame_hash);
         free(script);
+        cleanup_fixture(&s);
         return 0;
     }
 
@@ -285,11 +290,13 @@ static int run_case(const char *name) {
         printf("FAIL: tx mismatch (expected %zu bytes got %zu, actual hex %s)\n",
                expect.tx_len, tx_len, actual_tx_hex);
         free(script);
+        cleanup_fixture(&s);
         return 0;
     }
 
     PASS();
     free(script);
+    cleanup_fixture(&s);
     return 1;
 }
 

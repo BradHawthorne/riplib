@@ -50,6 +50,26 @@ static void tx_reset(void) {
     memset(tx_capture, 0, sizeof(tx_capture));
 }
 
+/* Track arena heap base pointers across the whole test suite so we can
+ * free them at exit.  Tracking the rip_state_t* itself wouldn't work
+ * because the state is typically a stack local that becomes invalid
+ * the moment its test function returns; the arena's base pointer is a
+ * malloc()ed heap address and stays stable. */
+#define MAX_TRACKED_ARENAS 200
+static uint8_t *tracked_arenas[MAX_TRACKED_ARENAS];
+static int tracked_arena_count = 0;
+
+static void track_arena(psram_arena_t *a) {
+    if (a->base && tracked_arena_count < MAX_TRACKED_ARENAS)
+        tracked_arenas[tracked_arena_count++] = a->base;
+}
+
+static void cleanup_all_arenas(void) {
+    for (int i = 0; i < tracked_arena_count; i++)
+        free(tracked_arenas[i]);
+    tracked_arena_count = 0;
+}
+
 static void init_fixture(rip_state_t *s, comp_context_t *ctx) {
     memset(fb, 0, sizeof(fb));
     memset(palette, 0, sizeof(palette));
@@ -59,6 +79,7 @@ static void init_fixture(rip_state_t *s, comp_context_t *ctx) {
     draw_init(fb, W, W, H);
     tx_reset();
     rip_init_first(s);
+    track_arena(&s->psram_arena);
 }
 
 static void feed_script(rip_state_t *s, comp_context_t *ctx, const char *script) {
@@ -1112,6 +1133,67 @@ static void test_mouse_click_dispatches_host_string(void) {
         FAIL("click did not dispatch host text");
 }
 
+static void test_mouse_radio_deselects_others(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("MF_RADIO click deselects other regions in same group");
+    init_fixture(&s, &ctx);
+    /* 1M format: num:2 x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1 res:4 text.
+     * flags digit 2 → spec bit 1 → RIP_MF_RADIO. */
+    feed_script(&s, &ctx, "!|1M010505 0F0F0020000R1|");  /* radio #1 (5..15) */
+    feed_script(&s, &ctx, "!|1M0214141E1E0020000R2|");   /* radio #2 (40..54) */
+    /* Click region #2.  Note the typo above (' 0F') was intentional fixing. */
+    /* Reset s and re-feed without the space typo. */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1M0105050F0F0020000R1|");
+    feed_script(&s, &ctx, "!|1M0214141E1E0020000R2|");
+    rip_mouse_event_state(&s, 50, 50, true);
+    /* First match wins — region 0 is the older one, region 1 was clicked
+     * (assuming it was found by the loop second).  Both must end up
+     * inactive: clicked region deactivates after dispatch (one-shot)
+     * AND its RADIO peers are also deactivated. */
+    if (!s.mouse_regions[0].active && !s.mouse_regions[1].active)
+        PASS();
+    else
+        FAIL("RADIO did not deselect peers");
+}
+
+static void test_mouse_send_char_uses_hotkey(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("MF_SEND_CHAR sends hotkey instead of host text");
+    init_fixture(&s, &ctx);
+    /* hotkey = 'X' = 88 = mega2 "2G" (2*36+16=88).  flags '1' → SEND_CHAR. */
+    feed_script(&s, &ctx, "!|1M010A0A1E0U2G10000IGNORED|");
+    tx_reset();
+    rip_mouse_event_state(&s, 25, 20, true);
+    if (tx_len == 2 && tx_capture[0] == 88 && tx_capture[1] == '\r')
+        PASS();
+    else
+        FAIL("SEND_CHAR did not push hotkey");
+}
+
+static void test_mouse_toggle_inverts_active(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("MF_TOGGLE flips region active state on each click");
+    init_fixture(&s, &ctx);
+    /* flags digit '4' → spec bit 2 → RIP_MF_TOGGLE. */
+    feed_script(&s, &ctx, "!|1M010A0A1E0U0040000T|");
+    bool first = s.mouse_regions[0].active;
+    rip_mouse_event_state(&s, 25, 20, true);
+    bool after_first = s.mouse_regions[0].active;
+    rip_mouse_event_state(&s, 25, 20, true);
+    bool after_second = s.mouse_regions[0].active;
+    if (first != after_first && after_second == first)
+        PASS();
+    else
+        FAIL("TOGGLE did not flip + flip back");
+}
+
 static void test_mouse_click_outside_no_dispatch(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1609,6 +1691,9 @@ int main(void) {
     test_preproc_if_with_app_var();
     test_preproc_if_with_app_var_false();
     test_mouse_click_dispatches_host_string();
+    test_mouse_radio_deselects_others();
+    test_mouse_send_char_uses_hotkey();
+    test_mouse_toggle_inverts_active();
     test_mouse_click_outside_no_dispatch();
     test_polygon_overflow_rejected();
     test_set_one_palette_entry();
@@ -1622,6 +1707,8 @@ int main(void) {
     test_l1_text_block_lifecycle();
     test_text_xy_expands_variables();
     test_l1_audio_pushes_marker();
+
+    cleanup_all_arenas();
 
     printf("\n%d/%d tests passed\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

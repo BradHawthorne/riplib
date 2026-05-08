@@ -1,0 +1,15 @@
+# Default: normalize line endings on commit, native on checkout.
+* text=auto
+
+# Compatibility fixtures must be byte-exact across platforms — frame
+# hashes baked into .expect depend on the .rip stream not gaining an
+# extra \r on Windows.  Pin both to LF.
+*.rip    text eol=lf
+*.expect text eol=lf
+
+# Source files: keep LF in the repo.
+*.c   text eol=lf
+*.h   text eol=lf
+*.yml text eol=lf
+*.md  text eol=lf
+CMakeLists.txt text eol=lf

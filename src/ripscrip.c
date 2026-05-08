@@ -1006,7 +1006,12 @@ void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked) {
         /* DLL: field must have MF_ACTIVE(0x04) set to be hit-testable.
          * rip_mouse.c field record +0x20, pFieldBuf+0x20 |= MF_ACTIVE */
         if (!(r->flags & RIP_MF_ACTIVE)) continue;
-        if (!r->active) continue;
+        /* L10: TOGGLE regions remain hit-testable regardless of
+         * r->active because that field tracks the toggled "checked"
+         * state, not the live/dead state.  For non-TOGGLE regions,
+         * r->active=false means the region was retired (e.g., by a
+         * one-shot click) and should not respond. */
+        if (!(r->flags & RIP_MF_TOGGLE) && !r->active) continue;
 
         if (x >= r->x0 && x <= r->x1 && y >= r->y0 && y <= r->y1) {
 
