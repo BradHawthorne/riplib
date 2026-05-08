@@ -2727,34 +2727,23 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* -- Extended positioned text (v2.0+) -------------------------------- */
-    /* DLL command table entry 9: '-' = RIP_TEXT_XY_EXT (5 args: XY,XY,XY,XY,2 + text) */
+    /* DLL command table entry 9: '-' = RIP_TEXT_XY_EXT (5 args: XY,XY,XY,XY,2 + text)
+     *
+     * L14: previously this case had its own copy of the text-rendering
+     * logic that (a) skipped variable expansion and (b) passed NULL as
+     * the bitmap font to draw_text, which makes draw_text early-return
+     * — silently dropping any glyph in the bitmap-font branch.  Route
+     * through rip_render_text so escapes, $variables, justification,
+     * and font selection all match RIP_TEXT/RIP_TEXT_XY exactly.
+     *
+     * The bounding box (x1,y1) and flags (p+8) are still not honored —
+     * documented as a deliberate gap; the DLL clips text to the box and
+     * applies horizontal/vertical justification within it. */
     case '-': /* RIP_TEXT_XY_EXT -- x0:2 y0:2 x1:2 y1:2 flags:2 text */
         if (len >= 10) {
             s->draw_x = mega2(p);
             s->draw_y = scale_y(mega2(p + 2));
-            /* x1/y1 define a bounding box (p+4..p+7); flags at p+8 control justify.
-             * Rendered without bounding clip -- same font path as RIP_TEXT_XY. */
-            const char *tp = p + 10;
-            int tlen = len - 10;
-            if (tlen > 0) {
-                char tbuf[256];
-                int outlen = unescape_text(tp, tlen, tbuf);
-                uint8_t tc = s->palette[s->draw_color & 0x0F];
-                uint8_t fid = s->font_id;
-                int16_t adv;
-                if (fid > 0 && fid < BGI_FONT_COUNT && bgi_fonts_loaded &&
-                    bgi_fonts[fid].strokes) {
-                    adv = bgi_font_draw_string_ex(&bgi_fonts[fid],
-                        s->draw_x, s->draw_y, tbuf, outlen,
-                        s->font_size ? s->font_size : 1, tc, s->font_dir, s->font_attrib);
-                } else {
-                    draw_text(s->draw_x, s->draw_y, tbuf, outlen,
-                              NULL, 16, tc, 0xFF);
-                    adv = outlen * 8;
-                }
-                if (s->font_dir == 0) s->draw_x += adv;
-                else                  s->draw_y += adv;
-            }
+            rip_render_text(s, p + 10, len - 10);
         }
         break;
 

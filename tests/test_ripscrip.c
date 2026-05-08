@@ -899,6 +899,108 @@ static void test_l1_audio_pushes_marker(void) {
         FAIL("1A did not push CMD_PLAY_SOUND marker");
 }
 
+static void test_text_xy_ext_renders_via_shared_helper(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("- (TEXT_XY_EXT) routes through shared text path (regression for L14)");
+    init_fixture(&s, &ctx);
+    /* Bitmap font path (font_id == 0).  Before L14 this passed NULL
+     * font to draw_text, which silently dropped the entire string.
+     * Body "$BEEP$" expansion pushes BEL to TX as a side effect we can
+     * easily verify without comparing rendered glyphs. */
+    tx_reset();
+    /* x0=05 y0=05 x1=14(40) y1=0K(20) flags=00 body=$BEEP$ */
+    feed_script(&s, &ctx, "!|-0505140K00$BEEP$|");
+    int has_bel = 0;
+    for (size_t i = 0; i < tx_len; i++)
+        if (tx_capture[i] == 0x07) { has_bel = 1; break; }
+    if (has_bel)
+        PASS();
+    else
+        FAIL("- did not run shared text rendering (still uses old broken code)");
+}
+
+static void test_draw_to_moves_cursor(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("_ DRAW_TO updates draw cursor and optionally draws a line");
+    init_fixture(&s, &ctx);
+    /* x0=05 y0=05 mode=01 (draw on) param=00 x1=0F y1=0F */
+    feed_script(&s, &ctx, "!|_050501000F0F|");
+    /* Pixel between (5,5) and (15,15) on the diagonal — e.g. (10, 11)
+     * (scale_y skews Y by 8/7).  Just check that draw_x/draw_y advanced. */
+    if (s.draw_x == 15 && s.draw_y == /* scale_y(15) = 17 */ 17)
+        PASS();
+    else
+        FAIL("DRAW_TO did not update cursor position");
+}
+
+static void test_icon_request_queue_dequeue(void) {
+    rip_icon_state_t state;
+    char name_out[16];
+
+    TEST("rip_icon_request_file enqueue + dequeue + clear");
+    memset(&state, 0, sizeof(state));
+    /* Initially empty. */
+    if (rip_icon_pending_requests(&state) != 0) {
+        FAIL("setup: state not empty");
+        return;
+    }
+    rip_icon_request_file(&state, "ALPHA", 5);
+    rip_icon_request_file(&state, "BETA", 4);
+    if (rip_icon_pending_requests(&state) != 2) {
+        FAIL("queue did not accept two distinct files");
+        return;
+    }
+    /* Duplicate request — must coalesce, not grow. */
+    rip_icon_request_file(&state, "ALPHA", 5);
+    if (rip_icon_pending_requests(&state) != 2) {
+        FAIL("duplicate request grew the queue");
+        return;
+    }
+    /* Dequeue first — FIFO order. */
+    int len = rip_icon_dequeue_request(&state, name_out, sizeof(name_out));
+    if (len != 5 || memcmp(name_out, "ALPHA", 5) != 0) {
+        FAIL("dequeue returned wrong entry");
+        return;
+    }
+    if (rip_icon_pending_requests(&state) != 1) {
+        FAIL("dequeue did not decrement count");
+        return;
+    }
+    /* Clear remaining. */
+    rip_icon_clear_requests(&state);
+    if (rip_icon_pending_requests(&state) == 0)
+        PASS();
+    else
+        FAIL("clear did not empty the queue");
+}
+
+static void test_fuzz_multiple_seeds(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("rip_process survives 4 different 4K random byte seeds");
+    static const uint32_t seeds[] = {
+        0xCAFEBABEu, 0xFEEDFACEu, 0x12345678u, 0xA5A5A5A5u
+    };
+    for (size_t k = 0; k < sizeof(seeds)/sizeof(seeds[0]); k++) {
+        init_fixture(&s, &ctx);
+        uint32_t lcg = seeds[k];
+        for (int i = 0; i < 4096; i++) {
+            lcg = lcg * 1103515245u + 12345u;
+            uint8_t b = (uint8_t)(lcg >> 16);
+            rip_process(&s, &ctx, b);
+        }
+        /* Recover with a clean newline + valid command. */
+        feed_script(&s, &ctx, "\r\n!|X0202|");
+    }
+    PASS();  /* No crash across all seeds = pass. */
+    (void)s;
+}
+
 static void test_null_safety_public_entrypoints(void) {
     TEST("public entrypoints are NULL-safe");
     /* These would have crashed before L11/L12.  Just call them and
@@ -1811,6 +1913,10 @@ int main(void) {
     test_eval_if_le_3_5();
     test_eval_if_ne_strings();
     test_scroll_clears_only_source_rect();
+    test_text_xy_ext_renders_via_shared_helper();
+    test_draw_to_moves_cursor();
+    test_icon_request_queue_dequeue();
+    test_fuzz_multiple_seeds();
     test_null_safety_public_entrypoints();
     test_fuzz_random_bytes_no_crash();
     test_command_with_no_args();
