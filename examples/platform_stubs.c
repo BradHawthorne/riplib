@@ -18,10 +18,6 @@ uint16_t palette_read_rgb565(uint8_t index) {
     return g_palette[index];
 }
 
-void *gpu_psram_alloc(uint32_t size) {
-    return malloc(size);
-}
-
 void card_tx_push(const char *buf, int len) {
     /* Send to stdout for demo purposes */
     fwrite(buf, 1, len, stdout);

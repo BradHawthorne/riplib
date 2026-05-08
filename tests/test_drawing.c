@@ -7,6 +7,7 @@
 
 #include "drawing.h"
 #include "bgi_font.h"
+#include "riplib_platform.h"  /* extern prototypes for the platform stubs below */
 #include "font_bgi_trip.h"
 #include "font_cp437_8x8.h"
 #include <stdio.h>
@@ -35,7 +36,6 @@ static int tests_passed = 0;
 static uint16_t palette[256];
 void palette_write_rgb565(uint8_t i, uint16_t v) { palette[i] = v; }
 uint16_t palette_read_rgb565(uint8_t i) { return palette[i]; }
-void *gpu_psram_alloc(uint32_t size) { return malloc(size); }
 void card_tx_push(const char *buf, int len) { (void)buf; (void)len; }
 
 /* ── Helper ─────────────────────────────────────────────────────── */

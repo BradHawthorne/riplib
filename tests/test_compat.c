@@ -46,7 +46,6 @@ typedef struct {
 
 void palette_write_rgb565(uint8_t i, uint16_t v) { palette[i] = v; }
 uint16_t palette_read_rgb565(uint8_t i) { return palette[i]; }
-void *gpu_psram_alloc(uint32_t size) { return malloc(size); }
 
 void card_tx_push(const char *buf, int len) {
     size_t n;
