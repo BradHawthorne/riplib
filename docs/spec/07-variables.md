@@ -88,6 +88,25 @@ $COMPAT$
      Value:    "1"
      Description: Basic compatibility level. Always returns "1".
 
+$COLORMODE$
+     Format:   Decimal digit
+     Value:    "0" in palette-mapping mode; "1".."8" in direct-RGB
+               mode to indicate bits per RGB component.
+     Description: Mirrors RIP_SET_COLOR_MODE (|M). RIPlib records
+                  the negotiated mode while rendering to its indexed
+                  framebuffer.
+
+$COORDSIZE$
+     Format:   Decimal digit
+     Value:    "2".."5"
+     Description: Current variable-width coordinate byte size from
+                  RIP_SET_COORDINATE_SIZE (|n). Default is "2".
+
+$ISPALETTE$
+     Format:   Single digit
+     Value:    "1"
+     Description: Reports that the target has an indexed palette.
+
 $USER$
      Format:   String (may be empty)
      Value:    "" (empty on embedded — no login context)
@@ -251,6 +270,9 @@ a linear search of the variable table.
      $RIPVER$     protocol   v1.54     Version string
      $PROT$       protocol   v3.1      Resolution mode
      $COMPAT$     protocol   v3.1      Compatibility level
+     $COLORMODE$  protocol   v2.0      Palette/RGB mode
+     $COORDSIZE$  protocol   v2.0      Coordinate byte size
+     $ISPALETTE$  protocol   v2.0      Palette availability
      $USER$       identity   v1.54     User name (empty)
      $RAND$       numeric    v1.54     LCG random 0-32767
      $BEEP$       sound      v1.54     System bell

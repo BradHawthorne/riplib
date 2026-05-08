@@ -75,9 +75,9 @@ LEVEL 0 — Extended Commands (v2.0+):
      d    EXT_FONT_STYLE         7     !|d<fid><attr><size>|
      f    FONT_ATTRIB            4     !|f<attrib><res>|
      h    HEADER                 8     !|h<type><id><flags>|
-     n    SET_COORD_SIZE         4     !|n<mode><size>|
+     n    SET_COORD_SIZE         4     !|n<byte_size><res>|
      M    SET_COLOR_MODE         2     !|M<mode><depth>|
-     N    SET_BORDER             2     !|N<color>|
+     N    SET_BORDER             2     !|N<borders>|
      &    ICON_STYLE             14    !|&<x0><y0>..<scale>|
      .    STAMP_ICON             12    !|.<slot><x><y><w><h><fl>|
      J    SAVE_ICON              2     !|J<slot>|
@@ -310,7 +310,7 @@ A.7  FILL PATTERN REFERENCE
 
 Pattern bit interpretation:
      1 = foreground pixel (draw color)
-     0 = background pixel (fill color)
+     0 = background pixel (back color)
 
 Pattern tiling: pattern row = y & 7, pattern bit = 0x80 >> (x & 7)
 

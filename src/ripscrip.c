@@ -96,6 +96,7 @@ static void apply_session_draw_state(rip_state_t *s);
 static void rip_upload_reset(rip_state_t *s);
 static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_len,
                                    const uint8_t *data, int size);
+static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c);
 
 /* Card->host TX FIFO helper (implemented in main.c / emulator stubs). */
 extern void card_tx_push(const char *buf, int len);
@@ -116,6 +117,12 @@ static int mega_digit(char ch) {
 
 static int16_t mega2(const char *p) {
     return (int16_t)(mega_digit(p[0]) * 36 + mega_digit(p[1]));
+}
+
+static int32_t mega3(const char *p) {
+    return (int32_t)(mega_digit(p[0]) * 1296 +
+                     mega_digit(p[1]) * 36 +
+                     mega_digit(p[2]));
 }
 
 static int32_t mega4(const char *p) {
@@ -179,6 +186,215 @@ static bool rip_filename_is_safe(const char *name, int len) {
     }
 
     return true;
+}
+
+static bool rip_var_name_copy(const char *name, int len,
+                              char *out, int out_cap) {
+    int start = 0;
+    int end = len;
+    int n;
+
+    if (!name || !out || out_cap <= 0 || len <= 0)
+        return false;
+    while (start < end && (name[start] == ' ' || name[start] == '\t'))
+        start++;
+    while (end > start && (name[end - 1] == ' ' || name[end - 1] == '\t'))
+        end--;
+    if (end - start >= 2 && name[start] == '$' && name[end - 1] == '$') {
+        start++;
+        end--;
+    }
+    n = end - start;
+    if (n <= 0 || n >= out_cap)
+        return false;
+    for (int i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)name[start + i];
+        if (!((c >= 'A' && c <= 'Z') ||
+              (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') ||
+              c == '_'))
+            return false;
+        out[i] = (char)c;
+    }
+    out[n] = '\0';
+    return true;
+}
+
+static bool rip_var_name_eq(const char *stored, const char *name, int len) {
+    int slen;
+
+    if (!stored || !name || len <= 0)
+        return false;
+    slen = (int)strlen(stored);
+    if (slen != len)
+        return false;
+    return memcmp(stored, name, (size_t)len) == 0;
+}
+
+static int rip_user_var_find(const rip_state_t *s, const char *name, int len) {
+    if (!s || !name || len <= 0)
+        return -1;
+    for (int i = 0; i < s->user_var_count && i < RIP_USER_VAR_MAX; i++) {
+        if (rip_var_name_eq(s->user_var_names[i], name, len))
+            return i;
+    }
+    return -1;
+}
+
+static bool rip_user_var_set(rip_state_t *s,
+                             const char *name, int name_len,
+                             const char *value, int value_len) {
+    char key[RIP_USER_VAR_NAME_MAX + 1];
+    int idx;
+    int copy;
+
+    if (!s || !value || value_len < 0)
+        return false;
+    if (!rip_var_name_copy(name, name_len, key, sizeof(key)))
+        return false;
+    if (rip_var_name_eq(key, "APP0", 4) ||
+        rip_var_name_eq(key, "APP1", 4) ||
+        rip_var_name_eq(key, "APP2", 4) ||
+        rip_var_name_eq(key, "APP3", 4) ||
+        rip_var_name_eq(key, "APP4", 4) ||
+        rip_var_name_eq(key, "APP5", 4) ||
+        rip_var_name_eq(key, "APP6", 4) ||
+        rip_var_name_eq(key, "APP7", 4) ||
+        rip_var_name_eq(key, "APP8", 4) ||
+        rip_var_name_eq(key, "APP9", 4)) {
+        int app = key[3] - '0';
+        copy = value_len < (int)sizeof(s->app_vars[0]) - 1
+             ? value_len
+             : (int)sizeof(s->app_vars[0]) - 1;
+        memcpy(s->app_vars[app], value, (size_t)copy);
+        s->app_vars[app][copy] = '\0';
+        return true;
+    }
+
+    idx = rip_user_var_find(s, key, (int)strlen(key));
+    if (idx < 0) {
+        if (s->user_var_count >= RIP_USER_VAR_MAX)
+            return false;
+        idx = s->user_var_count++;
+        strcpy(s->user_var_names[idx], key);
+    }
+    copy = value_len < RIP_USER_VAR_VALUE_MAX ? value_len : RIP_USER_VAR_VALUE_MAX;
+    memcpy(s->user_var_values[idx], value, (size_t)copy);
+    s->user_var_values[idx][copy] = '\0';
+    return true;
+}
+
+static bool rip_query_prompt_begin(rip_state_t *s,
+                                   const char *vname, int vlen) {
+    char prompt_buf[40];
+    int plen = 0;
+    int copy;
+
+    if (!s || !vname || vlen <= 0 || s->query_pending)
+        return false;
+
+    prompt_buf[plen++] = (char)0x3E;  /* CMD_QUERY_PROMPT marker */
+    copy = vlen < (int)sizeof(prompt_buf) - 2
+         ? vlen
+         : (int)sizeof(prompt_buf) - 2;
+    for (int k = 0; k < copy; k++)
+        prompt_buf[plen++] = vname[k];
+    prompt_buf[plen++] = '\0';
+    card_tx_push(prompt_buf, plen);
+
+    copy = vlen < (int)sizeof(s->query_var_name) - 1
+         ? vlen
+         : (int)sizeof(s->query_var_name) - 1;
+    memcpy(s->query_var_name, vname, (size_t)copy);
+    s->query_var_name[copy] = '\0';
+    memset(s->query_response, 0, sizeof(s->query_response));
+    s->query_response_len = 0;
+    s->query_pending = true;
+    return true;
+}
+
+static bool rip_parse_host_date(const char *date, int *year, int *month, int *day) {
+    int mm;
+    int dd;
+    int yy;
+
+    if (!date || !year || !month || !day)
+        return false;
+    if (!(date[0] >= '0' && date[0] <= '9' &&
+          date[1] >= '0' && date[1] <= '9' &&
+          date[2] == '/' &&
+          date[3] >= '0' && date[3] <= '9' &&
+          date[4] >= '0' && date[4] <= '9' &&
+          date[5] == '/' &&
+          date[6] >= '0' && date[6] <= '9' &&
+          date[7] >= '0' && date[7] <= '9'))
+        return false;
+    mm = (date[0] - '0') * 10 + (date[1] - '0');
+    dd = (date[3] - '0') * 10 + (date[4] - '0');
+    yy = (date[6] - '0') * 10 + (date[7] - '0');
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31)
+        return false;
+    *year = 2000 + yy;
+    *month = mm;
+    *day = dd;
+    return true;
+}
+
+static bool rip_is_leap_year(int year) {
+    return ((year % 4) == 0 && (year % 100) != 0) || (year % 400) == 0;
+}
+
+static int rip_day_of_year(int year, int month, int day) {
+    static const int month_offsets[12] =
+        { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+    int yday = month_offsets[month - 1] + day;
+    if (month > 2 && rip_is_leap_year(year))
+        yday++;
+    return yday;
+}
+
+static int rip_days_from_civil(int year, int month, int day) {
+    int y = year;
+    unsigned m = (unsigned)month;
+    unsigned d = (unsigned)day;
+    unsigned mp;
+    int era;
+    unsigned yoe;
+    unsigned doy;
+    unsigned doe;
+
+    y -= (m <= 2u);
+    era = (y >= 0 ? y : y - 399) / 400;
+    yoe = (unsigned)(y - era * 400);
+    mp = (m > 2u) ? (m - 3u) : (m + 9u);
+    doy = (153u * mp + 2u) / 5u + d - 1u;
+    doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return era * 146097 + (int)doe - 719468;
+}
+
+static int rip_weekday_monday0(int year, int month, int day) {
+    int days = rip_days_from_civil(year, month, day);
+    int dow = (days + 3) % 7; /* 1970-01-01 was Thursday. */
+    if (dow < 0)
+        dow += 7;
+    return dow;
+}
+
+static int rip_iso_weeks_in_year(int year) {
+    int jan1 = rip_weekday_monday0(year, 1, 1);
+    return (jan1 == 3 || (jan1 == 2 && rip_is_leap_year(year))) ? 53 : 52;
+}
+
+static int rip_iso_week(int year, int month, int day) {
+    int doy = rip_day_of_year(year, month, day);
+    int dow = rip_weekday_monday0(year, month, day) + 1; /* Monday=1 */
+    int week = (doy - dow + 10) / 7;
+
+    if (week < 1)
+        return rip_iso_weeks_in_year(year - 1);
+    if (week > rip_iso_weeks_in_year(year))
+        return 1;
+    return week;
 }
 
 static void rip_upload_reset(rip_state_t *s) {
@@ -711,10 +927,17 @@ void rip_init_first(rip_state_t *s) {
         palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
     }
 
-    /* Resolution mode: 0=EGA(640×350). memset zeroed it; document the default.
-     * A2GSPU framebuffer is fixed 640×400 (rendered as EGA-scaled). The 'n'
-     * command may set this field; $PROT$ query reports it to the BBS. */
+    /* Scene/protocol mode defaults.  Rendering is always to the fixed indexed
+     * framebuffer, but the v2.x commands and variables observe this state. */
+    s->header_type = 0;
+    s->header_id = 0;
+    s->header_flags = 0;
     s->resolution_mode = 0;
+    s->coordinate_size = 2;
+    s->coordinate_res = 0;
+    s->color_mode = 0;
+    s->color_bits = 0;
+    s->filled_borders_enabled = true;
 
     /* A2GSPU v3.1: application variables and overflow pagination */
     memset(s->app_vars, 0, sizeof(s->app_vars));
@@ -869,6 +1092,20 @@ void rip_session_reset(rip_state_t *s) {
 
     /* Clear application variables. */
     memset(s->app_vars, 0, sizeof(s->app_vars));
+    memset(s->user_var_names, 0, sizeof(s->user_var_names));
+    memset(s->user_var_values, 0, sizeof(s->user_var_values));
+    s->user_var_count = 0;
+
+    /* Reset scene/protocol mode metadata for the next BBS session. */
+    s->header_type = 0;
+    s->header_id = 0;
+    s->header_flags = 0;
+    s->resolution_mode = 0;
+    s->coordinate_size = 2;
+    s->coordinate_res = 0;
+    s->color_mode = 0;
+    s->color_bits = 0;
+    s->filled_borders_enabled = true;
 
     /* Reset stream preprocessor state. */
     s->preproc_state = 0;
@@ -1121,6 +1358,18 @@ static int rip_expand_variables(rip_state_t *s,
              * 0=EGA(640x350), 1=VGA(640x480), 2=SVGA, 3=XGA, 4=HIGH. */
             vval_len = snprintf(val, sizeof(val), "%u", s->resolution_mode);
             if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 9 && memcmp(vname, "COLORMODE", 9) == 0) {
+            /* $COLORMODE$ returns 0 in palette-mapping mode, or the RGB
+             * bits/component value (1..8) in direct RGB mode. */
+            unsigned mode = (s->color_mode == 0) ? 0u : (unsigned)s->color_bits;
+            vval_len = snprintf(val, sizeof(val), "%u", mode);
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 9 && memcmp(vname, "COORDSIZE", 9) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%u", s->coordinate_size);
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 9 && memcmp(vname, "ISPALETTE", 9) == 0) {
+            val[0] = '1';
+            vval_len = 1;
         } else if (vlen == 4 && vname[0] == 'A' && vname[1] == 'P' &&
                    vname[2] == 'P' && vname[3] >= '0' && vname[3] <= '9') {
             /* $APP0$-$APP9$ — application-defined variables */
@@ -1228,31 +1477,24 @@ static int rip_expand_variables(rip_state_t *s,
             if (vval_len < 0) vval_len = 0;
 
         /* FIX TX7: $WOYM$ — ISO week-of-year (Monday start), 2-digit string.
-         * DLL ripTextVarEngine @ 0x026218, handler @ 0x0390B0 ("WOYM").
-         * Algorithm: (yday + 6 - (wday + 6) % 7) / 7 + 1, clamped 01-53. */
+         * DLL ripTextVarEngine @ 0x026218, handler @ 0x0390B0 ("WOYM"). */
         } else if (vlen == 4 && memcmp(vname, "WOYM", 4) == 0) {
             int week = 0;
             if (s->host_date[0] != '\0') {
-                /* Parse host_date "MM/DD/YY" and compute day-of-year + wday.
-                 * Simplified: use a rough estimate since we don't have mktime
-                 * from a "MM/DD/YY" string without a full calendar library.
-                 * Fall through to RTC path which has full struct tm. */
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                int yday = tm->tm_yday;
-                int wday = tm->tm_wday; /* 0=Sunday */
-                week = (yday + 6 - (wday + 6) % 7) / 7 + 1;
-                if (week < 1) week = 1;
-                if (week > 53) week = 53;
+                int year;
+                int month;
+                int day;
+                if (rip_parse_host_date(s->host_date, &year, &month, &day))
+                    week = rip_iso_week(year, month, day);
             } else {
                 time_t now = time(NULL);
                 struct tm *tm = localtime(&now);
-                int yday = tm->tm_yday;
-                int wday = tm->tm_wday; /* 0=Sunday */
-                week = (yday + 6 - (wday + 6) % 7) / 7 + 1;
-                if (week < 1) week = 1;
-                if (week > 53) week = 53;
+                week = rip_iso_week(1900 + tm->tm_year,
+                                    tm->tm_mon + 1,
+                                    tm->tm_mday);
             }
+            if (week < 1) week = 1;
+            if (week > 53) week = 53;
             vval_len = snprintf(val, sizeof(val), "%02d", week);
             if (vval_len < 0) vval_len = 0;
 
@@ -1286,6 +1528,11 @@ static int rip_expand_variables(rip_state_t *s,
             val[0] = '\0';
             vval_len = 0;
 
+        } else if (vlen == 5 && memcmp(vname, "RESET", 5) == 0) {
+            rip_reset_windows_state(s, NULL);
+            val[0] = '\0';
+            vval_len = 0;
+
         /* $ABORT$ — abort the current RIPscrip scene (reset state).
          * DLL: sets abort flag; parser discards remaining stream bytes.
          * A2GSPU: reset the FSM to IDLE so the next !| starts fresh. */
@@ -1295,6 +1542,16 @@ static int rip_expand_variables(rip_state_t *s,
             s->cmd_len = 0;
             val[0] = '\0';
             vval_len = 0;
+
+        } else {
+            int uidx = rip_user_var_find(s, vname, vlen);
+            if (uidx >= 0) {
+                vval_len = (int)rip_strnlen(s->user_var_values[uidx],
+                                            sizeof(s->user_var_values[uidx]));
+                if (vval_len > (int)sizeof(val) - 1)
+                    vval_len = (int)sizeof(val) - 1;
+                memcpy(val, s->user_var_values[uidx], (size_t)vval_len);
+            }
         }
 
         if (vval_len >= 0) {
@@ -1392,7 +1649,7 @@ static void rip_tw_putchar(rip_state_t *s, uint8_t ch) {
 void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked) {
     if (!s || !clicked) return;
 
-    for (int i = 0; i < s->num_mouse_regions; i++) {
+    for (int i = (int)s->num_mouse_regions - 1; i >= 0; i--) {
         rip_mouse_region_t *r = &s->mouse_regions[i];
 
         /* DLL: field must have MF_ACTIVE(0x04) set to be hit-testable.
@@ -1824,8 +2081,10 @@ static void rip_render_text_box(rip_state_t *s,
     cy0 = y0 > saved_clip.y0 ? y0 : saved_clip.y0;
     cx1 = x1 < saved_clip.x1 ? x1 : saved_clip.x1;
     cy1 = y1 < saved_clip.y1 ? y1 : saved_clip.y1;
-    if (cx0 > cx1 || cy0 > cy1)
+    if (cx0 > cx1 || cy0 > cy1) {
+        draw_restore_clip(&saved_clip);
         return;
+    }
 
     old_hjust = s->font_hjust;
     old_vjust = s->font_vjust;
@@ -1874,6 +2133,78 @@ static void apply_session_draw_state(rip_state_t *s) {
     draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
                         s->palette[s->back_color & 0x0F]);
     apply_draw_state(s);
+}
+
+static bool rip_begin_filled_border(rip_state_t *s, uint8_t *saved_mode) {
+    if (!s || !saved_mode || !s->filled_borders_enabled)
+        return false;
+    *saved_mode = s->write_mode;
+    draw_set_write_mode(DRAW_MODE_COPY);
+    draw_set_color(s->palette[s->draw_color & 0x0F]);
+    return true;
+}
+
+static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode) {
+    if (!s)
+        return;
+    draw_set_write_mode(saved_mode);
+}
+
+static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
+    if (!s)
+        return;
+
+    /* Windows + viewport -> full defaults */
+    s->tw_x0 = 0; s->tw_y0 = 0;
+    s->tw_x1 = 639; s->tw_y1 = 349;
+    s->tw_wrap = 0; s->tw_font_size = 0;
+    s->tw_active = false;
+    set_session_viewport(s, 0, 0, 639, 399);
+
+    /* Drawing state -> defaults */
+    s->draw_color = 15;
+    s->draw_x = 0; s->draw_y = 0;
+    s->write_mode = DRAW_MODE_COPY;
+    s->line_style = 0; s->line_thick = 1;
+    s->fill_pattern = 1; s->fill_color = 15;
+    s->back_color = 0;
+    s->font_id = 0; s->font_ext_id = 0;
+    s->font_dir = 0; s->font_size = 1;
+    s->font_hjust = 0; s->font_vjust = 0;
+    s->font_attrib = 0;
+    s->resolution_mode = 0;
+    s->coordinate_size = 2;
+    s->coordinate_res = 0;
+    s->color_mode = 0;
+    s->color_bits = 0;
+    s->filled_borders_enabled = true;
+
+    for (int i = 0; i < 16; i++) {
+        s->palette[i] = palette_slot(i);
+        palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
+    }
+
+    s->num_mouse_regions = 0;
+    memset(&s->button_style, 0, sizeof(s->button_style));
+    s->clipboard.valid = false;
+    s->clipboard.width = 0;
+    s->clipboard.height = 0;
+    memset(s->icon_slot_valid, 0, sizeof(s->icon_slot_valid));
+    s->icon_style_active = false;
+    s->icon_style_style = 0;
+    s->icon_style_align = 0;
+    s->icon_style_scale = 0;
+    s->text_block.active = false;
+
+    s->rip_has_drawn = false;
+    s->cursor_repositioned = false;
+    draw_set_write_mode(DRAW_MODE_COPY);
+    draw_set_line_style(0xFF, 1);
+    draw_set_fill_style(0, s->palette[s->back_color]);
+    draw_set_color(s->palette[s->draw_color & 0x0F]);
+    draw_fill_screen(s->palette[s->back_color]);
+    if (c)
+        comp_set_cursor(c, 0, 0);
 }
 
 static void execute_rip_command(rip_state_t *s, void *ctx) {
@@ -2353,10 +2684,24 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
                     if (rlen > 0)
                         card_tx_push(s->app_vars[idx], rlen);
+                    else
+                        (void)rip_query_prompt_begin(s, vname, vlen);
                 } else {
-                    /* Unrecognised extended query — reply with empty string */
-                    (void)resp; (void)rlen;
-                    card_tx_push("\r", 1);
+                    char key[RIP_USER_VAR_NAME_MAX + 1];
+                    if (rip_var_name_copy(vname, vlen, key, sizeof(key))) {
+                        int uidx = rip_user_var_find(s, key, (int)strlen(key));
+                        if (uidx >= 0) {
+                            rlen = (int)rip_strnlen(s->user_var_values[uidx],
+                                                    sizeof(s->user_var_values[uidx]));
+                            if (rlen > 0)
+                                card_tx_push(s->user_var_values[uidx], rlen);
+                        } else {
+                            (void)rip_query_prompt_begin(s, vname, vlen);
+                        }
+                    } else {
+                        (void)resp; (void)rlen;
+                        card_tx_push("\r", 1);
+                    }
                 }
             }
             break;
@@ -2502,12 +2847,23 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * flags:3 res:2 text (format: varname[,width]:?prompt?[default])
                    * For $APP0$-$APP9$: store default value in app_vars[].
                    * For other variables: display the prompt/default as text. */
-            if (len >= 5) {
+            if (len > 0) {
                 /* Skip flags:3 + res:2, process remaining text */
-                int tstart = 5;
+                int tstart = (len >= 5) ? 5 : 0;
                 if (tstart < len) {
                     char tbuf[128];
                     int tlen = unescape_text(p + tstart, len - tstart > 127 ? 127 : len - tstart, tbuf);
+                    int eq = -1;
+                    bool handled_define = false;
+                    for (int i = 0; i < tlen; i++) {
+                        if (tbuf[i] == '=') { eq = i; break; }
+                        if (tbuf[i] == '?') break;
+                    }
+                    if (eq > 0) {
+                        handled_define = rip_user_var_set(s, tbuf, eq,
+                                                          tbuf + eq + 1,
+                                                          tlen - eq - 1);
+                    }
                     /* Find default value between last pair of ? marks */
                     const char *display = tbuf;
                     int dlen = tlen;
@@ -2538,7 +2894,28 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         int vlen = dlen < 31 ? dlen : 31;
                         memcpy(s->app_vars[idx], display, (size_t)vlen);
                         s->app_vars[idx][vlen] = '\0';
-                    } else {
+                        handled_define = true;
+                    } else if (name_end >= 3 && tbuf[0] == '$' &&
+                               tbuf[name_end - 1] == '$') {
+                        handled_define = rip_user_var_set(s, tbuf, name_end,
+                                                          display, dlen);
+                    }
+                    if (!handled_define) {
+                        char rawbuf[128];
+                        int rawlen = unescape_text(p, len > 127 ? 127 : len,
+                                                   rawbuf);
+                        int raw_eq = -1;
+                        for (int i = 0; i < rawlen; i++) {
+                            if (rawbuf[i] == '=') { raw_eq = i; break; }
+                            if (rawbuf[i] == '?') break;
+                        }
+                        if (raw_eq > 0) {
+                            handled_define = rip_user_var_set(s, rawbuf, raw_eq,
+                                                              rawbuf + raw_eq + 1,
+                                                              rawlen - raw_eq - 1);
+                        }
+                    }
+                    if (!handled_define) {
                         /* L17: same NULL-font silent-drop bug as L14/L16.
                          * Render the prompt with cp437_8x16. */
                         if (dlen > 0) {
@@ -2578,31 +2955,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     vname[4] >= '0' && vname[4] <= '9' && vname[5] == '$') {
                     int idx = vname[4] - '0';
                     rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
-                    if (rlen == 0 && !s->query_pending) {
-                        /* Empty variable — BBS wants user input.  Start round-trip:
-                         * push 0x3E (CMD_QUERY_PROMPT marker) + variable name + NUL
-                         * so the IIgs bridge loop can show an input form. */
-                        char prompt_buf[40];
-                        int plen = 0;
-                        prompt_buf[plen++] = (char)0x3E;  /* CMD_QUERY_PROMPT marker */
-                        /* Copy variable name ("$APPn$") as the prompt label */
-                        {
-                            int k;
-                            for (k = 0; k < vlen && k < 6 && plen < 38; k++)
-                                prompt_buf[plen++] = vname[k];
-                        }
-                        prompt_buf[plen++] = '\0';
-                        card_tx_push(prompt_buf, plen);
-                        /* Record pending state — main.c CMD_QUERY_RESPONSE handler
-                         * will fill s->app_vars[idx] when the IIgs responds. */
-                        s->query_pending = true;
-                        {
-                            int k;
-                            for (k = 0; k < vlen && k < 31; k++)
-                                s->query_var_name[k] = vname[k];
-                            s->query_var_name[k < 31 ? k : 31] = '\0';
-                        }
-                        s->query_response_len = 0;
+                    if (rlen == 0 && rip_query_prompt_begin(s, vname, vlen)) {
                         /* Do not push a response to the BBS yet */
                         rlen = -1;  /* sentinel: skip card_tx_push below */
                     } else {
@@ -2651,6 +3004,25 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     /* URL follows after the variable name — display as status text */
                     /* No process launch; just acknowledge with zero-length response */
                     rlen = 0;
+
+                } else {
+                    char key[RIP_USER_VAR_NAME_MAX + 1];
+                    if (rip_var_name_copy(vname, vlen, key, sizeof(key))) {
+                        int uidx = rip_user_var_find(s, key, (int)strlen(key));
+                        if (uidx >= 0) {
+                            rlen = (int)rip_strnlen(s->user_var_values[uidx],
+                                                    sizeof(s->user_var_values[uidx]));
+                            if (rlen > (int)sizeof(resp))
+                                rlen = (int)sizeof(resp);
+                            memcpy(resp, s->user_var_values[uidx], (size_t)rlen);
+                        } else if (rip_query_prompt_begin(s, vname, vlen)) {
+                            rlen = -1;
+                        } else {
+                            rlen = 0;
+                        }
+                    } else {
+                        rlen = 0;
+                    }
                 }
 
                 /* rlen == -1 means query_pending was set; don't respond to BBS yet. */
@@ -2754,46 +3126,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* ── Screen operations ───────────────────────────────────── */
     case '*': /* RIP_RESET_WINDOWS — full state reset per spec */
-        /* Windows + viewport → full defaults */
-        s->tw_x0 = 0; s->tw_y0 = 0;
-        s->tw_x1 = 639; s->tw_y1 = 349;
-        s->tw_wrap = 0; s->tw_font_size = 0;
-        s->tw_active = false;
-        /* Push viewport to both session state and active port (L15). */
-        set_session_viewport(s, 0, 0, 639, 399);
-        /* Drawing state → defaults */
-        s->draw_color = 15; /* white */
-        s->draw_x = 0; s->draw_y = 0;
-        s->write_mode = 0;
-        s->line_style = 0; s->line_thick = 1;
-        draw_set_line_style(0xFF, 1);
-        s->fill_pattern = 1; s->fill_color = 15; /* Fix B4: BGI SOLID_FILL, white (DLL default) */
-        s->back_color = 0;
-        draw_set_fill_style(0, s->palette[s->back_color]); /* card 0 = solid; BG=back_color */
-        s->font_id = 0; s->font_dir = 0; s->font_size = 1;
-        /* Palette → EGA defaults (offset to 240-255 to avoid xterm conflict) */
-        for (int i = 0; i < 16; i++) {
-            s->palette[i] = palette_slot(i);
-            palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
-        }
-        /* Mouse regions → cleared */
-        s->num_mouse_regions = 0;
-        /* Level 1 state → cleared */
-        memset(&s->button_style, 0, sizeof(s->button_style));
-        s->clipboard.valid = false;
-        memset(s->icon_slot_valid, 0, sizeof(s->icon_slot_valid));
-        s->icon_style_active = false;
-        s->icon_style_style = 0;
-        s->icon_style_align = 0;
-        s->icon_style_scale = 0;
-        s->text_block.active = false;
-        /* Screen → cleared directly. Also reset rip_has_drawn so that
-         * any ANSI ESC[2J arriving before the next RIP drawing command
-         * is allowed to clear (e.g., between login screens). */
-        s->rip_has_drawn = false;
-        s->cursor_repositioned = false;
-        draw_fill_screen(0);
-        comp_set_cursor(c, 0, 0);
+        rip_reset_windows_state(s, c);
         break;
     case 'e': /* v1.54 spec §3.1: '|e' = RIP_ERASE_WINDOW — clear text window to background,
                * move cursor to upper-left of text window. IcyTerm: EraseWindow (0 args).
@@ -2939,12 +3272,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 8) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t rx = mega2(p + 4), ry_s = scale_y(mega2(p + 6));
+            uint8_t border_mode;
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_ellipse(cx, cy, rx, ry_s, true);
             }
-            draw_set_color(s->palette[s->draw_color & 0x0F]);
-            draw_ellipse(cx, cy, rx, ry_s, false);
+            if (rip_begin_filled_border(s, &border_mode)) {
+                draw_ellipse(cx, cy, rx, ry_s, false);
+                rip_end_filled_border(s, border_mode);
+            } else {
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+            }
         }
         break;
 
@@ -2966,21 +3304,22 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                *
                * Order matters: draw_pie(fill=true) paints the sector with
                * g_color over the arc/radii it drew first, so we must fill
-               * before outlining or the outline gets wiped.  Skip outline
-               * entirely if there's no fill — the bare draw_pie(false)
-               * call below already drew it. */
+               * before outlining or the outline gets wiped.  The optional
+               * outline is controlled by RIP_SET_BORDER and drawn in COPY. */
         if (len >= 10) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t sa = mega2(p + 4), ea = mega2(p + 6);
             int16_t r  = scale_y(mega2(p + 8));
-            uint8_t dc = s->palette[s->draw_color & 0x0F];
+            uint8_t border_mode;
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_pie(cx, cy, r, sa, ea, true);
-                draw_set_color(dc);
+            }
+            if (rip_begin_filled_border(s, &border_mode)) {
                 draw_pie(cx, cy, r, sa, ea, false);
+                rip_end_filled_border(s, border_mode);
             } else {
-                draw_pie(cx, cy, r, sa, ea, false);
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
             }
         }
         break;
@@ -2989,14 +3328,16 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t sa = mega2(p + 4), ea = mega2(p + 6);
             int16_t rx = mega2(p + 8), ry_s = scale_y(mega2(p + 10));
-            uint8_t dc = s->palette[s->draw_color & 0x0F];
+            uint8_t border_mode;
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, true);
-                draw_set_color(dc);
+            }
+            if (rip_begin_filled_border(s, &border_mode)) {
                 draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, false);
+                rip_end_filled_border(s, border_mode);
             } else {
-                draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, false);
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
             }
         }
         break;
@@ -3037,12 +3378,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             if (s->cmd_char == 'l') {
                 draw_polyline(pts, npts);
             } else if (s->cmd_char == 'p') {
+                uint8_t border_mode;
                 if (s->fill_pattern != 0) {
                     draw_set_color(s->palette[s->fill_color & 0x0F]);
                     draw_polygon(pts, npts, true);
                 }
-                draw_set_color(s->palette[s->draw_color & 0x0F]);
-                draw_polygon(pts, npts, false);
+                if (rip_begin_filled_border(s, &border_mode)) {
+                    draw_polygon(pts, npts, false);
+                    rip_end_filled_border(s, border_mode);
+                } else {
+                    draw_set_color(s->palette[s->draw_color & 0x0F]);
+                }
             } else {
                 draw_polygon(pts, npts, false);
             }
@@ -3142,12 +3488,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 6) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t r = scale_y(mega2(p + 4));
+            uint8_t border_mode;
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_circle(cx, cy, r, true);
             }
-            draw_set_color(s->palette[s->draw_color & 0x0F]);
-            draw_circle(cx, cy, r, false);
+            if (rip_begin_filled_border(s, &border_mode)) {
+                draw_circle(cx, cy, r, false);
+                rip_end_filled_border(s, border_mode);
+            } else {
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+            }
         }
         break;
 
@@ -3168,12 +3519,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t x0 = mega2(p),      y0 = scale_y(mega2(p + 2));
             int16_t x1 = mega2(p + 4),  y1 = scale_y1(mega2(p + 6));
             int16_t r  = scale_y(mega2(p + 8));
+            uint8_t border_mode;
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_rounded_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, r, true);
             }
-            draw_set_color(s->palette[s->draw_color & 0x0F]);
-            draw_rounded_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, r, false);
+            if (rip_begin_filled_border(s, &border_mode)) {
+                draw_rounded_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, r, false);
+                rip_end_filled_border(s, border_mode);
+            } else {
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+            }
         }
         break;
 
@@ -3275,34 +3631,55 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* -- Header (v2.0+) -------------------------------------------------- */
     /* DLL command table entry 32: 'h' = RIP_HEADER (3 args: 2,4,2) */
     case 'h': /* RIP_HEADER -- type:2 id:4 flags:2 */
-        /* Sets page header/title metadata -- no visible output on card.
-         * Accepted for stream hygiene; values are not stored. */
+        /* Scene metadata; no visible output.  A header that resets the
+         * environment also restores filled-object borders by spec. */
+        if (len >= 8) {
+            s->header_type = (uint8_t)(mega2(p) & 0xFF);
+            s->header_id = (uint32_t)mega4(p + 2);
+            s->header_flags = (uint8_t)(mega2(p + 6) & 0xFF);
+            s->filled_borders_enabled = true;
+        }
         break;
 
     /* -- Coordinate size (v2.0+) ----------------------------------------- */
     /* DLL command table entry 49: 'n' = RIP_SET_COORDINATE_SIZE (2 args: 1,3) */
-    case 'n': /* RIP_SET_COORDINATE_SIZE -- mode:1 size:3 */
-        /* Selects resolution mode for subsequent XY decoding.
-         * 5 modes: 0=640x350 (EGA default), 1=640x480, 2=800x600,
-         *          3=1024x768, 4=custom (size:3 = custom value).
-         * Card is fixed at 640x400; all modes map to the same display.
-         * Accept and ignore -- no coordinate scaling adjustment needed. */
+    case 'n': /* RIP_SET_COORDINATE_SIZE -- byte_size:1 res:3 */
+        /* Track the requested coordinate byte width.  The renderer keeps
+         * using its fixed framebuffer coordinate transform, but $COORDSIZE$
+         * and subsequent state snapshots now reflect the negotiated size. */
+        if (len >= 4) {
+            uint8_t size = (uint8_t)mega_digit(p[0]);
+            if (size >= 2 && size <= 5)
+                s->coordinate_size = size;
+            s->coordinate_res = (uint32_t)mega3(p + 1);
+        }
         break;
 
     /* -- Color mode (v2.0+) ---------------------------------------------- */
     /* DLL command table entry 46: 'M' = RIP_SET_COLOR_MODE (2 args: 1,1) */
-    case 'M': /* RIP_SET_COLOR_MODE -- mode:1 depth:1 */
-        /* Selects color depth for subsequent color arguments.
-         * mode=0: 4-bit EGA (default), mode=1: 8-bit VGA, mode=2: 18-bit VGA.
-         * Card always uses 16-color EGA palette; higher depths fold to 4 bits.
-         * Accept and ignore. */
+    case 'M': /* RIP_SET_COLOR_MODE -- mode:1 bits:1 */
+        /* mode=0: palette mapping. mode!=0: direct RGB with bits/component.
+         * The card remains palette-backed, but mode tracking is observable
+         * through $COLORMODE$ and future color-parameter handlers. */
+        if (len >= 2) {
+            uint8_t mode = (uint8_t)mega_digit(p[0]);
+            uint8_t bits = (uint8_t)mega_digit(p[1]);
+            s->color_mode = mode;
+            if (mode == 0) {
+                s->color_bits = 0;
+            } else {
+                if (bits < 1) bits = 1;
+                if (bits > 8) bits = 8;
+                s->color_bits = bits;
+            }
+        }
         break;
 
-    /* -- Border color (v2.0+) -------------------------------------------- */
+    /* -- Filled-object border control (v2.A3+) ---------------------------- */
     /* DLL command table entry 48: 'N' = RIP_SET_BORDER (1 arg: 2-digit) */
-    case 'N': /* RIP_SET_BORDER -- color:2 */
-        /* Sets screen border / overscan color.
-         * Card has no overscan region; accepted and ignored. */
+    case 'N': /* RIP_SET_BORDER -- borders:2, 00=off, nonzero=on */
+        if (len >= 2)
+            s->filled_borders_enabled = (mega2(p) != 0);
         break;
 
     /* -- Poly-Bezier (v2.0+) --------------------------------------------- */
@@ -3345,34 +3722,46 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 10) {
             int16_t bx0 = mega2(p),      by0 = scale_y(mega2(p + 2));
             int16_t bx1 = mega2(p + 4),  by1 = scale_y1(mega2(p + 6));
-            /* flags:2 at p+8 -- reserved, ignored */
             const char *tp = p + 10;
             int tlen = len - 10;
             if (tlen > 0 && bx1 > bx0 && by1 > by0) {
                 char tbuf[256];
+                char vbuf[256];
+                draw_clip_state_t saved_clip;
+                int16_t cx0, cy0, cx1, cy1;
                 int outlen = unescape_text(tp, tlen > 255 ? 255 : tlen, tbuf);
+                outlen = rip_expand_variables(s, tbuf, outlen, vbuf, sizeof(vbuf));
                 uint8_t tc = s->palette[s->draw_color & 0x0F];
                 int char_w = 8, char_h = 16;
                 int cur_x = bx0, cur_y = by0;
                 int i = 0;
-                while (i < outlen && cur_y + char_h <= by1) {
-                    int word_end = i;
-                    while (word_end < outlen && tbuf[word_end] != ' ') word_end++;
-                    int word_w = (word_end - i) * char_w;
-                    if (cur_x + word_w > bx1 && cur_x > bx0) {
-                        cur_x = bx0;
-                        cur_y += char_h;
-                        if (cur_y + char_h > by1) break;
-                    }
-                    draw_text(cur_x, cur_y, tbuf + i, word_end - i,
-                              cp437_8x16, char_h, tc, 0xFF);
-                    cur_x += word_w;
-                    i = word_end;
-                    if (i < outlen && tbuf[i] == ' ') {
-                        cur_x += char_w;
-                        i++;
+                draw_save_clip(&saved_clip);
+                cx0 = bx0 > saved_clip.x0 ? bx0 : saved_clip.x0;
+                cy0 = by0 > saved_clip.y0 ? by0 : saved_clip.y0;
+                cx1 = bx1 < saved_clip.x1 ? bx1 : saved_clip.x1;
+                cy1 = by1 < saved_clip.y1 ? by1 : saved_clip.y1;
+                if (cx0 <= cx1 && cy0 <= cy1) {
+                    draw_set_clip(cx0, cy0, cx1, cy1);
+                    while (i < outlen && cur_y + char_h <= by1) {
+                        int word_end = i;
+                        while (word_end < outlen && vbuf[word_end] != ' ') word_end++;
+                        int word_w = (word_end - i) * char_w;
+                        if (cur_x + word_w > bx1 && cur_x > bx0) {
+                            cur_x = bx0;
+                            cur_y += char_h;
+                            if (cur_y + char_h > by1) break;
+                        }
+                        draw_text(cur_x, cur_y, vbuf + i, word_end - i,
+                                  cp437_8x16, char_h, tc, 0xFF);
+                        cur_x += word_w;
+                        i = word_end;
+                        if (i < outlen && vbuf[i] == ' ') {
+                            cur_x += char_w;
+                            i++;
+                        }
                     }
                 }
+                draw_restore_clip(&saved_clip);
             }
         }
         break;
@@ -3384,13 +3773,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 8) {
             int16_t ex0 = mega2(p),     ey0 = scale_y(mega2(p + 2));
             int16_t ex1 = mega2(p + 4), ey1 = scale_y1(mega2(p + 6));
+            uint8_t border_mode;
             /* mode:2 at p+8, param1:2 at p+10, param2:2 at p+12 -- ignored */
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_rect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1, true);
             }
-            draw_set_color(s->palette[s->draw_color & 0x0F]);
-            draw_rect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1, false);
+            if (rip_begin_filled_border(s, &border_mode)) {
+                draw_rect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1, false);
+                rip_end_filled_border(s, border_mode);
+            } else {
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+            }
         }
         break;
 
@@ -3483,6 +3877,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
          * With 3 points this is a filled+outlined triangle. */
         if (len >= 12) {
             int16_t pts[6];
+            uint8_t border_mode;
             pts[0] = mega2(p);     pts[1] = scale_y(mega2(p + 2));
             pts[2] = mega2(p + 4); pts[3] = scale_y(mega2(p + 6));
             pts[4] = mega2(p + 8); pts[5] = scale_y(mega2(p + 10));
@@ -3490,8 +3885,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_polygon(pts, 3, true);
             }
-            draw_set_color(s->palette[s->draw_color & 0x0F]);
-            draw_polygon(pts, 3, false);
+            if (rip_begin_filled_border(s, &border_mode)) {
+                draw_polygon(pts, 3, false);
+                rip_end_filled_border(s, border_mode);
+            } else {
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+            }
         }
         break;
 
@@ -3683,8 +4082,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * interpreted as two 2-digit flag fields). */
     case 'f': /* RIP_FONT_ATTRIB — attrib:2 reserved:2 */
         /* bit0=bold, bit1=italic, bit2=underline, bit3=shadow.
-         * Stored in s->font_attrib for use by text rendering paths.
-         * BGI stroke font renderer support for attribs is future work. */
+         * Stored in s->font_attrib and applied by the BGI stroke renderer. */
         if (len >= 2)
             s->font_attrib = (uint8_t)(mega2(p) & 0x0F);
         break;
@@ -4253,14 +4651,14 @@ void rip_sync_time_byte(uint8_t data_byte) {
  * Called by main.c for each BUS_MOSAIC_CMD_QUERY_RESPONSE write.
  * data_byte: next response character typed by the user on the IIgs,
  *   or 0x00 to commit and send the response to the BBS.
- * On NUL: stores response in the target $APPn$ variable, pushes it to the
+ * On NUL: stores response in the target user variable, pushes it to the
  * BBS via TX FIFO, and clears query_pending. */
 void rip_query_response_byte(uint8_t data_byte) {
     rip_state_t *s = g_rip_state;
     if (!s || !s->query_pending) return;
 
     if (data_byte == '\0') {
-        /* Commit: identify target $APPn$ from query_var_name and store result */
+        /* Commit: identify target variable from query_var_name and store result. */
         const char *vn = s->query_var_name;
         if (vn[0] == '$' && vn[1] == 'A' && vn[2] == 'P' && vn[3] == 'P' &&
             vn[4] >= '0' && vn[4] <= '9' && vn[5] == '$') {
@@ -4272,6 +4670,12 @@ void rip_query_response_byte(uint8_t data_byte) {
             /* Send response to BBS now that we have it */
             if (rlen > 0)
                 card_tx_push(s->app_vars[idx], rlen);
+        } else {
+            int rlen = s->query_response_len;
+            if (rip_user_var_set(s, vn, (int)strlen(vn),
+                                 s->query_response, rlen) && rlen > 0) {
+                card_tx_push(s->query_response, rlen);
+            }
         }
         s->query_pending = false;
         s->query_response_len = 0;

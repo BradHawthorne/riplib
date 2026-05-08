@@ -44,9 +44,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 extern void palette_write_rgb565(uint8_t index, uint16_t rgb565);
 extern void card_tx_push(const char *buf, int len);
+
+#define RIP2_PI_F 3.14159265358979323846f
+
+static int16_t rip2_round_to_i16(float v) {
+    return (int16_t)(v >= 0.0f ? v + 0.5f : v - 0.5f);
+}
+
+static void rip2_circle_point(int16_t cx, int16_t cy, int16_t r,
+                              int16_t deg, int16_t *ox, int16_t *oy) {
+    int d = deg % 360;
+    float rad;
+
+    if (d < 0)
+        d += 360;
+    rad = (float)d * (RIP2_PI_F / 180.0f);
+    *ox = (int16_t)(cx + rip2_round_to_i16(cosf(rad) * (float)r));
+    *oy = (int16_t)(cy - rip2_round_to_i16(sinf(rad) * (float)r));
+}
 
 static uint8_t rip2_rgb332_r(uint8_t rgb) {
     return (uint8_t)((((rgb >> 5) & 0x07u) * 255u) / 7u);
@@ -855,45 +874,14 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
             break;
         int16_t cx = params[0];
         int16_t cy = scale_y(params[1]);
-        int16_t r  = params[2];
+        int16_t r  = scale_y(params[2]);
         int16_t sa = params[3];
         int16_t ea = params[4];
         draw_arc(cx, cy, r, sa, ea);
 
-        /* Integer sin/cos table for 0..90 degrees, scaled x1024 */
-        static const int16_t chord_sin91[91] = {
-            0, 18, 36, 54, 71, 89, 107, 125, 143, 160,
-            178, 195, 213, 230, 248, 265, 282, 299, 316, 333,
-            350, 367, 383, 400, 416, 432, 448, 464, 480, 496,
-            511, 526, 541, 556, 571, 585, 600, 614, 628, 642,
-            655, 669, 682, 695, 707, 720, 732, 744, 756, 767,
-            778, 789, 800, 810, 821, 831, 840, 850, 859, 868,
-            877, 886, 894, 902, 910, 917, 924, 931, 938, 944,
-            950, 956, 961, 966, 971, 976, 980, 984, 988, 992,
-            995, 998, 1000, 1003, 1005, 1006, 1008, 1009, 1010, 1011,
-            1012,
-        };
-
-/* Compute integer sin and cos for an angle in degrees.
- * Results are scaled by 1024.  Uses the 91-entry table. */
-#define CHORD_SC(deg, ps, pc)                                              \
-    do {                                                                   \
-        int16_t _a = (int16_t)(((deg) % 360 + 360) % 360);               \
-        if      (_a <=  90) { *(ps) =  chord_sin91[_a];      *(pc) =  chord_sin91[90 - _a]; }  \
-        else if (_a <= 180) { *(ps) =  chord_sin91[180 - _a]; *(pc) = -chord_sin91[_a - 90]; } \
-        else if (_a <= 270) { *(ps) = -chord_sin91[_a - 180]; *(pc) = -chord_sin91[270 - _a]; }\
-        else                { *(ps) = -chord_sin91[360 - _a]; *(pc) =  chord_sin91[_a - 270]; }\
-    } while (0)
-
-        int16_t ss, sc, es, ec;
-        CHORD_SC(sa, &ss, &sc);
-        CHORD_SC(ea, &es, &ec);
-#undef CHORD_SC
-
-        int16_t x0 = (int16_t)(cx + (int32_t)r * sc / 1024);
-        int16_t y0 = (int16_t)(cy - (int32_t)r * ss / 1024);
-        int16_t x1 = (int16_t)(cx + (int32_t)r * ec / 1024);
-        int16_t y1 = (int16_t)(cy - (int32_t)r * es / 1024);
+        int16_t x0, y0, x1, y1;
+        rip2_circle_point(cx, cy, r, sa, &x0, &y0);
+        rip2_circle_point(cx, cy, r, ea, &x1, &y1);
         draw_line(x0, y0, x1, y1);
         break;
     }

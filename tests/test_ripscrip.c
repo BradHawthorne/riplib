@@ -684,6 +684,28 @@ static void test_var_rand_advances_lcg(void) {
         FAIL("$RAND$ LCG state not Knuth/POSIX");
 }
 
+static void test_var_reset_restores_state(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("$RESET$ performs the same state reset as '*'");
+    init_fixture(&s, &ctx);
+    draw_set_color(77);
+    draw_pixel(10, 10);
+    s.write_mode = DRAW_MODE_XOR;
+    draw_set_write_mode(DRAW_MODE_XOR);
+    s.font_attrib = 7;
+    s.num_mouse_regions = 4;
+    feed_script(&s, &ctx, "!|T$RESET$|");
+    if (s.num_mouse_regions == 0 &&
+        s.write_mode == DRAW_MODE_COPY &&
+        s.font_attrib == 0 &&
+        draw_get_pixel(10, 10) == s.palette[s.back_color])
+        PASS();
+    else
+        FAIL("$RESET$ did not restore windows/drawing state");
+}
+
 static void test_l1_kill_mouse_regions(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -775,6 +797,53 @@ static void test_l1_query_ext_returns_app_var(void) {
         PASS();
     else
         FAIL("1Q did not return app var");
+}
+
+static void test_l1_define_query_and_expand_generic_var(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1D generic variables query and expand in IF expressions");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1D000  CITY=Austin|");
+    tx_reset();
+    feed_script(&s, &ctx, "!|1Q00000$CITY$|");
+    if (!(tx_len == 6 && memcmp(tx_capture, "Austin", 6) == 0)) {
+        FAIL("1Q did not return generic variable");
+        return;
+    }
+    feed_script(&s, &ctx, "<<IF $CITY$=Austin>>!|X0303|<<ENDIF>>");
+    if (draw_get_pixel(3, 3) != 0)
+        PASS();
+    else
+        FAIL("generic variable did not expand in IF expression");
+}
+
+static void test_l1_generic_query_round_trip(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    const char *answer = "Paris";
+
+    TEST("undefined generic query prompts and stores response");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1Q00000$CITY$|");
+    if (!(s.query_pending && tx_len >= 8 && tx_capture[0] == 0x3E &&
+          memcmp(tx_capture + 1, "$CITY$", 6) == 0)) {
+        FAIL("generic query did not start prompt round-trip");
+        return;
+    }
+    tx_reset();
+    for (size_t i = 0; answer[i] != '\0'; i++)
+        rip_query_response_byte((uint8_t)answer[i]);
+    rip_query_response_byte(0x00);
+    if (!s.query_pending &&
+        s.user_var_count == 1 &&
+        strcmp(s.user_var_names[0], "CITY") == 0 &&
+        strcmp(s.user_var_values[0], "Paris") == 0 &&
+        tx_len == 5 && memcmp(tx_capture, "Paris", 5) == 0)
+        PASS();
+    else
+        FAIL("generic query response was not stored and returned");
 }
 
 static void test_sync_date_byte_commits_on_nul(void) {
@@ -1286,6 +1355,45 @@ static void test_bounded_text_wraps(void) {
         FAIL("bounded text did not draw");
 }
 
+static void test_bounded_text_clips_long_word(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    int inside = 0;
+    int outside = 0;
+
+    TEST("'\"' RIP_BOUNDED_TEXT clips overlong words to the box");
+    init_fixture(&s, &ctx);
+    /* Box (5,5)-(12,20), flags=00, text would extend to x=36 unclipped. */
+    feed_script(&s, &ctx, "!|\"05050C0K00AAAA|");
+    for (int y = 5; y <= 20 && !inside; y++)
+        for (int x = 5; x <= 12 && !inside; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) inside = 1;
+    for (int y = 5; y <= 20 && !outside; y++)
+        for (int x = 13; x <= 40 && !outside; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) outside = 1;
+    if (inside && !outside)
+        PASS();
+    else
+        FAIL("bounded text wrote outside its box");
+}
+
+static void test_bounded_text_expands_empty_app_variable(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    int touched = 0;
+
+    TEST("'\"' RIP_BOUNDED_TEXT expands empty $APPn$ variables");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|\"05050U1E00$APP0$|");
+    for (int y = 5; y <= 30 && !touched; y++)
+        for (int x = 5; x <= 60 && !touched; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) touched = 1;
+    if (!touched)
+        PASS();
+    else
+        FAIL("bounded text rendered a literal empty variable token");
+}
+
 static void test_polygon_all_outside_clip_no_draw(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1624,6 +1732,22 @@ static void test_mouse_click_outside_no_dispatch(void) {
         FAIL("click outside region still dispatched");
 }
 
+static void test_mouse_click_uses_latest_overlapping_region(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("overlapping mouse regions are scanned last-in first-out");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1M010A0A1E1E0000000OLD|");
+    feed_script(&s, &ctx, "!|1M020A0A1E1E0000000NEW|");
+    tx_reset();
+    rip_mouse_event_state(&s, 15, 20, true);
+    if (tx_len == 4 && memcmp(tx_capture, "NEW\r", 4) == 0)
+        PASS();
+    else
+        FAIL("older overlapping mouse region won the hit test");
+}
+
 static void test_polygon_overflow_rejected(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1692,24 +1816,49 @@ static void test_group_markers_accepted(void) {
         FAIL("group markers swallowed inner command");
 }
 
-static void test_no_op_metadata_commands_accepted(void) {
+static void test_metadata_commands_store_state_and_vars(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("h/n/M/N metadata commands accepted without resync");
+    TEST("h/n/M/N metadata commands store state");
     init_fixture(&s, &ctx);
-    /* Each of these has a 'recognised but stubbed' handler. */
-    feed_script(&s, &ctx, "!|h00000000|");
-    feed_script(&s, &ctx, "!|n0000|");
-    feed_script(&s, &ctx, "!|M00|");
+    feed_script(&s, &ctx, "!|h01000102|");
+    feed_script(&s, &ctx, "!|n4000|");
+    feed_script(&s, &ctx, "!|M18|");
     feed_script(&s, &ctx, "!|N00|");
-    /* If any threw the FSM into ERROR_RECOVERY, this final pixel would
-     * not draw.  Use it as the canary. */
-    feed_script(&s, &ctx, "!|X0303|");
-    if (draw_get_pixel(3, 3) != 0)
+    feed_script(&s, &ctx, "<<IF $COLORMODE$=8>>!|X0303|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $COORDSIZE$=4>>!|X0404|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $ISPALETTE$=1>>!|X0505|<<ENDIF>>");
+    if (s.header_type == 1 &&
+        s.header_id == 1 &&
+        s.header_flags == 2 &&
+        s.coordinate_size == 4 &&
+        s.coordinate_res == 0 &&
+        s.color_mode == 1 &&
+        s.color_bits == 8 &&
+        !s.filled_borders_enabled &&
+        draw_get_pixel(3, 3) != 0 &&
+        draw_get_pixel(4, 4) != 0 &&
+        draw_get_pixel(5, 5) != 0)
         PASS();
     else
-        FAIL("a no-op metadata command broke parsing");
+        FAIL("metadata command state or query variable mismatch");
+}
+
+static void test_filled_border_toggle_controls_outline(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("N toggles draw-color borders on filled objects");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|S0104|");
+    feed_script(&s, &ctx, "!|N00|!|G0K0K05|");
+    feed_script(&s, &ctx, "!|N01|!|G140K05|");
+    if (draw_get_pixel(20, 17) == s.palette[4] &&
+        draw_get_pixel(40, 17) == s.palette[15])
+        PASS();
+    else
+        FAIL("filled-object border flag was not honored");
 }
 
 static void test_back_color_visible_in_pattern_fill(void) {
@@ -2056,6 +2205,19 @@ static void test_l2_query_palette_replies(void) {
         FAIL("21 did not emit a palette query response");
 }
 
+static void test_l2_chord_scales_radius_like_level0_arcs(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("2c chord scales radius through the EGA-to-card Y transform");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2c0K0K070000|");
+    if (draw_get_pixel(28, 22) != 0 && draw_get_pixel(27, 22) == 0)
+        PASS();
+    else
+        FAIL("2c chord used unscaled radius");
+}
+
 static void test_port_switch_restores_pattern_back_color(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2382,6 +2544,7 @@ int main(void) {
     test_var_abort_resets_fsm();
     test_var_beep_pushes_bel();
     test_var_rand_advances_lcg();
+    test_var_reset_restores_state();
     test_var_appn_set_via_define();
     test_l1_kill_mouse_regions();
     test_l1_mouse_region_define();
@@ -2389,6 +2552,8 @@ int main(void) {
     test_l1_image_style_stored();
     test_l1_viewport_ext();
     test_l1_query_ext_returns_app_var();
+    test_l1_define_query_and_expand_generic_var();
+    test_l1_generic_query_round_trip();
     test_l1_file_query_missing_returns_zero();
     test_l2_port_define();
     test_l2_port_zero_protected();
@@ -2403,6 +2568,7 @@ int main(void) {
     test_l2_alpha_preserves_write_mode();
     test_l2_port_copy_scales_destination_rect();
     test_l2_query_palette_replies();
+    test_l2_chord_scales_radius_like_level0_arcs();
     test_sync_date_byte_commits_on_nul();
     test_sync_time_byte_commits_on_nul();
     test_query_response_round_trip();
@@ -2428,6 +2594,8 @@ int main(void) {
     test_ridiculously_long_text();
     test_poly_bezier_renders_segment();
     test_bounded_text_wraps();
+    test_bounded_text_clips_long_word();
+    test_bounded_text_expands_empty_app_variable();
     test_polygon_all_outside_clip_no_draw();
     test_session_reset_clears_state();
     test_session_reset_then_resume();
@@ -2444,10 +2612,12 @@ int main(void) {
     test_mouse_send_char_uses_hotkey();
     test_mouse_toggle_inverts_active();
     test_mouse_click_outside_no_dispatch();
+    test_mouse_click_uses_latest_overlapping_region();
     test_polygon_overflow_rejected();
     test_set_one_palette_entry();
     test_group_markers_accepted();
-    test_no_op_metadata_commands_accepted();
+    test_metadata_commands_store_state_and_vars();
+    test_filled_border_toggle_controls_outline();
     test_back_color_visible_in_pattern_fill();
     test_erase_view_uses_back_color();
     test_back_color_command_propagates_to_draw_layer();

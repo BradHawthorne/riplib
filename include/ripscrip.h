@@ -28,6 +28,11 @@
 /* Maximum text block lines */
 #define RIP_MAX_TEXT_LINES    64
 
+/* Application-defined variables beyond the standard $APP0$-$APP9$ slots. */
+#define RIP_USER_VAR_MAX       16
+#define RIP_USER_VAR_NAME_MAX  15
+#define RIP_USER_VAR_VALUE_MAX 63
+
 /* Maximum nested <<IF>> depth tracked by the stream preprocessor. */
 #define RIP_PREPROC_MAX_DEPTH 8
 
@@ -311,13 +316,22 @@ typedef struct {
 
     /* A2GSPU v3.1: Application variables */
     char app_vars[10][32];   /* $APP0$ through $APP9$ */
+    char user_var_names[RIP_USER_VAR_MAX][RIP_USER_VAR_NAME_MAX + 1];
+    char user_var_values[RIP_USER_VAR_MAX][RIP_USER_VAR_VALUE_MAX + 1];
+    uint8_t user_var_count;
 
-    /* DLL ground truth: GFXSTYLE resolution_mode field.
-     * 0=EGA(640x350), 1=VGA(640x480), 2=SVGA, 3=XGA, 4=HIGH.
-     * A2GSPU has a fixed 640x400 framebuffer so always renders as EGA (0),
-     * but the field is stored so the 'n' command can set it and $PROT$
-     * can report the negotiated mode back to the BBS. */
+    /* Scene/protocol mode metadata.  The framebuffer remains indexed
+     * 640x400, but these fields track the RIPscrip v2.x mode commands
+     * so text variables and state save/restore can report them accurately. */
+    uint8_t header_type;
+    uint32_t header_id;
+    uint8_t header_flags;
     uint8_t resolution_mode;
+    uint8_t coordinate_size;      /* RIP_SET_COORDINATE_SIZE byte size, default 2 */
+    uint32_t coordinate_res;      /* reserved/extension field from '|n' */
+    uint8_t color_mode;           /* 0=palette mapping, 1=direct RGB encoding */
+    uint8_t color_bits;           /* RGB bits/component when color_mode != 0 */
+    bool filled_borders_enabled;  /* RIP_SET_BORDER, default enabled */
 
     /* FIX V1: Host-supplied date/time (CB_GET_TIME callback equivalent).
      * Populated by CMD_SYNC_DATE / CMD_SYNC_TIME from the IIgs bridge loop,
@@ -341,11 +355,11 @@ typedef struct {
      * input it sets query_pending, pushes a CMD_QUERY_PROMPT stream via the
      * TX FIFO, and pauses variable expansion.  The IIgs sends back the typed
      * response via CMD_QUERY_RESPONSE bytes; on the NUL terminator the card
-     * stores the result in the target $APPn$ variable and clears query_pending.
+     * stores the result in the target user variable and clears query_pending.
      * query_response is the staging accumulator for incoming response bytes. */
     bool    query_pending;         /* true while waiting for IIgs response */
-    char    query_var_name[32];    /* $APPn$ variable name being queried */
-    char    query_response[32];    /* incoming response accumulator */
+    char    query_var_name[32];    /* $APPn$ or generic variable being queried */
+    char    query_response[RIP_USER_VAR_VALUE_MAX + 1]; /* incoming response accumulator */
     uint8_t query_response_len;
 
     /* Per-session PSRAM arena — 1 MB reserved once at boot by
@@ -394,8 +408,8 @@ typedef struct {
     uint8_t  icon_style_scale;
 
     /* FIX L1-7: 1V extended viewport scale factor (0=none, 1-35 in MegaNum).
-     * Stored alongside the viewport rect; ignored on this fixed-res card but
-     * needed so $PROT$ can report back the correct capability flags. */
+     * Stored alongside the viewport rect for state introspection and future
+     * host-side scaling on renderers that support it. */
     uint8_t viewport_scale;
 
     /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────── *

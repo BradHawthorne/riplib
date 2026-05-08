@@ -108,9 +108,8 @@ draw_rect to fill the vacated strip.
      Format:       !|,<sx0><sy0><sx1><sy1><dx><dy><dx1><dy1><r><r>|
 
 Extended version of copy region with separate source and
-destination rectangles. Supports scaling if source and
-destination sizes differ (not implemented in v3.1 — sizes
-must match).
+destination rectangles. If the destination rectangle is present
+and differs in size, RIPlib scales the source region into it.
 
 
 ---------------------------------------------------------------------
@@ -220,8 +219,9 @@ and parameter control. Updates the drawing cursor.
 Defines an animation frame with source, destination, and
 timing coordinates. Used for simple sprite-like animations.
 
-     v3.1 STATUS: Stubbed. Full implementation requires a
-     sprite/frame manager with timer-based playback.
+     v3.1 STATUS: Embedded fallback. RIPlib renders the frame
+     geometry immediately; timer-based sprite playback remains a
+     host/client responsibility.
 
 
 ---------------------------------------------------------------------
@@ -353,16 +353,18 @@ identifier, and behavioral flags).
 
 
 ---------------------------------------------------------------------
-4.20  RIP_SET_COORDINATE_SIZE — Set Coordinate Mode
+4.20  RIP_SET_COORDINATE_SIZE — Set Coordinate Size
 ---------------------------------------------------------------------
 
      Function:     Set Coordinate Size
      Command:      |n
-     Arguments:    mode:1 size:3
-     Format:       !|n<mode><size>|
+     Arguments:    byte_size:1 res:3
+     Format:       !|n<byte_size><res>|
 
-Sets the coordinate resolution mode (EGA 640×350, VGA 640×480,
-etc.). Affects how protocol coordinates map to the framebuffer.
+Sets the encoded byte width for variable-width X/Y parameters.
+RIPlib records the requested size for `$COORDSIZE$` and state
+introspection. The embedded renderer continues to map supported
+commands into its fixed 640x400 indexed framebuffer.
 
 
 ---------------------------------------------------------------------
@@ -375,18 +377,23 @@ etc.). Affects how protocol coordinates map to the framebuffer.
      Format:       !|M<mode><depth>|
 
 Sets the color mode (EGA 16-color, VGA 256-color, etc.).
+RIPlib records palette-vs-direct-RGB mode for `$COLORMODE$`; the
+embedded drawing surface remains palette-indexed.
 
 
 ---------------------------------------------------------------------
-4.22  RIP_SET_BORDER — Set Border Color
+4.22  RIP_SET_BORDER — Filled Object Border Control
 ---------------------------------------------------------------------
 
-     Function:     Set Border Color
+     Function:     Enable/disable borders on filled objects
      Command:      |N
-     Arguments:    color:2
-     Format:       !|N<color>|
+     Arguments:    borders:2
+     Format:       !|N<borders>|
 
-Sets the screen border color.
+Controls whether filled objects draw an outline in the current
+draw color after filling. `00` disables borders; nonzero enables
+them. Borders are drawn with write mode COPY, matching the v2.A3
+spec. RIP_BAR remains borderless.
 
 
 ---------------------------------------------------------------------

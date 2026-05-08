@@ -287,13 +287,16 @@ Lookup order:
 3.12  RIP_WRITE_ICON — Write Icon to Storage
 ---------------------------------------------------------------------
 
-     Function:     Write Icon (stub)
+     Function:     Write Icon to Runtime Cache
      Command:      |1W
-     Arguments:    (implementation-defined)
-     Format:       !|1W...|
+     Arguments:    [res:2] filename
+     Format:       !|1W[res]<filename>|
 
-No-op on embedded systems (no writable filesystem in v1.54).
-With flash filesystem (v3.1), could write to /icons/.
+Stores the current image clipboard in RIPlib's runtime icon
+cache under the given filename. Subsequent RIP_LOAD_ICON (|1I)
+commands resolve the cached icon before requesting a host-side
+file transfer. On embedded targets this is an in-memory cache,
+not a persistent filesystem write.
 
 
 ---------------------------------------------------------------------
@@ -401,10 +404,10 @@ variable table (APP0-APP9 for indexed access).
      Format:       !|1O<filename>|
      Example:      !|1OMYFONT.CHR|
 
-Requests loading of a BGI CHR or RFF font file. On the card,
-all 10 standard fonts are pre-compiled in flash — this command
-is a no-op for standard fonts. Custom fonts would be loaded
-from the flash filesystem (/fonts/) if available.
+Requests loading of a BGI CHR or RFF font file. If the filename
+matches one of RIPlib's built-in BGI fonts, that font becomes the
+current font. Otherwise the filename is queued as a host-side file
+request so an embedding application can provide a custom font.
 
 
 ---------------------------------------------------------------------
