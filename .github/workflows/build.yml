@@ -17,10 +17,50 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Configure
-      run: cmake -B build -DRIPLIB_BUILD_TESTS=ON -DRIPLIB_BUILD_EXAMPLES=ON
+      run: cmake -B build -DRIPLIB_BUILD_TESTS=ON -DRIPLIB_BUILD_EXAMPLES=ON -DBUILD_TESTING=ON
 
     - name: Build
       run: cmake --build build
 
     - name: Test
       run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure with UBSan + ASan
+      run: |
+        cmake -B build-san \
+          -DCMAKE_C_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=undefined -fno-omit-frame-pointer -g -O1" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address" \
+          -DRIPLIB_BUILD_TESTS=ON \
+          -DBUILD_TESTING=ON
+
+    - name: Build (sanitized)
+      run: cmake --build build-san
+
+    - name: Test (sanitized)
+      env:
+        UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      run: ctest --test-dir build-san --output-on-failure
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure with -fanalyzer
+      run: cmake -B build-analyzer -DCMAKE_C_FLAGS="-fanalyzer -O1" -DRIPLIB_BUILD_TESTS=ON -DBUILD_TESTING=ON
+
+    - name: Build (any -Wanalyzer-* surfaces here)
+      run: cmake --build build-analyzer 2>&1 | tee analyzer.log
+
+    - name: Fail if analyzer warnings
+      run: |
+        if grep -E '\-Wanalyzer-' analyzer.log; then
+          echo "::error::gcc analyzer reported issues"
+          exit 1
+        fi

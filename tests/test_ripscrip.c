@@ -852,6 +852,247 @@ static void test_l1_audio_pushes_marker(void) {
         FAIL("1A did not push CMD_PLAY_SOUND marker");
 }
 
+static void test_poly_bezier_renders_segment(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("'z' RIP_POLY_BEZIER renders a cubic segment");
+    init_fixture(&s, &ctx);
+    /* nsegs=1, nsteps=8, 4 control points (0,30)→(10,10)→(30,10)→(40,30) */
+    feed_script(&s, &ctx, "!|z0108001E0A0A140A141E|");
+    /* The curve should put some pixels in the y<25 region (control points
+     * pull it up).  Sample around the midpoint. */
+    int hit = 0;
+    for (int x = 15; x <= 25 && !hit; x++)
+        for (int y = 10; y < 25 && !hit; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) hit = 1;
+    if (hit)
+        PASS();
+    else
+        FAIL("poly-bezier did not draw any pixels");
+}
+
+static void test_bounded_text_wraps(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("'\"' RIP_BOUNDED_TEXT renders inside the bounding box");
+    init_fixture(&s, &ctx);
+    /* Box (5,5)-(60,30) flags=00 text="HELLO". */
+    feed_script(&s, &ctx, "!|\"05050U1E00HELLO|");
+    /* scale_y(5)=5; expect glyph pixels somewhere in (5..60, 5..30). */
+    int hit = 0;
+    for (int y = 5; y <= 25 && !hit; y++)
+        for (int x = 5; x <= 60 && !hit; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) hit = 1;
+    if (hit)
+        PASS();
+    else
+        FAIL("bounded text did not draw");
+}
+
+static void test_polygon_all_outside_clip_no_draw(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("polygon entirely outside the viewport draws nothing");
+    init_fixture(&s, &ctx);
+    /* Clip to a tiny rect. */
+    feed_script(&s, &ctx, "!|v00000A0A|");
+    /* Filled polygon (3 pts) at (50,50)/(60,50)/(55,60) — all outside. */
+    feed_script(&s, &ctx, "!|p0332321E32 1E3C 1E");
+    feed_script(&s, &ctx, "|");
+    /* No pixel inside the viewport (which is small) should be set. */
+    int touched = 0;
+    for (int y = 0; y <= 12; y++)
+        for (int x = 0; x <= 10; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) touched = 1;
+    if (!touched)
+        PASS();
+    else
+        FAIL("polygon outside clip drew inside it");
+}
+
+static void test_session_reset_clears_state(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("rip_session_reset clears mouse/clipboard/vars/query/preproc");
+    init_fixture(&s, &ctx);
+    /* Populate state heavily. */
+    feed_script(&s, &ctx, "!|1M010A0A1E0U0000000HOST|");
+    strcpy(s.app_vars[2], "DIRTY");
+    s.query_pending = true;
+    strcpy(s.query_var_name, "$APP2$");
+    s.preproc_depth = 3;
+    s.preproc_suppress = true;
+    s.text_block.active = true;
+    s.clipboard.valid = true;
+    /* Reset. */
+    rip_session_reset(&s);
+    /* Verify everything cleared. */
+    if (s.num_mouse_regions == 0 &&
+        s.app_vars[2][0] == '\0' &&
+        !s.query_pending &&
+        s.preproc_depth == 0 &&
+        !s.preproc_suppress &&
+        !s.text_block.active &&
+        !s.clipboard.valid &&
+        s.state == RIP_ST_IDLE)
+        PASS();
+    else
+        FAIL("session reset left state behind");
+}
+
+static void test_session_reset_preserves_arena(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    psram_arena_t before_arena;
+
+    TEST("rip_session_reset reuses the same PSRAM arena base");
+    init_fixture(&s, &ctx);
+    before_arena = s.psram_arena;
+    rip_session_reset(&s);
+    /* Reset rewinds (used==0) but keeps the same backing block. */
+    if (s.psram_arena.base == before_arena.base &&
+        s.psram_arena.size == before_arena.size &&
+        s.psram_arena.used == 0)
+        PASS();
+    else
+        FAIL("session reset reallocated arena");
+}
+
+static void test_reset_windows_full_defaults(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("'*' RIP_RESET_WINDOWS restores drawing/text/viewport defaults");
+    init_fixture(&s, &ctx);
+    /* Disturb state. */
+    feed_script(&s, &ctx, "!|c04|!|S0205|!|k7|!|w0A0A1E1E11|!|v0000050A|");
+    s.tw_active = true;
+    s.text_block.active = true;
+    s.num_mouse_regions = 5;
+    /* Reset. */
+    feed_script(&s, &ctx, "!|*|");
+    if (s.draw_color == 15 &&
+        s.fill_color == 15 &&
+        s.fill_pattern == 1 &&
+        s.line_thick == 1 &&
+        s.tw_x0 == 0 && s.tw_x1 == 639 &&
+        s.tw_y0 == 0 && s.tw_y1 == 349 &&
+        s.vp_x0 == 0 && s.vp_x1 == 639 &&
+        s.num_mouse_regions == 0 &&
+        !s.text_block.active)
+        PASS();
+    else
+        FAIL("reset_windows did not restore all defaults");
+}
+
+static void test_palette_save_apply_round_trip(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint16_t custom_red;
+
+    TEST("rip_save_palette + rip_apply_palette round-trips custom colors");
+    init_fixture(&s, &ctx);
+    /* Customize palette index 5 to a non-default value. */
+    feed_script(&s, &ctx, "!|a0510|");  /* idx=5, ega64=16 */
+    custom_red = palette[245];
+    /* Save snapshot, then clobber the live palette to default. */
+    rip_save_palette(&s);
+    palette[245] = 0x1234;
+    /* Re-apply — saved snapshot must come back. */
+    rip_apply_palette();
+    if (palette[245] == custom_red && custom_red != 0x1234)
+        PASS();
+    else
+        FAIL("palette save/apply did not round-trip");
+}
+
+static void test_port_switch_preserves_color_and_pos(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("port switch saves/restores color, position, line style, fill");
+    init_fixture(&s, &ctx);
+    /* Define port 1.  Set state on port 0 first. */
+    s.draw_color = 7;
+    s.fill_color = 11;
+    s.draw_x = 100;
+    s.draw_y = 80;
+    s.line_thick = 3;
+    /* Define and switch to port 1.  '2P' creates port; '2s' switches. */
+    feed_script(&s, &ctx, "!|2P1000005050200|");  /* port 1, viewport */
+    feed_script(&s, &ctx, "!|2s100|");             /* switch to port 1 */
+    /* Mutate state inside port 1. */
+    s.draw_color = 2;
+    s.draw_x = 30;
+    /* Switch back to port 0 — state should be restored. */
+    feed_script(&s, &ctx, "!|2s000|");
+    if (s.draw_color == 7 &&
+        s.fill_color == 11 &&
+        s.draw_x == 100 &&
+        s.draw_y == 80 &&
+        s.line_thick == 3)
+        PASS();
+    else
+        FAIL("port switch did not restore port 0 state");
+}
+
+static void test_preproc_depth_overflow(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("preprocessor handles > MAX_DEPTH nested IFs without corruption");
+    init_fixture(&s, &ctx);
+    /* 9 IFs, all true.  RIP_PREPROC_MAX_DEPTH is 8 — the 9th IF must
+     * route into preproc_overflow, not corrupt the stack.  Then 9
+     * ENDIFs unwind both overflow and depth back to zero. */
+    feed_script(&s, &ctx,
+        "<<IF 1>><<IF 1>><<IF 1>><<IF 1>><<IF 1>>"
+        "<<IF 1>><<IF 1>><<IF 1>><<IF 1>>"
+        "<<ENDIF>><<ENDIF>><<ENDIF>><<ENDIF>><<ENDIF>>"
+        "<<ENDIF>><<ENDIF>><<ENDIF>><<ENDIF>>"
+        "!|X0202|");
+    if (s.preproc_depth == 0 &&
+        s.preproc_overflow == 0 &&
+        !s.preproc_suppress &&
+        draw_get_pixel(2, 2) != 0)
+        PASS();
+    else
+        FAIL("preprocessor depth overflow not handled cleanly");
+}
+
+static void test_preproc_if_with_app_var(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("<<IF $APP0$=hello>> branches on substituted value");
+    init_fixture(&s, &ctx);
+    strcpy(s.app_vars[0], "hello");
+    feed_script(&s, &ctx, "<<IF $APP0$=hello>>!|X0303|<<ENDIF>>");
+    /* scale_y(3) = 3 (3*8/7 = 3). */
+    if (draw_get_pixel(3, 3) != 0)
+        PASS();
+    else
+        FAIL("variable substitution in IF expression failed");
+}
+
+static void test_preproc_if_with_app_var_false(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("<<IF $APP0$=other>> false branch suppresses output");
+    init_fixture(&s, &ctx);
+    strcpy(s.app_vars[0], "hello");
+    feed_script(&s, &ctx, "<<IF $APP0$=other>>!|X0404|<<ENDIF>>");
+    if (draw_get_pixel(4, 4) == 0)
+        PASS();
+    else
+        FAIL("variable substitution in IF false-branch leaked");
+}
+
 static void test_mouse_click_dispatches_host_string(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1356,6 +1597,17 @@ int main(void) {
     test_eval_if_le_3_5();
     test_eval_if_ne_strings();
     test_scroll_clears_only_source_rect();
+    test_poly_bezier_renders_segment();
+    test_bounded_text_wraps();
+    test_polygon_all_outside_clip_no_draw();
+    test_session_reset_clears_state();
+    test_session_reset_preserves_arena();
+    test_reset_windows_full_defaults();
+    test_palette_save_apply_round_trip();
+    test_port_switch_preserves_color_and_pos();
+    test_preproc_depth_overflow();
+    test_preproc_if_with_app_var();
+    test_preproc_if_with_app_var_false();
     test_mouse_click_dispatches_host_string();
     test_mouse_click_outside_no_dispatch();
     test_polygon_overflow_rejected();
