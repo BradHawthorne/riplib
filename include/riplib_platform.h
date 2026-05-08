@@ -5,7 +5,8 @@
  * dependencies (PSRAM arena, compositor, etc.). Consumers implement
  * the 3 extern functions below for their platform.
  *
- * Copyright (c) 2026 SimVU (Brad Hawthorne) — MIT License
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #pragma once
@@ -35,7 +36,7 @@ static inline void psram_arena_init(psram_arena_t *a, uint32_t size) {
 }
 
 static inline void *psram_arena_alloc(psram_arena_t *a, uint32_t size) {
-    size = (size + 31) & ~31;  /* 32-byte align */
+    size = (size + 31u) & ~(uint32_t)31u;  /* 32-byte align */
     if (!a->base || a->used + size > a->size) return NULL;
     void *p = a->base + a->used;
     a->used += size;
@@ -62,16 +63,14 @@ extern void palette_write_rgb565(uint8_t index, uint16_t rgb565);
 extern uint16_t palette_read_rgb565(uint8_t index);
 
 /**
- * Allocate memory for icon/font caching.
- * On embedded: PSRAM arena. On desktop: malloc().
- */
-extern void *gpu_psram_alloc(uint32_t size);
-
-/**
  * Send response bytes back to the BBS (via serial/TCP).
  * Used for query responses, file transfer, mouse events.
  */
 extern void card_tx_push(const char *buf, int len);
+
+/* gpu_psram_alloc was previously declared here but the library uses
+ * psram_arena_alloc() exclusively.  Removed to avoid ghost-symbol
+ * confusion; the test/demo platform stubs no longer need to provide it. */
 
 /* ── Compositor stub ────────────────────────────────────────────── */
 /* Minimal stub — the full compositor is not part of RIPlib.

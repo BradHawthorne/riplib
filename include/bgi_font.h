@@ -15,8 +15,8 @@
  *   LITT = Small
  *   SCRI = Script
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #pragma once
@@ -41,13 +41,13 @@
 typedef struct {
     const uint8_t *data;     /* Raw .CHR binary data (after header) */
     int            data_size;
-    uint8_t        num_chars; /* Number of characters in font */
+    uint16_t       num_chars; /* Number of characters in font (on-disk u16 LE) */
     uint8_t        first_char;/* ASCII code of first character */
     int16_t        top;       /* Distance from origin to top */
     int16_t        baseline;  /* Distance from origin to baseline */
     int16_t        bottom;    /* Distance from origin to bottom */
     const uint8_t *widths;    /* Character width table */
-    const uint16_t *offsets;  /* Stroke data offset table */
+    const uint8_t *offsets;   /* LE stroke offset table (2 bytes per char) */
     const uint8_t *strokes;   /* Stroke data */
 } bgi_font_t;
 

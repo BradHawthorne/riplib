@@ -34,13 +34,14 @@
  *     - draw_copy_rect() implements port-to-port pixel copy within the
  *       single shared framebuffer
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #include "ripscrip2.h"
 #include "riplib_platform.h"
 #include "drawing.h"
+#include <stdlib.h>
 #include <string.h>
 
 extern void palette_write_rgb565(uint8_t index, uint16_t rgb565);
@@ -66,14 +67,38 @@ static inline int mega2l(const char *p) {
     return mega_dig(p[0]) * 36 + mega_dig(p[1]);
 }
 
-/* Scale RIPscrip EGA Y-coordinate (0-349) to card display Y (0-399). */
+/* Scale RIPscrip EGA Y-coordinate (0-349) to card display Y (0-399).
+ * MUST match ripscrip.c::scale_y so the same EGA coord lands on the
+ * same card pixel whether reached via Level 0 or Level 2 commands. */
 static inline int16_t scale_y(int16_t y) {
-    return (int16_t)((y * 8 + 3) / 7);
+    return (int16_t)((y * 8) / 7);
 }
 
-/* Scale Y for bottom edges -- ceiling so adjacent rects touch. */
+/* Scale Y for bottom edges -- ceiling so adjacent rects touch.
+ * Matches ripscrip.c::scale_y1. */
 static inline int16_t scale_y1(int16_t y) {
     return (int16_t)((y * 8 + 6) / 7);
+}
+
+static void clamp_ega_rect(int16_t *x0, int16_t *y0,
+                           int16_t *x1, int16_t *y1) {
+    int16_t tx0 = *x0, ty0 = *y0, tx1 = *x1, ty1 = *y1;
+    if (tx0 > tx1) { int16_t t = tx0; tx0 = tx1; tx1 = t; }
+    if (ty0 > ty1) { int16_t t = ty0; ty0 = ty1; ty1 = t; }
+    if (tx0 < 0) tx0 = 0;
+    if (ty0 < 0) ty0 = 0;
+    if (tx1 > 639) tx1 = 639;
+    if (ty1 > 349) ty1 = 349;
+    *x0 = tx0;
+    *y0 = ty0;
+    *x1 = tx1;
+    *y1 = ty1;
+}
+
+/* Delegate to the canonical implementation in ripscrip.c so the BGI →
+ * card pattern mapping has one source of truth. */
+static int8_t bgi_fill_to_card(uint8_t bgi_style) {
+    return rip_bgi_fill_to_card(bgi_style);
 }
 
 
@@ -102,13 +127,20 @@ void ripscrip2_init(ripscrip2_state_t *s) {
     /* Engine capabilities */
     s->caps_mask = 0x7F;
 
-    /* Per-port extended attributes (backward compat arrays; authoritative
-     * values live in rip_port_t.alpha / .comp_mode / .zorder). */
-    for (int i = 0; i < 36; i++) {
-        s->port_alpha[i]     = 35; /* fully opaque */
-        s->port_comp_mode[i] = 0;  /* COPY */
-        s->port_zorder[i]    = 0;
-    }
+    /* Per-port extended attributes (backward compat mirror; authoritative
+     * values live in rip_port_t.alpha / .comp_mode / .zorder).
+     *
+     * Match rip_init_first()'s rip_port_t initialization:
+     *   port 0       : alpha=35 (fully opaque), comp=0, z=0   — protected fullscreen
+     *   ports 1..35  : alpha=0 (transparent),   comp=0, z=0   — unallocated
+     *
+     * Previously this loop wrote alpha=35 to all 36 slots, diverging from
+     * rip_port_t for the unallocated ports.  !|2F (RIP_PORT_FLAGS) keeps
+     * both sides in sync after that. */
+    memset(s->port_alpha,     0, sizeof(s->port_alpha));
+    memset(s->port_comp_mode, 0, sizeof(s->port_comp_mode));
+    memset(s->port_zorder,    0, sizeof(s->port_zorder));
+    s->port_alpha[0] = 35;
 
     /* Default VGA palette: first 16 = EGA colors as RGB332 */
     static const uint8_t ega16[16] = {
@@ -155,6 +187,12 @@ static void port_save_state(rip_state_t *rs, uint8_t idx)
     p->font_id      = rs->font_id;
     p->font_size    = rs->font_size;
     p->font_dir     = rs->font_dir;
+    p->font_hjust   = rs->font_hjust;
+    p->font_vjust   = rs->font_vjust;
+    p->font_attrib  = rs->font_attrib;
+    p->font_ext_id   = rs->font_ext_id;
+    p->font_ext_attr = rs->font_ext_attr;
+    p->font_ext_size = rs->font_ext_size;
 }
 
 /*
@@ -166,6 +204,7 @@ static void port_save_state(rip_state_t *rs, uint8_t idx)
 static void port_load_state(rip_state_t *rs, uint8_t idx)
 {
     rip_port_t *p = &rs->ports[idx];
+    int8_t card_pat;
 
     rs->draw_x       = p->draw_x;
     rs->draw_y       = p->draw_y;
@@ -179,6 +218,12 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
     rs->font_id      = p->font_id;
     rs->font_size    = p->font_size;
     rs->font_dir     = p->font_dir;
+    rs->font_hjust   = p->font_hjust;
+    rs->font_vjust   = p->font_vjust;
+    rs->font_attrib  = p->font_attrib;
+    rs->font_ext_id   = p->font_ext_id;
+    rs->font_ext_attr = p->font_ext_attr;
+    rs->font_ext_size = p->font_ext_size;
 
     /* Sync rip_state_t viewport from port */
     rs->vp_x0 = p->vp_x0;
@@ -190,10 +235,13 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
     draw_set_clip(p->vp_x0, p->vp_y0, p->vp_x1, p->vp_y1);
 
     /* Sync draw layer state */
+    draw_set_color(rs->palette[p->draw_color & 0x0F]);
     draw_set_write_mode(p->write_mode);
     draw_set_pos(p->draw_x, p->draw_y);
     draw_set_line_style(p->line_style, p->line_thick);
-    draw_set_fill_style(p->fill_pattern, p->fill_color);
+    card_pat = bgi_fill_to_card(p->fill_pattern);
+    draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
+                        rs->palette[p->fill_color & 0x0F]);
 }
 
 /*
@@ -215,6 +263,12 @@ static void port_set_defaults(rip_port_t *p)
     p->font_id      = 0;
     p->font_size    = 1;
     p->font_dir     = 0;   /* horizontal */
+    p->font_hjust   = 0;
+    p->font_vjust   = 0;
+    p->font_attrib  = 0;
+    p->font_ext_id  = 0;
+    p->font_ext_attr = 0;
+    p->font_ext_size = 0;
     p->origin_x     = 0;
     p->origin_y     = 0;
     p->alpha        = 35;  /* fully opaque */
@@ -257,6 +311,7 @@ static bool rip_port_create(rip_state_t *rs, uint8_t idx,
     p->allocated = true;
 
     /* Scale EGA (640x350) viewport to card (640x400) pixel coords */
+    clamp_ega_rect(&x0, &y0, &x1, &y1);
     p->vp_x0 = x0;
     p->vp_y0 = scale_y(y0);
     p->vp_x1 = x1;
@@ -309,7 +364,6 @@ static bool rip_port_destroy(rip_state_t *rs, uint8_t idx, bool force)
  * rip_port_switch -- save current port state and load new port state.
  *
  * Mirrors DLL ripSwitchPort / sub_03393C:
- *   - RIP_PORT_IDX_CURRENT (0xFF) = re-apply current port (no index change)
  *   - If the target port is not allocated, auto-create it with a full-screen
  *     viewport (DLL creates a screen-type stub on demand)
  *   - Saves active port's drawing state before switching
@@ -326,9 +380,6 @@ static bool rip_port_destroy(rip_state_t *rs, uint8_t idx, bool force)
 static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
                              uint8_t switch_flags)
 {
-    if (new_idx == RIP_PORT_IDX_CURRENT)
-        new_idx = rs->active_port;  /* re-apply: reloads state, no index change */
-
     if (new_idx >= RIP_MAX_PORTS)
         return false;
 
@@ -420,8 +471,18 @@ static void rip_port_copy(rip_state_t *rs,
     if (w <= 0 || h <= 0)
         return;
 
-    draw_set_write_mode(write_mode);
-    draw_copy_rect(rsx0, rsy0, rdx, rdy, w, h);
+    if (write_mode == DRAW_MODE_COPY) {
+        draw_copy_rect(rsx0, rsy0, rdx, rdy, w, h);
+    } else {
+        size_t bytes = (size_t)w * (size_t)h;
+        uint8_t *scratch = (uint8_t *)malloc(bytes);
+        if (!scratch)
+            return;
+        draw_save_region(rsx0, rsy0, w, h, scratch);
+        draw_set_write_mode(write_mode);
+        draw_restore_region(rdx, rdy, w, h, scratch);
+        free(scratch);
+    }
 
     /* Restore active port's write mode */
     draw_set_write_mode(rs->ports[rs->active_port].write_mode);
@@ -482,10 +543,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *
      * Wire format: !|2p<port_num:1><dest_port:1><reserved:2>|
      *
-     * port_num sentinels:
-     *   0-35              = specific port
-     *   RIP_PORT_IDX_ALL  = delete all non-protected ports (except 0)
-     *   RIP_PORT_IDX_CURRENT = delete the active port
+     * port_num: specific port in the on-wire 0-35 range
      * dest_port: ignored (DLL ignores it too)
      */
     case RIP2_CMD_PORT_DELETE: {
@@ -493,14 +551,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
             break;
         uint8_t port_num = (uint8_t)mega1(raw + 0);
 
-        if (port_num == RIP_PORT_IDX_ALL) {
-            for (int i = 1; i < RIP_MAX_PORTS; i++)
-                rip_port_destroy(rs, (uint8_t)i, false);
-        } else if (port_num == RIP_PORT_IDX_CURRENT) {
-            rip_port_destroy(rs, rs->active_port, false);
-        } else {
-            rip_port_destroy(rs, port_num, false);
-        }
+        rip_port_destroy(rs, port_num, false);
         break;
     }
 
@@ -508,7 +559,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *
      * Wire format: !|2s<port_num:1><flags:2><reserved:3>|
      *
-     * port_num: 0-35 or RIP_PORT_IDX_CURRENT (0xFF)
+     * port_num: 0-35
      * flags (2-digit MegaNum, OR of):
      *   1 = protect dest, 2 = unprotect dest
      *   4 = protect src,  8 = unprotect src
@@ -533,7 +584,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *              write_mode@18
      */
     case RIP2_CMD_PORT_COPY: {
-        if (raw_len < 17)
+        if (raw_len < 18)
             break;
         uint8_t src_port = (uint8_t)mega1(raw + 0);
         int16_t sx0      = (int16_t)mega2l(raw + 1);
@@ -647,9 +698,9 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
             uint8_t color = (uint8_t)(((r & 7) << 5) | ((g & 7) << 2) | (b & 3));
             draw_set_color(color);
             if (vertical)
-                draw_hline(gx, gy + i, gw);
+                draw_hline(gx, (int16_t)(gy + i), gw);
             else
-                draw_vline(gx + i, gy, gh);
+                draw_vline((int16_t)(gx + i), gy, gh);
         }
         break;
     }

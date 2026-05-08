@@ -18,8 +18,8 @@
  * SHR scanline control bytes) that don't map to draw_*() primitives.
  * All UHR/Mosaic/protocol drawing MUST go through draw_*().
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #pragma once

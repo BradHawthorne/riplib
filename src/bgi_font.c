@@ -18,17 +18,22 @@
  * by multiplying by the RIPscrip charsize (1-10) and draws lines
  * using draw_line() from the unified drawing engine.
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #include "bgi_font.h"
 #include "drawing.h"
+#include <limits.h>
 
 /* Sign-extend a 7-bit value to int16_t */
 static int16_t sign7(uint8_t v) {
     if (v & 0x40) return (int16_t)(v | 0xFF80);  /* negative */
     return (int16_t)(v & 0x3F);
+}
+
+static uint16_t read_u16le(const uint8_t *p) {
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
 bool bgi_font_parse(bgi_font_t *font, const uint8_t *data, int size) {
@@ -74,7 +79,7 @@ bool bgi_font_parse(bgi_font_t *font, const uint8_t *data, int size) {
     if (p < 0) return false;
 
     /* Parse the 16-byte font header at '+' */
-    font->num_chars  = data[p + 1] | (data[p + 2] << 8);
+    font->num_chars  = (uint16_t)(data[p + 1] | (data[p + 2] << 8));
     font->first_char = data[p + 4];
 
     uint16_t stroke_off = data[p + 5] | (data[p + 6] << 8);
@@ -87,7 +92,7 @@ bool bgi_font_parse(bgi_font_t *font, const uint8_t *data, int size) {
     /* Stroke offset table: 2 bytes LE per character, starting at '+' + 16 */
     int off_start = p + 16;
     if (off_start + font->num_chars * 2 > size) return false;
-    font->offsets = (const uint16_t *)&data[off_start];
+    font->offsets = &data[off_start];
 
     /* Width table: 1 byte per character, after stroke offset table */
     int wid_start = off_start + font->num_chars * 2;
@@ -105,17 +110,23 @@ bool bgi_font_parse(bgi_font_t *font, const uint8_t *data, int size) {
     return true;
 }
 
-/* Render one character, returns X advance */
+/* Render one character, returns X advance.
+ *
+ * italic_shear: 0 = no italic; otherwise the per-stroke X is offset by
+ * (dy / italic_shear) pixels — a positive shear factor produces glyphs
+ * that lean right (top displaced toward +X).  4 is ~25% slope, which is
+ * a typical italic angle. */
 static int16_t render_char(const bgi_font_t *font,
                             int16_t ox, int16_t oy,
                             uint8_t ch, uint8_t scale,
-                            uint8_t color, uint8_t direction) {
+                            uint8_t color, uint8_t direction,
+                            int italic_shear) {
     if (ch < font->first_char) return 0;
     int idx = ch - font->first_char;
     if (idx >= font->num_chars) return 0;
 
     /* Get stroke data offset for this character */
-    uint16_t soff = font->offsets[idx];
+    uint16_t soff = read_u16le(font->offsets + idx * 2);
     const uint8_t *sp = font->strokes + soff;
     const uint8_t *end = font->data + font->data_size;
 
@@ -135,6 +146,11 @@ static int16_t render_char(const bgi_font_t *font,
         /* Scale coordinates */
         int16_t dx = sx * scale;
         int16_t dy = sy * scale;
+
+        /* Italic: shear X proportional to Y so the top of the glyph
+         * (positive sy in BGI stroke space) leans toward +X. */
+        if (italic_shear > 0)
+            dx = (int16_t)(dx + dy / italic_shear);
 
         if (opcode == 0) {
             /* End of character */
@@ -193,7 +209,7 @@ int16_t bgi_font_draw_string(const bgi_font_t *font,
     int16_t advance = 0;
     for (int i = 0; i < len; i++) {
         int16_t w = render_char(font, x, y, (uint8_t)str[i],
-                                 scale, color, direction);
+                                 scale, color, direction, 0);
         if (direction == 0) {
             x += w;
         } else {
@@ -239,14 +255,13 @@ int16_t bgi_font_draw_string_ex(const bgi_font_t *font,
                               scale, color, direction);
     }
 
-    /* Main string draw (italic handled by shearing the Y baseline) */
+    /* Main string draw — italic handled by per-stroke X shear inside
+     * render_char (real glyph slanting, not a constant translation). */
     if (attrib & BGI_ATTR_ITALIC) {
-        /* Italic: draw char-by-char with X offset proportional to Y.
-         * Shear factor: 0.2 * (top - baseline_offset) */
-        int16_t italic_shear = (font->top > 0 ? font->top : 8) * scale / 5;
         for (int i = 0; i < len; i++) {
-            int16_t w = render_char(font, x + italic_shear, y,
-                                     (uint8_t)str[i], scale, color, direction);
+            int16_t w = render_char(font, x, y,
+                                     (uint8_t)str[i], scale, color, direction,
+                                     /* italic shear: dx += dy/4 ≈ 25° slant */ 4);
             if (direction == 0) x += w;
             else y += w;
             advance += w;
@@ -278,7 +293,7 @@ int16_t bgi_font_string_width(const bgi_font_t *font,
                                uint8_t scale) {
     if (!font || !font->widths || scale == 0) return 0;
 
-    int16_t total = 0;
+    int total = 0;
     for (int i = 0; i < len; i++) {
         uint8_t ch = (uint8_t)str[i];
         if (ch < font->first_char) continue;
@@ -286,5 +301,7 @@ int16_t bgi_font_string_width(const bgi_font_t *font,
         if (idx >= font->num_chars) continue;
         total += font->widths[idx] * scale;
     }
-    return total;
+    if (total > INT16_MAX)
+        return INT16_MAX;
+    return (int16_t)total;
 }

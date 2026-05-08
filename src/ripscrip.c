@@ -9,8 +9,8 @@
  * Reference: TeleGrafix RIPscrip 1.54 specification (RIPSCRIP.DOC)
  * Reference: RIPtermJS (JavaScript implementation)
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #include "ripscrip.h"
@@ -49,8 +49,14 @@ extern uint16_t palette_read_rgb565(uint8_t index);
  * (640×400 = 256 KB), uploaded icon cache, and file staging buffer. */
 #define RIP_PSRAM_ARENA_SIZE (1024u * 1024u)
 
-/* Shared RIPscrip 2.0 extension state */
-static ripscrip2_state_t rip2_state;
+/* Reset the per-frame command-level prefix flags.  Used by the FSM at
+ * every dispatch boundary (CR/LF, '|', error recovery) to start the
+ * next command in a clean Level 0 state. */
+static inline void clear_levels(rip_state_t *s) {
+    s->is_level1 = false;
+    s->is_level2 = false;
+    s->is_level3 = false;
+}
 
 /* BGI stroke fonts (parsed at init, indexed by BGI_FONT_* ID) */
 #define BGI_FONT_COUNT 11  /* 0=bitmap, 1-10=stroke */
@@ -64,16 +70,16 @@ static bool bgi_fonts_loaded = false;
 /* Global parser state (one RIPscrip session at a time) */
 static rip_state_t *g_rip_state = NULL;
 
+static void apply_session_draw_state(rip_state_t *s);
+static void rip_upload_reset(rip_state_t *s);
+static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_len,
+                                   const uint8_t *data, int size);
+
 /* Card->host TX FIFO helper (implemented in main.c / emulator stubs). */
 extern void card_tx_push(const char *buf, int len);
 
 /* FILE UPLOAD — receive BMP/ICN data from host for PSRAM caching */
 #define FILE_UPLOAD_MAX  (128 * 1024)  /* 128KB max per file */
-static uint8_t *upload_buf = NULL;
-static int upload_pos = 0;
-static char upload_name[16];
-static int upload_name_len = 0;
-static bool upload_reading_name = false;
 
 /* ══════════════════════════════════════════════════════════════════
  * MEGANUM DECODER — base-36 parameter encoding
@@ -86,24 +92,107 @@ static int mega_digit(char ch) {
     return 0;
 }
 
-static int mega2(const char *p) {
-    return mega_digit(p[0]) * 36 + mega_digit(p[1]);
+static int16_t mega2(const char *p) {
+    return (int16_t)(mega_digit(p[0]) * 36 + mega_digit(p[1]));
 }
 
-static int mega4(const char *p) {
-    return mega_digit(p[0]) * 46656 + mega_digit(p[1]) * 1296 +
-           mega_digit(p[2]) * 36 + mega_digit(p[3]);
+static int32_t mega4(const char *p) {
+    return (int32_t)(mega_digit(p[0]) * 46656 + mega_digit(p[1]) * 1296 +
+                     mega_digit(p[2]) * 36 + mega_digit(p[3]));
 }
 
 /* Scale RIPscrip Y (640×350) to card Y (640×400).
  * Two variants prevent gaps between adjacent rectangles:
  * scale_y  = floor (for top edges, y-positions, single coords)
  * scale_y1 = ceiling (for bottom edges — ensures adjacent rects touch) */
-static int16_t scale_y(int y) {
+static int16_t scale_y(int16_t y) {
     return (int16_t)((y * 8) / 7);
 }
-static int16_t scale_y1(int y) {
+static int16_t scale_y1(int16_t y) {
     return (int16_t)((y * 8 + 6) / 7);
+}
+
+static void clamp_ega_rect(int16_t *x0, int16_t *y0,
+                           int16_t *x1, int16_t *y1) {
+    int16_t tx0 = *x0;
+    int16_t ty0 = *y0;
+    int16_t tx1 = *x1;
+    int16_t ty1 = *y1;
+
+    if (tx0 > tx1) { int16_t t = tx0; tx0 = tx1; tx1 = t; }
+    if (ty0 > ty1) { int16_t t = ty0; ty0 = ty1; ty1 = t; }
+
+    if (tx0 < 0) tx0 = 0;
+    if (ty0 < 0) ty0 = 0;
+    if (tx1 > 639) tx1 = 639;
+    if (ty1 > 349) ty1 = 349;
+
+    *x0 = tx0;
+    *y0 = ty0;
+    *x1 = tx1;
+    *y1 = ty1;
+}
+
+static bool rip_filename_is_safe(const char *name, int len) {
+    if (!name || len <= 0)
+        return false;
+
+    for (int i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)name[i];
+        if (c < 0x20u || c == 0x7Fu)
+            return false;
+        if (c == '/' || c == '\\' || c == ':')
+            return false;
+        if (c == '.' && i + 1 < len && name[i + 1] == '.')
+            return false;
+    }
+
+    return true;
+}
+
+static void rip_upload_reset(rip_state_t *s) {
+    if (!s) return;
+    s->upload_pos = 0;
+    s->upload_name[0] = '\0';
+    s->upload_name_len = 0;
+    s->upload_name_remaining = 0;
+    s->upload_name_overflow = false;
+    s->upload_reading_name = false;
+}
+
+static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_len,
+                                   const uint8_t *data, int size) {
+    uint16_t icn_w;
+    uint16_t icn_h;
+    size_t pixel_count;
+    uint8_t *pixels;
+    rip_icon_t existing;
+
+    if (!s || !data || !rip_filename_is_safe(name, name_len))
+        return;
+    if (!rip_icn_measure(data, size, &icn_w, &icn_h))
+        return;
+
+    pixel_count = (size_t)icn_w * (size_t)icn_h;
+    if (pixel_count == 0 || pixel_count > RIP_CLIPBOARD_MAX)
+        return;
+    if (rip_icon_lookup(&s->icon_state, name, name_len, &existing))
+        return;
+    if (rip_icon_cache_count(&s->icon_state) >= RIP_ICON_CACHE_MAX)
+        return;
+
+    pixels = (uint8_t *)psram_arena_alloc(&s->psram_arena, (uint32_t)pixel_count);
+    if (!pixels)
+        return;
+
+    if (!rip_icn_parse(data, size, pixels, &icn_w, &icn_h))
+        return;
+
+    (void)rip_icon_cache_pixels(&s->icon_state, name, name_len, pixels, icn_w, icn_h);
+}
+
+static uint8_t palette_slot(int idx) {
+    return (uint8_t)(240 + idx);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -158,7 +247,7 @@ static uint16_t ega64_to_rgb565(uint8_t ega) {
 void rip_save_palette(rip_state_t *s) {
     if (!s) return;
     for (int i = 0; i < 16; i++)
-        s->saved_palette_rgb565[i] = palette_read_rgb565(240 + i);
+        s->saved_palette_rgb565[i] = palette_read_rgb565(palette_slot(i));
 }
 
 /* Re-apply EGA palette to hardware — called when the EMU's xterm palette
@@ -180,10 +269,10 @@ void rip_apply_palette(void) {
     }
     if (has_snapshot) {
         for (int i = 0; i < 16; i++)
-            palette_write_rgb565(240 + i, g_rip_state->saved_palette_rgb565[i]);
+            palette_write_rgb565(palette_slot(i), g_rip_state->saved_palette_rgb565[i]);
     } else {
         for (int i = 0; i < 16; i++)
-            palette_write_rgb565(240 + i, ega_default_rgb565[i]);
+            palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
     }
 }
 
@@ -191,24 +280,38 @@ void rip_apply_palette(void) {
  * Performs the full memset, arena reservation, drawing defaults, and BGI
  * font parse.  Calling this on a mid-session protocol switch would wipe
  * session state (clipboard, mouse regions, text variables, PSRAM arena).
- * For protocol switches, call rip_activate() instead. */
+ * For protocol switches, call rip_activate() instead.
+ *
+ * IMPORTANT API CONTRACT: the caller MUST zero `s` before the very first
+ * call (e.g. via memset or by using a static-storage instance).  The
+ * function reads s->psram_arena to decide whether an arena is already
+ * reserved — if the struct contains uninitialized stack garbage, that
+ * read is UB and the arena allocation may be skipped.  All callers in
+ * this tree (test fixtures, demo, embedded boot) honor this contract. */
 void rip_init_first(rip_state_t *s) {
-    /* Reserve the PSRAM arena before the memset so we can restore the
-     * already-allocated block.  On the very first call, size == 0 and
-     * psram_arena_init() acquires the block from the global bump allocator. */
-    psram_arena_t saved_arena = s->psram_arena;
+    psram_arena_t saved_arena;
+
+    if (!s) return;
+
+    /* Snapshot the arena state.  After memset we will restore it so a
+     * second rip_init_first() call (mid-session re-init) does not leak
+     * the previously allocated PSRAM block.  On the first call, the
+     * caller-zeroed struct has saved_arena.base == NULL which is the
+     * "no arena yet" signal that drives psram_arena_init() below. */
+    saved_arena = s->psram_arena;
     memset(s, 0, sizeof(*s));
     s->psram_arena = saved_arena;
 
-    /* First call: reserve the arena block from global PSRAM. */
-    if (s->psram_arena.size == 0)
+    /* Allocate arena on first init.  Treat (base==NULL || size==0) as
+     * "needs alloc" — covers both fresh zero-init and prior failed
+     * allocation states.  A previously-successful arena has base!=NULL
+     * and size>0, so we preserve it across re-init. */
+    if (s->psram_arena.base == NULL || s->psram_arena.size == 0)
         psram_arena_init(&s->psram_arena, RIP_PSRAM_ARENA_SIZE);
 
     /* Bind the icon module to this arena.  Cache is cleared because we just
      * memset'd — all PSRAM pixel pointers from a previous session are gone. */
-    rip_icon_set_arena(&s->psram_arena);
-
-    upload_buf = NULL;
+    rip_icon_set_arena(&s->icon_state, &s->psram_arena);
 
     g_rip_state = s;
     s->draw_color = 15; /* white */
@@ -220,15 +323,15 @@ void rip_init_first(rip_state_t *s) {
     s->tw_x1 = 639;
     s->tw_y1 = 349;
     s->vp_x0 = 0; s->vp_y0 = 0;
-    s->vp_x1 = 639; s->vp_y1 = 349;
+    s->vp_x1 = 639; s->vp_y1 = 399;
 
     /* Default palette: map EGA indices 0-15 to framebuffer values 240-255.
      * This avoids conflicting with xterm-256 colors at indices 0-239.
      * RIP draw commands write framebuffer value s->palette[color], and the
      * display converts via emu->palette[240+i] → EGA RGB565. */
     for (int i = 0; i < 16; i++) {
-        s->palette[i] = 240 + i;
-        palette_write_rgb565(240 + i, ega_default_rgb565[i]);
+        s->palette[i] = palette_slot(i);
+        palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
     }
 
     /* Resolution mode: 0=EGA(640×350). memset zeroed it; document the default.
@@ -248,7 +351,7 @@ void rip_init_first(rip_state_t *s) {
     /* FIX TX2: refresh_suppress starts false (normal refresh enabled). */
     s->refresh_suppress = false;
 
-    ripscrip2_init(&rip2_state);
+    ripscrip2_init(&s->rip2_state);
 
     /* Parse all BGI stroke fonts (flash data, parsed once at boot). */
     if (!bgi_fonts_loaded) {
@@ -283,6 +386,12 @@ void rip_init_first(rip_state_t *s) {
         p0->write_mode   = 0;     /* COPY */
         p0->line_thick   = 1;
         p0->font_size    = 1;
+        p0->font_hjust   = 0;
+        p0->font_vjust   = 0;
+        p0->font_attrib  = 0;
+        p0->font_ext_id  = 0;
+        p0->font_ext_attr = 0;
+        p0->font_ext_size = 0;
         p0->alpha        = 35;    /* fully opaque */
     }
     s->active_port = 0;
@@ -313,10 +422,8 @@ void rip_activate(rip_state_t *s) {
      * deactivation; rip_apply_palette() writes it back to hardware. */
     rip_apply_palette();
 
-    /* Reset the viewport clip to full screen so stale clip regions from
-     * the previous protocol don't constrain RIPscrip drawing. */
-    s->vp_x0 = 0; s->vp_y0 = 0;
-    s->vp_x1 = 639; s->vp_y1 = 349;
+    /* Re-apply the active session's drawing and clip state. */
+    apply_session_draw_state(s);
 }
 
 /* Codex FIX 3: Session disconnect reset.
@@ -334,19 +441,22 @@ void rip_activate(rip_state_t *s) {
  * Codex FIX 5: Clears query_pending / query_var_name so an unanswered
  * $QUERY$ from the disconnected session cannot affect the next session. */
 void rip_session_reset(rip_state_t *s) {
+    g_rip_state = s;
+
     /* Reclaim all PSRAM arena allocations (clipboard pixels, cached icon
      * pixels, upload staging buffer) from the disconnected session. */
     psram_arena_reset(&s->psram_arena);
 
     /* Rebind the icon cache to the freshly-reset arena.  This also clears
      * the runtime cache so stale pixel pointers into the old arena are gone. */
-    rip_icon_set_arena(&s->psram_arena);
+    rip_icon_set_arena(&s->icon_state, &s->psram_arena);
 
     /* Codex FIX 4: Flush the pending icon file request queue. */
-    rip_icon_clear_requests();
+    rip_icon_clear_requests(&s->icon_state);
 
     /* Clear upload staging pointer — it pointed into the now-reset arena. */
-    upload_buf = NULL;
+    s->upload_buf = NULL;
+    rip_upload_reset(s);
 
     /* Clear mouse regions from the previous session. */
     memset(s->mouse_regions, 0, sizeof(s->mouse_regions));
@@ -365,15 +475,68 @@ void rip_session_reset(rip_state_t *s) {
     /* Clear clipboard — pixel data was in the arena, now invalid. */
     s->clipboard.data  = NULL;
     s->clipboard.valid = false;
+    s->clipboard.width = 0;
+    s->clipboard.height = 0;
 
     /* Clear application variables. */
     memset(s->app_vars, 0, sizeof(s->app_vars));
 
+    /* Reset stream preprocessor state. */
+    s->preproc_state = 0;
+    s->preproc_len = 0;
+    s->preproc_suppress = false;
+    s->preproc_depth = 0;
+    s->preproc_overflow = 0;
+    memset(s->preproc_parent_suppress, 0, sizeof(s->preproc_parent_suppress));
+    memset(s->preproc_branch_active, 0, sizeof(s->preproc_branch_active));
+    memset(s->preproc_branch_taken, 0, sizeof(s->preproc_branch_taken));
+
     /* Reset ripscrip2 overflow state. */
-    ripscrip2_init(&rip2_state);
+    ripscrip2_init(&s->rip2_state);
+
+    /* Reset parser and drawing defaults for the next session. */
+    s->state = RIP_ST_IDLE;
+    s->cmd_len = 0;
+    s->cmd_char = '\0';
+    clear_levels(s);
+    s->line_cont = false;
+    s->last_char = 0;
+    s->esc_detect = 0;
+    s->utf8_pipe_pending = false;
+    s->draw_x = 0;
+    s->draw_y = 0;
+    s->draw_color = 15;
+    s->back_color = 0;
+    s->write_mode = 0;
+    s->line_style = 0;
+    s->line_thick = 1;
+    s->fill_pattern = 1;
+    s->fill_color = 15;
+    s->font_id = 0;
+    s->font_dir = 0;
+    s->font_size = 1;
+    s->font_hjust = 0;
+    s->font_vjust = 0;
+    s->font_attrib = 0;
+    s->font_ext_id = 0;
+    s->font_ext_attr = 0;
+    s->font_ext_size = 0;
+    s->tw_x0 = 0;
+    s->tw_y0 = 0;
+    s->tw_x1 = 639;
+    s->tw_y1 = 349;
+    s->tw_wrap = 0;
+    s->tw_font_size = 0;
+    s->tw_cur_x = 0;
+    s->tw_cur_y = 0;
+    s->tw_active = false;
+    s->rip_has_drawn = false;
+    s->cursor_repositioned = false;
+    s->refresh_suppress = false;
 
     /* Reset Drawing Port table — deallocate all ports except port 0.
      * Port 0 gets its state refreshed to defaults; other slots are cleared. */
+    memset(&s->ports[0], 0, sizeof(rip_port_t));
     for (int i = 1; i < RIP_MAX_PORTS; i++)
         memset(&s->ports[i], 0, sizeof(rip_port_t));
     {
@@ -389,10 +552,18 @@ void rip_session_reset(rip_state_t *s) {
         p0->write_mode   = 0;
         p0->line_thick   = 1;
         p0->font_size    = 1;
+        p0->font_hjust   = 0;
+        p0->font_vjust   = 0;
+        p0->font_attrib  = 0;
+        p0->font_ext_id  = 0;
+        p0->font_ext_attr = 0;
+        p0->font_ext_size = 0;
         p0->alpha        = 35;
     }
     s->active_port = 0;
-    draw_set_clip(0, 0, 639, 399);
+    s->vp_x0 = 0; s->vp_y0 = 0;
+    s->vp_x1 = 639; s->vp_y1 = 399;
+    apply_session_draw_state(s);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -407,17 +578,43 @@ void rip_session_reset(rip_state_t *s) {
  * BGI 0 (EMPTY) needs special handling — don't fill at all.
  * ══════════════════════════════════════════════════════════════════ */
 
-/* Map BGI fill_style to card pattern_id. Returns -1 for EMPTY_FILL. */
+/* Map BGI fill_style to card pattern_id. Returns -1 for EMPTY_FILL.
+ *
+ * BGI styles (Borland Graphics Interface):
+ *   0 EMPTY 1 SOLID 2 LINE 3 LTSLASH 4 SLASH 5 BKSLASH
+ *   6 LTBKSLASH 7 HATCH 8 XHATCH 9 INTERLEAVE 10 WIDE_DOT 11 CLOSE_DOT 12 USER
+ *
+ * Card fill_patterns[] (drawing.c): 0=solid 1=50%checker 2=diag\ 3=diag/
+ *   4=horizontal 5=vertical 6=hatch 7=lightdiag 8=interleave 9=widedot
+ *   10=closedot.  Slot 11 = user_pattern[].
+ *
+ * Previous mapping (bgi_style-1) was incorrect — BGI 2 LINE is supposed
+ * to be horizontal lines but mapped to the 50% checker.  This table maps
+ * each BGI style to the closest visually-matching card pattern.
+ *
+ * Exposed via include/ripscrip.h so tests and ripscrip2.c can share it. */
+int8_t rip_bgi_fill_to_card(uint8_t bgi_style) {
+    switch (bgi_style) {
+        case 0:  return -1;  /* EMPTY  — caller skips fill */
+        case 1:  return 0;   /* SOLID  → solid */
+        case 2:  return 4;   /* LINE   → horizontal */
+        case 3:  return 7;   /* LTSLASH→ light diagonal (sparse /) */
+        case 4:  return 3;   /* SLASH  → diagonal / */
+        case 5:  return 2;   /* BKSLASH→ diagonal \ */
+        case 6:  return 2;   /* LTBKSLASH→ diagonal \ (no lighter variant) */
+        case 7:  return 6;   /* HATCH  → cross-hatch */
+        case 8:  return 1;   /* XHATCH → 50% checker (closest dense X feel) */
+        case 9:  return 8;   /* INTERLEAVE → CC/33 interleave */
+        case 10: return 9;   /* WIDE_DOT */
+        case 11: return 10;  /* CLOSE_DOT */
+        case 12: return 11;  /* USER → user_pattern */
+        default: return 0;   /* unknown → solid */
+    }
+}
+
+/* Internal alias retained for the rest of this TU. */
 static int8_t bgi_fill_to_card(uint8_t bgi_style) {
-    if (bgi_style == 0) return -1; /* EMPTY — caller should not fill */
-    if (bgi_style == 1) return 0;  /* SOLID → card 0 (fast path) */
-    if (bgi_style >= 2 && bgi_style <= 7) return bgi_style - 1; /* LINE..LTBKSLASH → 1..6 */
-    if (bgi_style == 8) return 7;  /* XHATCH → card 7 (closest cross-hatch variant) */
-    if (bgi_style == 9) return 8;  /* INTERLEAVE → card 8 (native, was approximate) */
-    if (bgi_style == 10) return 9; /* WIDE_DOT → card 9 (native, was approximate) */
-    if (bgi_style == 11) return 10;/* CLOSE_DOT → card 10 (native, was approximate) */
-    if (bgi_style == 12) return 11;/* USER → card user pattern */
-    return 0; /* fallback: solid */
+    return rip_bgi_fill_to_card(bgi_style);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -502,7 +699,7 @@ static int rip_expand_variables(rip_state_t *s,
             if (s->host_date[0] != '\0') {
                 vval_len = (int)strnlen(s->host_date, sizeof(s->host_date) - 1);
                 if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
-                memcpy(val, s->host_date, vval_len);
+                memcpy(val, s->host_date, (size_t)vval_len);
             } else {
                 /* Host not yet synced — fall back to RP2350 RTC */
                 time_t now = time(NULL);
@@ -517,7 +714,7 @@ static int rip_expand_variables(rip_state_t *s,
             if (s->host_time[0] != '\0') {
                 vval_len = (int)strnlen(s->host_time, sizeof(s->host_time) - 1);
                 if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
-                memcpy(val, s->host_time, vval_len);
+                memcpy(val, s->host_time, (size_t)vval_len);
             } else {
                 /* Host not yet synced — fall back to RP2350 RTC */
                 time_t now = time(NULL);
@@ -541,7 +738,7 @@ static int rip_expand_variables(rip_state_t *s,
             int idx = vname[3] - '0';
             vval_len = (int)strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
             if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
-            memcpy(val, s->app_vars[idx], vval_len);
+            memcpy(val, s->app_vars[idx], (size_t)vval_len);
 
         /* FIX M3: Sound text variables (CB_PLAY_SOUND callback equivalent).
          * In RIPSCRIP.DLL the host filled the sound callback slot and the DLL
@@ -705,9 +902,7 @@ static int rip_expand_variables(rip_state_t *s,
          * A2GSPU: reset the FSM to IDLE so the next !| starts fresh. */
         } else if (vlen == 5 && memcmp(vname, "ABORT", 5) == 0) {
             s->state = RIP_ST_IDLE;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             s->cmd_len = 0;
             val[0] = '\0';
             vval_len = 0;
@@ -717,7 +912,7 @@ static int rip_expand_variables(rip_state_t *s,
             /* Recognized variable — substitute its value */
             int copy = vval_len;
             if (o + copy > max_out - 1) copy = max_out - 1 - o;
-            memcpy(out + o, val, copy);
+            memcpy(out + o, val, (size_t)copy);
             o += copy;
             i = j + 1; /* advance past closing '$' */
         } else {
@@ -737,7 +932,8 @@ static int rip_expand_variables(rip_state_t *s,
 static void rip_tw_putchar(rip_state_t *s, uint8_t ch) {
     int16_t tw_x1_s = s->tw_x1;
     int16_t tw_y1_s = scale_y1(s->tw_y1);
-    int char_w = 8, char_h = 16;
+    const int16_t char_w = 8;
+    const int16_t char_h = 16;
 
     if (ch == '\r') {
         s->tw_cur_x = s->tw_x0;
@@ -748,14 +944,16 @@ static void rip_tw_putchar(rip_state_t *s, uint8_t ch) {
         /* Scroll if past bottom of text window */
         if (s->tw_cur_y + char_h > tw_y1_s) {
             int16_t tw_y0_s = scale_y(s->tw_y0);
+            int16_t tw_w = (int16_t)(tw_x1_s - s->tw_x0 + 1);
+            int16_t tw_h = (int16_t)(tw_y1_s - tw_y0_s + 1);
             draw_copy_rect(s->tw_x0, tw_y0_s + char_h,
                            s->tw_x0, tw_y0_s,
-                           tw_x1_s - s->tw_x0 + 1,
-                           tw_y1_s - tw_y0_s + 1 - char_h);
+                           tw_w,
+                           (int16_t)(tw_h - char_h));
             /* Clear the last line */
             draw_set_color(0);
-            draw_rect(s->tw_x0, tw_y1_s - char_h + 1,
-                      tw_x1_s - s->tw_x0 + 1, char_h, true);
+            draw_rect(s->tw_x0, (int16_t)(tw_y1_s - char_h + 1),
+                      tw_w, char_h, true);
             draw_set_color(s->palette[s->draw_color & 0x0F]);
             s->tw_cur_y = tw_y1_s - char_h;
         }
@@ -783,7 +981,7 @@ static void rip_tw_putchar(rip_state_t *s, uint8_t ch) {
     /* Draw the character */
     uint8_t tc = s->palette[s->draw_color & 0x0F];
     draw_text(s->tw_cur_x, s->tw_cur_y, (const char *)&ch, 1,
-              NULL, char_h, tc, 0xFF);
+              NULL, 16u, tc, 0xFF);
     s->tw_cur_x += char_w;
 
     /* Wrap if past right edge (non-wrap mode: just clip) */
@@ -799,8 +997,7 @@ static void rip_tw_putchar(rip_state_t *s, uint8_t ch) {
  * MOUSE HIT-TEST — dispatches click to matching region
  * ══════════════════════════════════════════════════════════════════ */
 
-void rip_mouse_event_ext(int16_t x, int16_t y, bool clicked) {
-    rip_state_t *s = g_rip_state;
+void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked) {
     if (!s || !clicked) return;
 
     for (int i = 0; i < s->num_mouse_regions; i++) {
@@ -831,7 +1028,8 @@ void rip_mouse_event_ext(int16_t x, int16_t y, bool clicked) {
                 draw_set_write_mode(DRAW_MODE_XOR);
                 draw_set_color(0xFF);
                 draw_rect(r->x0, r->y0,
-                          r->x1 - r->x0 + 1, r->y1 - r->y0 + 1, true);
+                          (int16_t)(r->x1 - r->x0 + 1),
+                          (int16_t)(r->y1 - r->y0 + 1), true);
                 draw_set_write_mode(s->write_mode);
                 draw_set_color(s->palette[s->draw_color & 0x0F]);
                 return;
@@ -860,37 +1058,53 @@ void rip_mouse_event_ext(int16_t x, int16_t y, bool clicked) {
     }
 }
 
+void rip_mouse_event_ext(int16_t x, int16_t y, bool clicked) {
+    rip_mouse_event_state(g_rip_state, x, y, clicked);
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * FILE UPLOAD — receive BMP/ICN data from host for PSRAM caching
  * ══════════════════════════════════════════════════════════════════ */
 
-void rip_file_upload_begin(uint8_t name_len) {
-    if (!upload_buf && g_rip_state)
-        upload_buf = (uint8_t *)psram_arena_alloc(&g_rip_state->psram_arena,
-                                                  FILE_UPLOAD_MAX);
-    upload_pos = 0;
-    upload_name_len = 0;
-    upload_reading_name = (name_len > 0);
+void rip_file_upload_begin_state(rip_state_t *s, uint8_t name_len) {
+    if (!s) return;
+    if (!s->upload_buf)
+        s->upload_buf = (uint8_t *)psram_arena_alloc(&s->psram_arena,
+                                                     FILE_UPLOAD_MAX);
+    rip_upload_reset(s);
+    s->upload_name_remaining = name_len;
+    s->upload_name_overflow = (name_len >= sizeof(s->upload_name));
+    s->upload_reading_name = (name_len > 0);
     /* Name bytes follow as FILE_UPLOAD_DATA writes */
 }
 
-void rip_file_upload_byte(uint8_t b) {
-    if (upload_reading_name) {
-        if (upload_name_len < 15) {
-            upload_name[upload_name_len++] = b;
-            upload_name[upload_name_len] = '\0';
+void rip_file_upload_byte_state(rip_state_t *s, uint8_t b) {
+    if (!s) return;
+    if (s->upload_reading_name) {
+        if (s->upload_name_len < (int)sizeof(s->upload_name) - 1) {
+            s->upload_name[s->upload_name_len++] = (char)b;
+            s->upload_name[s->upload_name_len] = '\0';
+        } else {
+            s->upload_name_overflow = true;
         }
-        if (b == '\0' || upload_name_len >= 12) {
-            upload_reading_name = false; /* name complete, data follows */
+        if (s->upload_name_remaining > 0)
+            s->upload_name_remaining--;
+        if (s->upload_name_remaining == 0) {
+            s->upload_reading_name = false; /* name complete, data follows */
         }
         return;
     }
-    if (upload_buf && upload_pos < FILE_UPLOAD_MAX)
-        upload_buf[upload_pos++] = b;
+    if (s->upload_buf && s->upload_pos < FILE_UPLOAD_MAX)
+        s->upload_buf[s->upload_pos++] = b;
 }
 
-void rip_file_upload_end(void) {
-    if (!upload_buf || upload_pos < 4) return;
+void rip_file_upload_end_state(rip_state_t *s) {
+    if (!s) return;
+    if (!s->upload_buf || s->upload_pos < 4 ||
+        s->upload_reading_name || s->upload_name_remaining != 0) {
+        rip_upload_reset(s);
+        return;
+    }
 
     /* RAF archive support — requires rip_raf.h (not in standalone RIPlib) */
 #ifdef RIPLIB_HAS_RAF
@@ -899,16 +1113,15 @@ void rip_file_upload_end(void) {
      * at buf[0x10] and decodes each 0x13-byte index entry via XOR (sub_0756C4).
      * When the host transfers a .RAF archive, we unpack every member into the
      * PSRAM icon cache so subsequent LOAD_ICON commands find them immediately. */
-    if (upload_pos >= 0x64 + 4 &&
-        (uint32_t)(upload_buf[0x10]       |
-                  ((uint32_t)upload_buf[0x11] << 8) |
-                  ((uint32_t)upload_buf[0x12] << 16) |
-                  ((uint32_t)upload_buf[0x13] << 24)) == RAF_MAGIC_SQSH) {
+    if (s->upload_pos >= 0x64 + 4 &&
+        (uint32_t)(s->upload_buf[0x10]       |
+                  ((uint32_t)s->upload_buf[0x11] << 8) |
+                  ((uint32_t)s->upload_buf[0x12] << 16) |
+                  ((uint32_t)s->upload_buf[0x13] << 24)) == RAF_MAGIC_SQSH) {
 
         raf_archive_t raf;
-        if (g_rip_state &&
-            raf_open(&raf, upload_buf, (uint32_t)upload_pos,
-                     &g_rip_state->psram_arena)) {
+        if (raf_open(&raf, s->upload_buf, (uint32_t)s->upload_pos,
+                     &s->psram_arena)) {
 
             /* Allocate a decompression scratch buffer from the arena.
              * 64 KB covers the largest icon likely to appear in a RAF archive.
@@ -916,8 +1129,7 @@ void rip_file_upload_end(void) {
              * we decompress into a flat buffer and hand off to the existing BMP/ICN
              * parsers. (RVA 0x064D68 rafDecompressEntry, RVA 0x06522A rafInflateBlock) */
             const uint32_t RAF_SCRATCH_MAX = 64u * 1024u;
-            uint8_t *scratch = (uint8_t *)psram_arena_alloc(
-                                   &g_rip_state->psram_arena, RAF_SCRATCH_MAX);
+            uint8_t *scratch = (uint8_t *)malloc(RAF_SCRATCH_MAX);
 
             if (scratch) {
                 for (uint16_t mi = 0; mi < raf.count; mi++) {
@@ -931,64 +1143,52 @@ void rip_file_upload_end(void) {
                      * DLL: ripLoadResource copies raw data and the caller
                      * (e.g. ripImageLoad) dispatches by file extension / magic. */
                     if (scratch[0] == 'B' && scratch[1] == 'M') {
-                        rip_icon_cache_bmp(me->name, (int)strlen(me->name),
+                        rip_icon_cache_bmp(&s->icon_state,
+                                           me->name, (int)strlen(me->name),
                                            scratch, (int)nbytes);
                     } else if (nbytes >= 6) {
-                        /* Try ICN (BGI putimage format) */
-                        uint16_t icn_w = (uint16_t)((scratch[0] | (scratch[1] << 8)) + 1);
-                        uint16_t icn_h = (uint16_t)((scratch[2] | (scratch[3] << 8)) + 1);
-                        uint32_t pixel_count = (uint32_t)icn_w * icn_h;
-                        if (icn_w <= 640 && icn_h <= 400 &&
-                            pixel_count <= RIP_CLIPBOARD_MAX) {
-                            uint8_t *pixels = (uint8_t *)psram_arena_alloc(
-                                                  &g_rip_state->psram_arena, pixel_count);
-                            if (pixels && rip_icn_parse(scratch, (int)nbytes,
-                                                        pixels, &icn_w, &icn_h)) {
-                                rip_icon_cache_pixels(me->name, (int)strlen(me->name),
-                                                      pixels, icn_w, icn_h);
-                            }
-                        }
+                        rip_cache_icn_if_valid(s, me->name, (int)strlen(me->name),
+                                               scratch, (int)nbytes);
                     }
                 }
+                free(scratch);
             }
             /* raf.entries lives in the arena — no explicit free needed. */
         }
-        upload_pos = 0;
-        upload_name_len = 0;
+        rip_upload_reset(s);
         return;
     }
 #endif /* RIPLIB_HAS_RAF */
 
-    /* Try BMP first (check 'BM' magic) */
-    if (upload_buf[0] == 'B' && upload_buf[1] == 'M') {
-        rip_icon_cache_bmp(upload_name, upload_name_len,
-                           upload_buf, upload_pos);
-    } else {
-        /* Try ICN (BGI putimage format — no magic, just validate header) */
-        uint16_t icn_w, icn_h;
-        uint32_t pixel_count;
-        if (upload_pos >= 6) {
-            icn_w = (upload_buf[0] | (upload_buf[1] << 8)) + 1;
-            icn_h = (upload_buf[2] | (upload_buf[3] << 8)) + 1;
-            pixel_count = (uint32_t)icn_w * icn_h;
-            if (icn_w <= 640 && icn_h <= 400 && pixel_count <= RIP_CLIPBOARD_MAX) {
-                uint8_t *pixels = g_rip_state
-                    ? (uint8_t *)psram_arena_alloc(&g_rip_state->psram_arena, pixel_count)
-                    : NULL;
-                if (pixels && rip_icn_parse(upload_buf, upload_pos,
-                                            pixels, &icn_w, &icn_h)) {
-                    /* Manually add to icon cache */
-                    extern bool rip_icon_cache_pixels(const char *name, int name_len,
-                                                      uint8_t *pixels, uint16_t w, uint16_t h);
-                    rip_icon_cache_pixels(upload_name, upload_name_len,
-                                          pixels, icn_w, icn_h);
-                }
-            }
-        }
+    if (s->upload_name_overflow ||
+        !rip_filename_is_safe(s->upload_name, s->upload_name_len)) {
+        rip_upload_reset(s);
+        return;
     }
 
-    upload_pos = 0;
-    upload_name_len = 0;
+    /* Try BMP first (check 'BM' magic) */
+    if (s->upload_buf[0] == 'B' && s->upload_buf[1] == 'M') {
+        rip_icon_cache_bmp(&s->icon_state,
+                           s->upload_name, s->upload_name_len,
+                           s->upload_buf, s->upload_pos);
+    } else {
+        rip_cache_icn_if_valid(s, s->upload_name, s->upload_name_len,
+                               s->upload_buf, s->upload_pos);
+    }
+
+    rip_upload_reset(s);
+}
+
+void rip_file_upload_begin(uint8_t name_len) {
+    rip_file_upload_begin_state(g_rip_state, name_len);
+}
+
+void rip_file_upload_byte(uint8_t b) {
+    rip_file_upload_byte_state(g_rip_state, b);
+}
+
+void rip_file_upload_end(void) {
+    rip_file_upload_end_state(g_rip_state);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1012,16 +1212,27 @@ static bool eval_if_expr(rip_state_t *s, const char *expr) {
     char expanded[128];
     rip_expand_variables(s, expr, (int)strlen(expr), expanded, sizeof(expanded));
 
-    /* != must be checked before = to avoid splitting "!=" on the '=' */
+    /* Check 2-char operators (!=, >=, <=) before 1-char (=, >, <) so
+     * that "5>=5" is parsed as ">=" rather than splitting on '='. */
     char *op = strstr(expanded, "!=");
     if (op) {
         *op = '\0';
-        return strcmp(expanded, op + 2) != 0;
+        return strcmp(expanded, op + 2) != 0;  /* string inequality */
+    }
+    op = strstr(expanded, ">=");
+    if (op) {
+        *op = '\0';
+        return atoi(expanded) >= atoi(op + 2);
+    }
+    op = strstr(expanded, "<=");
+    if (op) {
+        *op = '\0';
+        return atoi(expanded) <= atoi(op + 2);
     }
     op = strchr(expanded, '=');
     if (op) {
         *op = '\0';
-        return strcmp(expanded, op + 1) == 0;
+        return strcmp(expanded, op + 1) == 0;  /* string equality */
     }
     op = strchr(expanded, '>');
     if (op) {
@@ -1038,6 +1249,106 @@ static bool eval_if_expr(rip_state_t *s, const char *expr) {
     return expanded[0] != '\0' && !(expanded[0] == '0' && expanded[1] == '\0');
 }
 
+static void preproc_restore_suppress(rip_state_t *s) {
+    uint8_t idx;
+
+    if (!s) return;
+    if (s->preproc_overflow > 0) {
+        s->preproc_suppress = true;
+        return;
+    }
+    if (s->preproc_depth == 0) {
+        s->preproc_suppress = false;
+        return;
+    }
+
+    idx = (uint8_t)(s->preproc_depth - 1);
+    s->preproc_suppress = s->preproc_parent_suppress[idx] ||
+                          !s->preproc_branch_active[idx];
+}
+
+static void preproc_push_if(rip_state_t *s, const char *expr) {
+    bool parent_suppress;
+    bool branch_active = false;
+    uint8_t idx;
+
+    if (s->preproc_overflow > 0) {
+        s->preproc_overflow++;
+        s->preproc_suppress = true;
+        return;
+    }
+    if (s->preproc_depth >= RIP_PREPROC_MAX_DEPTH) {
+        s->preproc_overflow = 1;
+        s->preproc_suppress = true;
+        return;
+    }
+
+    parent_suppress = s->preproc_suppress;
+    if (!parent_suppress)
+        branch_active = eval_if_expr(s, expr);
+
+    idx = s->preproc_depth++;
+    s->preproc_parent_suppress[idx] = parent_suppress;
+    s->preproc_branch_active[idx] = branch_active;
+    s->preproc_branch_taken[idx] = branch_active;
+    s->preproc_suppress = parent_suppress || !branch_active;
+}
+
+static void preproc_handle_else(rip_state_t *s) {
+    uint8_t idx;
+
+    if (s->preproc_depth == 0) return;
+    if (s->preproc_overflow > 0) {
+        s->preproc_suppress = true;
+        return;
+    }
+
+    idx = (uint8_t)(s->preproc_depth - 1);
+    if (s->preproc_parent_suppress[idx]) {
+        s->preproc_branch_active[idx] = false;
+    } else if (s->preproc_branch_taken[idx]) {
+        s->preproc_branch_active[idx] = false;
+    } else {
+        s->preproc_branch_active[idx] = true;
+        s->preproc_branch_taken[idx] = true;
+    }
+    s->preproc_suppress = s->preproc_parent_suppress[idx] ||
+                          !s->preproc_branch_active[idx];
+}
+
+static void preproc_handle_endif(rip_state_t *s) {
+    if (s->preproc_overflow > 0) {
+        s->preproc_overflow--;
+        preproc_restore_suppress(s);
+        return;
+    }
+    if (s->preproc_depth == 0) return;
+
+    s->preproc_depth--;
+    preproc_restore_suppress(s);
+}
+
+static void preproc_finalize_directive(rip_state_t *s) {
+    const char *dir;
+
+    if (s->preproc_len < (int)sizeof(s->preproc_buf))
+        s->preproc_buf[s->preproc_len] = '\0';
+    else
+        s->preproc_buf[sizeof(s->preproc_buf) - 1] = '\0';
+
+    dir = s->preproc_buf;
+    if (strncmp(dir, "IF ", 3) == 0 || strcmp(dir, "IF") == 0) {
+        const char *expr = (dir[2] == ' ') ? dir + 3 : "";
+        preproc_push_if(s, expr);
+    } else if (strcmp(dir, "ELSE") == 0) {
+        preproc_handle_else(s);
+    } else if (strcmp(dir, "ENDIF") == 0) {
+        preproc_handle_endif(s);
+    }
+
+    s->preproc_len = 0;
+}
+
 /* ══════════════════════════════════════════════════════════════════
  * COMMAND EXECUTION
  * ══════════════════════════════════════════════════════════════════ */
@@ -1045,6 +1356,67 @@ static bool eval_if_expr(rip_state_t *s, const char *expr) {
 static void apply_draw_state(rip_state_t *s) {
     draw_set_color(s->palette[s->draw_color & 0x0F]);
     draw_set_write_mode(s->write_mode);
+}
+
+/* Unescape, variable-expand, justify, and render a text parameter at the
+ * session's current draw position, advancing the cursor by the rendered
+ * width.  Shared by RIP_TEXT ('T') and RIP_TEXT_XY ('@') so that both
+ * commands honor the same backslash escapes, variable substitution,
+ * justification flags, and BGI vs bitmap font selection. */
+static void rip_render_text(rip_state_t *s, const char *raw, int raw_len) {
+    char tbuf[256];
+    char vbuf[256];
+    int tlen;
+
+    if (raw_len <= 0) return;
+    tlen = unescape_text(raw, raw_len, tbuf);
+    tlen = rip_expand_variables(s, tbuf, tlen, vbuf, sizeof(vbuf));
+    if (tlen <= 0) return;
+
+    uint8_t tc = s->palette[s->draw_color & 0x0F];
+    uint8_t fid = s->font_id;
+    uint8_t fscale = s->font_size ? s->font_size : 1;
+    int16_t tx = s->draw_x, ty = s->draw_y;
+
+    bool stroke = (fid > 0 && fid < BGI_FONT_COUNT && bgi_fonts_loaded &&
+                   bgi_fonts[fid].strokes);
+    int16_t tw = stroke
+                 ? bgi_font_string_width(&bgi_fonts[fid], vbuf, tlen, fscale)
+                 : (int16_t)(tlen * 8);
+    int16_t th = stroke ? (int16_t)(bgi_fonts[fid].top * fscale) : 16;
+
+    /* Apply horizontal/vertical justification (DLL: 0=left/bottom,
+     * 1=center, 2=right/top, 3=baseline). */
+    if (s->font_hjust == 1)      tx = (int16_t)(tx - tw / 2);
+    else if (s->font_hjust == 2) tx = (int16_t)(tx - tw);
+    if (s->font_vjust == 0)      ty = (int16_t)(ty - th);
+    else if (s->font_vjust == 1) ty = (int16_t)(ty - th / 2);
+
+    int16_t adv;
+    if (stroke) {
+        adv = bgi_font_draw_string_ex(&bgi_fonts[fid], tx, ty, vbuf, tlen,
+                                       fscale, tc, s->font_dir, s->font_attrib);
+    } else {
+        draw_text(tx, ty, vbuf, tlen, cp437_8x16, 16, tc, 0xFF);
+        adv = tw;
+    }
+    if (s->font_dir == 0) s->draw_x = (int16_t)(s->draw_x + adv);
+    else                  s->draw_y = (int16_t)(s->draw_y + adv);
+}
+
+static void apply_session_draw_state(rip_state_t *s) {
+    int8_t card_pat = bgi_fill_to_card(s->fill_pattern);
+
+    draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
+    draw_set_pos(s->draw_x, s->draw_y);
+    draw_set_line_style(s->line_style, s->line_thick);
+    /* The 2nd arg becomes g_fill_color in drawing.c, used by fill_span
+     * for the OFF bits of patterned fills.  Per BGI/RIP semantics that
+     * is back_color (set by 'k'), with fill_color (set by 'S') used
+     * for the ON bits via the foreground g_color.  See M14. */
+    draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
+                        s->palette[s->back_color & 0x0F]);
+    apply_draw_state(s);
 }
 
 static void execute_rip_command(rip_state_t *s, void *ctx) {
@@ -1062,11 +1434,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     if (s->is_level3) {
         /* Level 3 commands (prefixed with '3') — RIPscrip 3.0 extensions.
          * DLL command table: 5 entries at level 3 (entries 125-129 of 129
-         * total).  Command letters and argument counts not fully documented;
-         * accept and ignore to prevent ERROR_RECOVERY consuming the frame. */
-        switch (s->cmd_char) {
-            default: break;
-        }
+         * total).  Command letters and argument counts are not publicly
+         * documented and no real-world BBS is known to send them.
+         *
+         * INTENTIONAL: accept and silently discard so a stray Level 3
+         * command does not poison the stream and trigger ERROR_RECOVERY,
+         * which would consume the next several !|... frames as resync. */
+        (void)s->cmd_char;
         return;
     }
 
@@ -1078,7 +1452,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         int nparams = 0;
         for (int i = 0; i + 1 < len && nparams < 16; i += 2)
             params[nparams++] = mega2(p + i);
-        ripscrip2_execute(&rip2_state, s, ctx, s->cmd_char,
+        ripscrip2_execute(&s->rip2_state, s, ctx, s->cmd_char,
                           p, len, params, nparams);
         return;
     }
@@ -1118,7 +1492,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int tlen = len - text_start;
                 if (tlen < 0) tlen = 0;
                 if (tlen > 127) tlen = 127;
-                if (tlen > 0) memcpy(r->text, p + text_start, tlen);
+                if (tlen > 0) memcpy(r->text, p + text_start, (size_t)tlen);
                 r->text_len = (uint8_t)tlen;
                 r->icon_path[0] = '\0';
                 r->active = true;
@@ -1139,18 +1513,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 rip_button_style_t *bs = &s->button_style;
                 bs->width      = mega2(p);
                 bs->height     = mega2(p + 2);
-                bs->orient     = mega2(p + 4);
+                bs->orient     = (uint8_t)mega2(p + 4);
                 bs->flags      = (uint16_t)mega4(p + 6); /* 4-digit MegaNum */
-                bs->bev_size   = mega2(p + 10);
-                bs->dfore      = mega2(p + 12) & 0x0F;
-                bs->dback      = mega2(p + 14) & 0x0F;
-                bs->bright     = mega2(p + 16) & 0x0F;
-                bs->dark       = mega2(p + 18) & 0x0F;
-                bs->surface    = mega2(p + 20) & 0x0F;
-                bs->grp_no     = mega2(p + 22);
-                bs->flags2     = mega2(p + 24);
-                bs->uline_col  = mega2(p + 26) & 0x0F;
-                bs->corner_col = mega2(p + 28) & 0x0F;
+                bs->bev_size   = (uint8_t)mega2(p + 10);
+                bs->dfore      = (uint8_t)(mega2(p + 12) & 0x0F);
+                bs->dback      = (uint8_t)(mega2(p + 14) & 0x0F);
+                bs->bright     = (uint8_t)(mega2(p + 16) & 0x0F);
+                bs->dark       = (uint8_t)(mega2(p + 18) & 0x0F);
+                bs->surface    = (uint8_t)(mega2(p + 20) & 0x0F);
+                bs->grp_no     = (uint8_t)mega2(p + 22);
+                bs->flags2     = (uint16_t)mega2(p + 24);
+                bs->uline_col  = (uint8_t)(mega2(p + 26) & 0x0F);
+                bs->corner_col = (uint8_t)(mega2(p + 28) & 0x0F);
             }
             break;
         case 'U': /* RIP_BUTTON — create button instance (draw + register mouse region).
@@ -1165,8 +1539,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 uint8_t surf = s->palette[bs->surface & 0x0F];
                 uint8_t hi   = s->palette[bs->bright & 0x0F];
                 uint8_t dk   = s->palette[bs->dark & 0x0F];
-                int16_t bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
-                int bev = bs->bev_size ? bs->bev_size : 2;
+                int16_t bw = (int16_t)(bx1 - bx0 + 1);
+                int16_t bh = (int16_t)(by1 - by0 + 1);
+                int16_t bev = bs->bev_size ? (int16_t)bs->bev_size : 2;
 
                 /* Surface fill */
                 draw_set_color(surf);
@@ -1184,15 +1559,19 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                  *   Shadow right:   x=bx1-i, y=[by0+i+1 .. by1-i-1]  (skip top corner)
                  */
                 draw_set_color(hi);
-                for (int i = 0; i < bev; i++) {
-                    draw_hline(bx0 + i,     by0 + i, bw - 2 * i - 1); /* top, full */
-                    draw_vline(bx0 + i, by0 + i + 1, bh - 2 * i - 2); /* left, skip top corner */
+                for (int16_t i = 0; i < bev; i++) {
+                    draw_hline((int16_t)(bx0 + i), (int16_t)(by0 + i),
+                               (int16_t)(bw - 2 * i - 1)); /* top, full */
+                    draw_vline((int16_t)(bx0 + i), (int16_t)(by0 + i + 1),
+                               (int16_t)(bh - 2 * i - 2)); /* left, skip top corner */
                 }
                 /* Shadow (bottom + right) */
                 draw_set_color(dk);
-                for (int i = 0; i < bev; i++) {
-                    draw_hline(bx0 + i + 1,     by1 - i, bw - 2 * i - 1); /* bottom, skip left corner */
-                    draw_vline(    bx1 - i, by0 + i + 1, bh - 2 * i - 2); /* right, skip top corner */
+                for (int16_t i = 0; i < bev; i++) {
+                    draw_hline((int16_t)(bx0 + i + 1), (int16_t)(by1 - i),
+                               (int16_t)(bw - 2 * i - 1)); /* bottom, skip left corner */
+                    draw_vline((int16_t)(bx1 - i), (int16_t)(by0 + i + 1),
+                               (int16_t)(bh - 2 * i - 2)); /* right, skip top corner */
                 }
 
                 /* Parse text: icon_file<>text_label<>host_command
@@ -1235,28 +1614,28 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 }
                 /* Icon lookup and blit */
                 bool icon_drawn = false;
-                int16_t label_y = by0 + (bh - 16) / 2; /* default: label centered */
+                int16_t label_y = (int16_t)(by0 + (bh - 16) / 2); /* default: label centered */
                 if (icon_len > 0) {
                     char icon_name[RIP_FILE_NAME_MAX + 1];
                     int nlen = icon_len < RIP_FILE_NAME_MAX ? icon_len : RIP_FILE_NAME_MAX;
-                    memcpy(icon_name, icon_text, nlen);
+                    memcpy(icon_name, icon_text, (size_t)nlen);
                     icon_name[nlen] = '\0';
 
                     rip_icon_t icon;
-                    if (rip_icon_lookup(icon_name, nlen, &icon)) {
-                        int16_t ix = bx0 + (bw - (int16_t)icon.width) / 2;
-                        int16_t iy = by0 + (bh - (int16_t)icon.height) / 2;
+                    if (rip_icon_lookup(&s->icon_state, icon_name, nlen, &icon)) {
+                        int16_t ix = (int16_t)(bx0 + (bw - (int16_t)icon.width) / 2);
+                        int16_t iy = (int16_t)(by0 + (bh - (int16_t)icon.height) / 2);
                         if (label_len > 0) {
                             /* Icon in upper half; label drawn below */
-                            iy = by0 + bev + 2;
-                            label_y = iy + (int16_t)icon.height + 2;
+                            iy = (int16_t)(by0 + bev + 2);
+                            label_y = (int16_t)(iy + (int16_t)icon.height + 2);
                         }
                         draw_restore_region(ix, iy, (int16_t)icon.width,
                                             (int16_t)icon.height, icon.pixels);
                         icon_drawn = true;
                     } else {
                         /* Icon not in cache — queue request for file transfer */
-                        rip_icon_request_file(icon_name, nlen);
+                        rip_icon_request_file(&s->icon_state, icon_name, nlen);
                     }
                 }
                 (void)icon_drawn;
@@ -1267,8 +1646,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     int llen = unescape_text(label_text, label_len > 127 ? 127 : label_len, lbuf);
                     if (llen > 0) {
                         uint8_t tc = s->palette[bs->dfore & 0x0F];
-                        int16_t tx = bx0 + (bw - llen * 8) / 2;
-                        draw_text(tx, label_y, lbuf, llen, cp437_8x16, 16, tc, 0xFF);
+                        int16_t tx = (int16_t)(bx0 + (bw - llen * 8) / 2);
+                        draw_text(tx, label_y, lbuf, llen, cp437_8x16, 16u, tc, 0xFF);
                     }
                 }
                 /* Register mouse region for button click.
@@ -1283,7 +1662,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     r->icon_path[0] = '\0';
                     r->hover = false;
                     if (host_len > 127) host_len = 127;
-                    memcpy(r->text, host_text, host_len);
+                    memcpy(r->text, host_text, (size_t)host_len);
                     r->text_len = (uint8_t)host_len;
                     r->active = true;
                     s->num_mouse_regions++;
@@ -1319,7 +1698,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int16_t px = mega2(p), py = scale_y(mega2(p + 2));
                 /* mode at p+4: 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT */
                 uint8_t mode = (len >= 6) ? mega2(p + 4) : 0;
-                draw_set_write_mode(mode <= 2 ? mode : 0);
+                if (mode > 4) mode = 0;
+                draw_set_write_mode(mode);
                 draw_restore_region(px, py, s->clipboard.width,
                                     s->clipboard.height, s->clipboard.data);
                 draw_set_write_mode(s->write_mode); /* restore */
@@ -1383,26 +1763,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int fname_len = len - fname_start;
                 if (fname_len > 0) {
                     const char *path = p + fname_start;
-
-                    /* SV3-8: Path traversal protection.
-                     * Reject any filename that contains ".." (directory escape),
-                     * or begins with an absolute-path character ('/' or '\').
-                     * The icon cache accepts only bare filenames (no directory
-                     * components), so these patterns are always illegitimate. */
-                    {
-                        char path_chk[65];
-                        int chk_len = fname_len < 64 ? fname_len : 64;
-                        memcpy(path_chk, path, chk_len);
-                        path_chk[chk_len] = '\0';
-                        if (strstr(path_chk, "..") ||
-                            path_chk[0] == '/'     ||
-                            path_chk[0] == '\\') {
-                            break; /* SV3-8: reject path traversal attempt */
-                        }
-                    }
+                    if (!rip_filename_is_safe(path, fname_len))
+                        break;
 
                     rip_icon_t icon;
-                    if (rip_icon_lookup(path, fname_len, &icon)) {
+                    if (rip_icon_lookup(&s->icon_state, path, fname_len, &icon)) {
                         /* Blit icon to framebuffer */
                         draw_restore_region(ix, iy, icon.width, icon.height,
                                             icon.pixels);
@@ -1413,7 +1778,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         if (mega_digit(p[6]) && s->clipboard.data) {
                             int sz = icon.width * icon.height;
                             if ((uint32_t)sz <= RIP_CLIPBOARD_MAX) {
-                                memcpy(s->clipboard.data, icon.pixels, sz);
+                                memcpy(s->clipboard.data, icon.pixels, (size_t)sz);
                                 s->clipboard.width = icon.width;
                                 s->clipboard.height = icon.height;
                                 s->clipboard.valid = true;
@@ -1421,7 +1786,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         }
                     } else {
                         /* Icon not found — queue file request + draw placeholder */
-                        rip_icon_request_file(path, fname_len);
+                        rip_icon_request_file(&s->icon_state, path, fname_len);
                         draw_set_color(s->palette[8]);
                         draw_rect(ix, iy, 32, 32, false);
                         draw_set_color(s->palette[s->draw_color & 0x0F]);
@@ -1445,7 +1810,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     char snd_buf[70];
                     snd_buf[0] = (char)0x3D; /* CMD_PLAY_SOUND marker */
                     int copy = fname_len < 68 ? fname_len : 68;
-                    memcpy(snd_buf + 1, fname, copy);
+                    memcpy(snd_buf + 1, fname, (size_t)copy);
                     snd_buf[1 + copy] = '\0';
                     card_tx_push(snd_buf, 2 + copy);
                 }
@@ -1463,7 +1828,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     char snd_buf[70];
                     snd_buf[0] = (char)0x3D; /* CMD_PLAY_SOUND marker */
                     int copy = fname_len < 68 ? fname_len : 68;
-                    memcpy(snd_buf + 1, fname, copy);
+                    memcpy(snd_buf + 1, fname, (size_t)copy);
                     snd_buf[1 + copy] = '\0';
                     card_tx_push(snd_buf, 2 + copy);
                 }
@@ -1489,7 +1854,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int plen = len - 2;
                 if (plen >= (int)sizeof(s->icon_dir))
                     plen = (int)sizeof(s->icon_dir) - 1;
-                memcpy(s->icon_dir, p + 2, plen);
+                memcpy(s->icon_dir, p + 2, (size_t)plen);
                 s->icon_dir[plen] = '\0';
             }
             break;
@@ -1539,9 +1904,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             if (len >= 9) {
                 int16_t vx0 = mega2(p), vy0 = mega2(p + 2);
                 int16_t vx1 = mega2(p + 4), vy1 = mega2(p + 6);
-                /* Normalize per DLL convention */
-                if (vx0 > vx1) { int16_t t = vx0; vx0 = vx1; vx1 = t; }
-                if (vy0 > vy1) { int16_t t = vy0; vy0 = vy1; vy1 = t; }
+                clamp_ega_rect(&vx0, &vy0, &vx1, &vy1);
                 s->vp_x0 = vx0;
                 s->vp_y0 = scale_y(vy0);
                 s->vp_x1 = vx1;
@@ -1577,13 +1940,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 const char *fname = p + 6;
                 int flen = len - 6;
                 if (flen <= 0) break;
+                if (!rip_filename_is_safe(fname, flen)) {
+                    card_tx_push("0\r", 2);
+                    break;
+                }
                 if (flen > (int)sizeof(fname_buf) - 1)
                     flen = (int)sizeof(fname_buf) - 1;
-                memcpy(fname_buf, fname, flen);
+                memcpy(fname_buf, fname, (size_t)flen);
                 fname_buf[flen] = '\0';
 
                 rip_icon_t icon;
-                if (rip_icon_lookup(fname, flen, &icon)) {
+                if (rip_icon_lookup(&s->icon_state, fname, flen, &icon)) {
                     /* E5: Extended response — include pixel-data size when available.
                      * width * height is the raw 8bpp pixel byte count, which matches
                      * what the BBS uses to decide whether to re-send the file. */
@@ -1599,7 +1966,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     }
                 } else {
                     card_tx_push("0\r", 2);
-                    rip_icon_request_file(fname, flen);
+                    rip_icon_request_file(&s->icon_state, fname, flen);
                 }
                 (void)mode; /* mode byte reserved for future size/date filtering */
             }
@@ -1644,7 +2011,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         /* Store default value into app_vars[idx] */
                         int idx = tbuf[4] - '0';
                         int vlen = dlen < 31 ? dlen : 31;
-                        memcpy(s->app_vars[idx], display, vlen);
+                        memcpy(s->app_vars[idx], display, (size_t)vlen);
                         s->app_vars[idx][vlen] = '\0';
                     } else {
                         if (dlen > 0) {
@@ -1712,35 +2079,35 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         /* Do not push a response to the BBS yet */
                         rlen = -1;  /* sentinel: skip card_tx_push below */
                     } else {
-                        memcpy(resp, s->app_vars[idx], rlen);
+                        memcpy(resp, s->app_vars[idx], (size_t)rlen);
                     }
 
                 /* $OVERFLOW(RESET)$ — reset to first page */
                 } else if (vlen >= 18 &&
                     memcmp(vname, "$OVERFLOW(RESET)$", 17) == 0) {
-                    rip2_state.overflow_page = 0;
+                    s->rip2_state.overflow_page = 0;
                     rlen = 0;
 
                 /* $OVERFLOW(NEXT)$ — advance one page */
                 } else if (vlen >= 17 &&
                     memcmp(vname, "$OVERFLOW(NEXT)$", 16) == 0) {
-                    if (rip2_state.overflow_page + 1 < rip2_state.overflow_total)
-                        rip2_state.overflow_page++;
+                    if (s->rip2_state.overflow_page + 1 < s->rip2_state.overflow_total)
+                        s->rip2_state.overflow_page++;
                     rlen = 0;
 
                 /* $OVERFLOW(PREV)$ — back one page */
                 } else if (vlen >= 17 &&
                     memcmp(vname, "$OVERFLOW(PREV)$", 16) == 0) {
-                    if (rip2_state.overflow_page > 0)
-                        rip2_state.overflow_page--;
+                    if (s->rip2_state.overflow_page > 0)
+                        s->rip2_state.overflow_page--;
                     rlen = 0;
 
                 /* $OVERFLOW$ — return "page/total" string */
                 } else if (vlen >= 11 &&
                     memcmp(vname, "$OVERFLOW$", 10) == 0) {
                     rlen = snprintf(resp, sizeof(resp), "%u/%u",
-                                   rip2_state.overflow_page + 1,
-                                   rip2_state.overflow_total);
+                                   s->rip2_state.overflow_page + 1,
+                                   s->rip2_state.overflow_total);
                     if (rlen < 0) rlen = 0;
 
                 /* Fix SV-1/S1: $FILEDEL$ — intentionally not implemented.
@@ -1780,17 +2147,22 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
     case 'S': /* v1.54 spec: 'S' = RIP_FILL_STYLE — pattern:2 color:2 */
         if (len >= 4) {
-            s->fill_pattern = mega2(p);
-            s->fill_color = mega2(p + 2) & 0x0F;
+            s->fill_pattern = (uint8_t)mega2(p);
+            s->fill_color = (uint8_t)(mega2(p + 2) & 0x0F);
             int8_t card_pat = bgi_fill_to_card(s->fill_pattern);
             if (card_pat >= 0)
-                draw_set_fill_style(card_pat, s->palette[s->fill_color]);
+                draw_set_fill_style((uint8_t)card_pat, s->palette[s->back_color]);
         }
         break;
     case '=': /* RIP_LINE_STYLE: style:2, user_pat:4, thick:2 */
         if (len >= 2) {
-            s->line_style = mega2(p);
-            if (len >= 8) s->line_thick = scale_y(mega2(p + 6)); /* Fix B6: scale thickness to card Y */
+            s->line_style = (uint8_t)mega2(p);
+            if (len >= 8) {
+                int16_t thick = scale_y(mega2(p + 6)); /* Fix B6: scale thickness to card Y */
+                if (thick < 1) thick = 1;
+                if (thick > 255) thick = 255;
+                s->line_thick = (uint8_t)thick;
+            }
             uint8_t pat = 0xFF;
             switch (s->line_style) {
             case 0: pat = 0xFF; break; /* solid */
@@ -1806,7 +2178,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
     case 'W': /* v1.54 spec: 'W' = RIP_WRITE_MODE — mode:2 */
         if (len >= 2) {
-            uint8_t wm = mega2(p);
+            uint8_t wm = (uint8_t)mega2(p);
             if (wm > 4) wm = 0;
             s->write_mode = wm;
             draw_set_write_mode(wm);
@@ -1814,9 +2186,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
     case 'Y': /* RIP_FONT_STYLE — font:2 dir:2 size:2 flags:2 */
         if (len >= 6) {
-            uint8_t fid = mega2(p);
-            uint8_t fdir = mega2(p + 2);
-            uint8_t fsize = mega2(p + 4);
+            uint8_t fid = (uint8_t)mega2(p);
+            uint8_t fdir = (uint8_t)mega2(p + 2);
+            uint8_t fsize = (uint8_t)mega2(p + 4);
             /* Validate: dir 0-2 (v3.1 adds dir=2 CCW), size 1-10 */
             if (fdir > 2) break;
             if (fsize < 1 || fsize > 10) break;
@@ -1825,7 +2197,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->font_size = fsize;
             /* v3.0 extension: justification flags in arg[3] (reserved in v1.54) */
             if (len >= 8) {
-                uint8_t flags = mega2(p + 6);
+                uint8_t flags = (uint8_t)mega2(p + 6);
                 s->font_hjust = 0;
                 if (flags & 0x02) s->font_hjust = 1; /* center */
                 if (flags & 0x04) s->font_hjust = 2; /* right */
@@ -1861,7 +2233,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         s->tw_wrap = 0; s->tw_font_size = 0;
         s->tw_active = false;
         s->vp_x0 = 0; s->vp_y0 = 0;
-        s->vp_x1 = 639; s->vp_y1 = 349;
+        s->vp_x1 = 639; s->vp_y1 = 399;
         draw_reset_clip();
         /* Drawing state → defaults */
         s->draw_color = 15; /* white */
@@ -1870,12 +2242,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         s->line_style = 0; s->line_thick = 1;
         draw_set_line_style(0xFF, 1);
         s->fill_pattern = 1; s->fill_color = 15; /* Fix B4: BGI SOLID_FILL, white (DLL default) */
-        draw_set_fill_style(0, 0); /* card 0 = solid */
+        s->back_color = 0;
+        draw_set_fill_style(0, s->palette[s->back_color]); /* card 0 = solid; BG=back_color */
         s->font_id = 0; s->font_dir = 0; s->font_size = 1;
         /* Palette → EGA defaults (offset to 240-255 to avoid xterm conflict) */
         for (int i = 0; i < 16; i++) {
-            s->palette[i] = 240 + i;
-            palette_write_rgb565(240 + i, ega_default_rgb565[i]);
+            s->palette[i] = palette_slot(i);
+            palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
         }
         /* Mouse regions → cleared */
         s->num_mouse_regions = 0;
@@ -1896,12 +2269,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * Note: previous "Fix B5" had this backwards; 'e' is always text-window clear. */
         comp_clear_screen(c, 2);
         break;
-    case 'E': /* v1.54 spec §3.2: '|E' = RIP_ERASE_VIEW — clear graphics viewport to background.
-               * IcyTerm: EraseView (0 args). Note: previous "Fix B5" had this backwards. */
-        draw_set_color(0);
-        { int16_t ey0 = scale_y(s->vp_y0), ey1 = scale_y1(s->vp_y1);
-          draw_rect(s->vp_x0, ey0,
-                    s->vp_x1 - s->vp_x0 + 1, ey1 - ey0 + 1, true);
+    case 'E': /* v1.54 spec §3.2: '|E' = RIP_ERASE_VIEW — clear graphics viewport
+               * to background color (RIP_BACK_COLOR).  Previously hard-coded to
+               * palette index 0 which only matches the default back_color. */
+        {
+            uint8_t bg = s->palette[s->back_color & 0x0F];
+            uint8_t fg = s->palette[s->draw_color & 0x0F];
+            draw_set_color(bg);
+            draw_rect(s->vp_x0, s->vp_y0,
+                      (int16_t)(s->vp_x1 - s->vp_x0 + 1),
+                      (int16_t)(s->vp_y1 - s->vp_y0 + 1), true);
+            draw_set_color(fg);
         }
         break;
     case '>': /* v1.54 spec §3.3: '|>' = RIP_ERASE_EOL — erase from text cursor to end of line.
@@ -1911,14 +2289,25 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
     case 'w': /* RIP_TEXT_WINDOW — pixel coordinates for text region */
         if (len >= 10) {
-            s->tw_x0 = mega2(p); s->tw_y0 = mega2(p + 2);
-            s->tw_x1 = mega2(p + 4); s->tw_y1 = mega2(p + 6);
-            s->tw_wrap = mega_digit(p[8]);
-            s->tw_font_size = mega_digit(p[9]);
+            int16_t tw_x0 = mega2(p);
+            int16_t tw_y0 = mega2(p + 2);
+            int16_t tw_x1 = mega2(p + 4);
+            int16_t tw_y1 = mega2(p + 6);
+            clamp_ega_rect(&tw_x0, &tw_y0, &tw_x1, &tw_y1);
+            s->tw_x0 = tw_x0;
+            s->tw_y0 = tw_y0;
+            s->tw_x1 = tw_x1;
+            s->tw_y1 = tw_y1;
+            s->tw_wrap = (uint8_t)mega_digit(p[8]);
+            s->tw_font_size = (uint8_t)mega_digit(p[9]);
             /* Initialize cursor to top-left of text window (scaled) */
             s->tw_cur_x = s->tw_x0;
             s->tw_cur_y = scale_y(s->tw_y0);
-            /* Non-default text window → route passthrough text to draw_text */
+            /* Non-default text window → route passthrough text to draw_text.
+             * Heuristic: any rect different from the full screen counts as
+             * "active".  A BBS that explicitly sets the full-screen rect
+             * will look identical to "no text window" — acceptable since
+             * both paths route to the same renderer. */
             s->tw_active = (s->tw_x0 != 0 || s->tw_y0 != 0 ||
                             s->tw_x1 != 639 || s->tw_y1 != 349);
         }
@@ -1927,12 +2316,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 8) {
             int16_t vx0 = mega2(p), vy0 = mega2(p + 2);
             int16_t vx1 = mega2(p + 4), vy1 = mega2(p + 6);
-            /* Normalize: ensure x0<=x1, y0<=y1 (DLL calls sub_03112E) */
-            if (vx0 > vx1) { int16_t t = vx0; vx0 = vx1; vx1 = t; }
-            if (vy0 > vy1) { int16_t t = vy0; vy0 = vy1; vy1 = t; }
-            s->vp_x0 = vx0; s->vp_y0 = vy0;
-            s->vp_x1 = vx1; s->vp_y1 = vy1;
-            draw_set_clip(vx0, scale_y(vy0), vx1, scale_y1(vy1));
+            clamp_ega_rect(&vx0, &vy0, &vx1, &vy1);
+            s->vp_x0 = vx0;
+            s->vp_y0 = scale_y(vy0);
+            s->vp_x1 = vx1;
+            s->vp_y1 = scale_y1(vy1);
+            draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
         }
         break;
 
@@ -1942,7 +2331,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 32) {
             for (int i = 0; i < 16; i++) {
                 uint8_t ega64 = mega2(p + i * 2) & 0x3F;
-                palette_write_rgb565(240 + i, ega64_to_rgb565(ega64));
+                palette_write_rgb565(palette_slot(i), ega64_to_rgb565(ega64));
             }
         }
         break;
@@ -1950,7 +2339,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 4) {
             uint8_t idx = mega2(p) & 0x0F;
             uint8_t ega64 = mega2(p + 2) & 0x3F;
-            palette_write_rgb565(240 + idx, ega64_to_rgb565(ega64));
+            palette_write_rgb565(palette_slot(idx), ega64_to_rgb565(ega64));
         }
         break;
 
@@ -1976,7 +2365,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len >= 8) {
             int16_t x0 = mega2(p), y0 = scale_y(mega2(p + 2));
             int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
-            draw_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, false);
+            draw_rect(x0, y0,
+                      (int16_t)(x1 - x0 + 1),
+                      (int16_t)(y1 - y0 + 1), false);
         }
         break;
     case 'B': /* RIP_BAR (filled rectangle, no border) — uses fill style */
@@ -1984,7 +2375,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t x0 = mega2(p), y0 = scale_y(mega2(p + 2));
             int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
             draw_set_color(s->palette[s->fill_color & 0x0F]);
-            draw_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, true);
+            draw_rect(x0, y0,
+                      (int16_t)(x1 - x0 + 1),
+                      (int16_t)(y1 - y0 + 1), true);
             draw_set_color(s->palette[s->draw_color & 0x0F]);
         }
         break;
@@ -2002,6 +2395,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * Args: cx:2 cy:2 st_ang:2 end_ang:2 x_rad:2 y_rad:2 (6 params, 12 chars).
                * IcyTerm: Oval { x, y, st_ang, end_ang, x_rad, y_rad } — parse_params.rs line 277.
                * Note: previous code had O/o swapped, mapping O to filled-oval (wrong). */
+        /* fall through — 'O' and 'V' share an implementation */
+    case 'V': /* RIP_OVAL_ARC — same field layout and renderer as 'O'. */
         if (len >= 12) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t sa = mega2(p + 4), ea = mega2(p + 6);
@@ -2034,43 +2429,45 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             draw_arc(cx, cy, r, sa, ea);
         }
         break;
-    case 'V': /* RIP_OVAL_ARC */
-        if (len >= 12) {
-            int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
-            int16_t sa = mega2(p + 4), ea = mega2(p + 6);
-            int16_t rx = mega2(p + 8), ry = mega2(p + 10);
-            draw_elliptical_arc(cx, cy, rx, scale_y(ry), sa, ea);
-        }
-        break;
+    /* 'V' was previously a duplicate handler for RIP_OVAL_ARC.
+     * Merged with 'O' above via case fall-through. */
 
     /* ── Pie slices ──────────────────────────────────────────── */
     case 'I': /* RIP_PIE_SLICE — outline in draw_color, fill in fill_color.
-               * DLL scales radius via ripScaleCoordY (EGA 350→400). */
+               * DLL scales radius via ripScaleCoordY (EGA 350→400).
+               *
+               * Order matters: draw_pie(fill=true) paints the sector with
+               * g_color over the arc/radii it drew first, so we must fill
+               * before outlining or the outline gets wiped.  Skip outline
+               * entirely if there's no fill — the bare draw_pie(false)
+               * call below already drew it. */
         if (len >= 10) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t sa = mega2(p + 4), ea = mega2(p + 6);
-            int16_t r = scale_y(mega2(p + 8));
+            int16_t r  = scale_y(mega2(p + 8));
             uint8_t dc = s->palette[s->draw_color & 0x0F];
-            draw_pie(cx, cy, r, sa, ea, false);
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_pie(cx, cy, r, sa, ea, true);
                 draw_set_color(dc);
                 draw_pie(cx, cy, r, sa, ea, false);
+            } else {
+                draw_pie(cx, cy, r, sa, ea, false);
             }
         }
         break;
-    case 'i': /* RIP_OVAL_PIE_SLICE — outline + fill */
+    case 'i': /* RIP_OVAL_PIE_SLICE — fill before outline (see 'I' comment). */
         if (len >= 12) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t sa = mega2(p + 4), ea = mega2(p + 6);
             int16_t rx = mega2(p + 8), ry_s = scale_y(mega2(p + 10));
             uint8_t dc = s->palette[s->draw_color & 0x0F];
-            draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, false);
             if (s->fill_pattern != 0) {
                 draw_set_color(s->palette[s->fill_color & 0x0F]);
                 draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, true);
                 draw_set_color(dc);
+                draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, false);
+            } else {
                 draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, false);
             }
         }
@@ -2100,6 +2497,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     case 'l': /* RIP_POLYLINE */ {
         if (len >= 6) {
             int npts = mega2(p);
+            /* Cap at 64 points to keep `pts[]` on the stack and out of the
+             * malloc fallback path inside draw_polygon. */
             if (npts < 2 || npts > 64) break;
             if (len < 2 + npts * 4) break;
             int16_t pts[128]; /* max 64 points × 2 coords */
@@ -2141,85 +2540,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* ── Text ────────────────────────────────────────────────── */
     case 'T': /* RIP_TEXT — draw text at current position, advance draw_x */
-        if (len > 0) {
-            /* DLL ground truth (rip_textvars.c): variable substitution occurs
-             * at the text output layer, after backslash unescape. Apply both. */
-            char tbuf[256];
-            char vbuf[256];
-            int tlen = unescape_text(p, len, tbuf);
-            tlen = rip_expand_variables(s, tbuf, tlen, vbuf, sizeof(vbuf));
-            uint8_t tc = s->palette[s->draw_color & 0x0F];
-            uint8_t fid = s->font_id;
-            uint8_t fscale = s->font_size ? s->font_size : 1;
-            int16_t adv;
-            int16_t tx = s->draw_x, ty = s->draw_y;
-            /* Measure text width for justification (DLL rip_textvars.c) */
-            int16_t tw, th;
-            if (fid > 0 && fid < BGI_FONT_COUNT && bgi_fonts_loaded && bgi_fonts[fid].strokes) {
-                tw = bgi_font_string_width(&bgi_fonts[fid], vbuf, tlen, fscale);
-                th = bgi_fonts[fid].top * fscale;
-            } else {
-                tw = tlen * 8;
-                th = 16;
-            }
-            /* Apply horizontal justification */
-            if (s->font_hjust == 1)      tx -= tw / 2;  /* center */
-            else if (s->font_hjust == 2) tx -= tw;       /* right */
-            /* Apply vertical justification (DLL: 0=bottom, 1=center, 2=top, 3=baseline) */
-            if (s->font_vjust == 0)      ty -= th;       /* bottom: text above point */
-            else if (s->font_vjust == 1) ty -= th / 2;   /* center */
-            /* vjust 2 = top: ty unchanged (text below point) */
-            /* vjust 3 = baseline: ty unchanged for bitmap fonts */
-            if (fid > 0 && fid < BGI_FONT_COUNT && bgi_fonts_loaded && bgi_fonts[fid].strokes) {
-                adv = bgi_font_draw_string_ex(&bgi_fonts[fid],
-                    tx, ty, vbuf, tlen, fscale, tc, s->font_dir, s->font_attrib);
-            } else {
-                draw_text(tx, ty, vbuf, tlen,
-                          cp437_8x16, 16, tc, 0xFF);
-                adv = tw;
-            }
-            if (s->font_dir == 0) s->draw_x += adv;
-            else                  s->draw_y += adv;
-        }
+        if (len > 0)
+            rip_render_text(s, p, len);
         break;
-    /* v1.54 spec: '@' = RIP_TEXT_XY — draw text at pixel position.
-     * NOTE: Session 12 remapped this to RIP_PIXEL based on DLL command table
-     * entry 16, but the DLL table maps internal function pointers, not protocol
-     * letters.  The v1.54 spec and all BBSes use '@' for TEXT_XY. */
+    /* v1.54 spec: '@' = RIP_TEXT_XY — draw text at pixel position. */
     case '@': /* RIP_TEXT_XY — x:2 y:2 text */
         if (len >= 4) {
             s->draw_x = mega2(p);
             s->draw_y = scale_y(mega2(p + 2));
-            char tbuf_at[256];
-            int tlen_at = unescape_text(p + 4, len - 4, tbuf_at);
-            uint8_t tc_at = s->palette[s->draw_color & 0x0F];
-            uint8_t fid_at = s->font_id;
-            uint8_t fscale_at = s->font_size ? s->font_size : 1;
-            int16_t adv_at;
-            int16_t tx_at = s->draw_x, ty_at = s->draw_y;
-            /* Measure + justify (same as RIP_TEXT) */
-            int16_t tw_at, th_at;
-            if (fid_at > 0 && fid_at < BGI_FONT_COUNT && bgi_fonts_loaded && bgi_fonts[fid_at].strokes) {
-                tw_at = bgi_font_string_width(&bgi_fonts[fid_at], tbuf_at, tlen_at, fscale_at);
-                th_at = bgi_fonts[fid_at].top * fscale_at;
-            } else {
-                tw_at = tlen_at * 8;
-                th_at = 16;
-            }
-            if (s->font_hjust == 1)      tx_at -= tw_at / 2;
-            else if (s->font_hjust == 2) tx_at -= tw_at;
-            if (s->font_vjust == 0)      ty_at -= th_at;
-            else if (s->font_vjust == 1) ty_at -= th_at / 2;
-            if (fid_at > 0 && fid_at < BGI_FONT_COUNT && bgi_fonts_loaded && bgi_fonts[fid_at].strokes) {
-                adv_at = bgi_font_draw_string_ex(&bgi_fonts[fid_at],
-                    tx_at, ty_at, tbuf_at, tlen_at, fscale_at, tc_at, s->font_dir, s->font_attrib);
-            } else {
-                draw_text(tx_at, ty_at, tbuf_at, tlen_at,
-                          cp437_8x16, 16, tc_at, 0xFF);
-                adv_at = tw_at;
-            }
-            if (s->font_dir == 0) s->draw_x += adv_at;
-            else                  s->draw_y += adv_at;
+            rip_render_text(s, p + 4, len - 4);
         }
         break;
     /* v1.54 spec: 'X' = RIP_PIXEL — draw single pixel at (x,y). */
@@ -2257,7 +2586,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             draw_set_user_fill_pattern(pat);
             s->fill_color = mega2(p + 16) & 0x0F;
             s->fill_pattern = 12; /* BGI USER_FILL */
-            draw_set_fill_style(11, s->palette[s->fill_color]);
+            draw_set_fill_style(11, s->palette[s->back_color]);
         }
         break;
 
@@ -2319,9 +2648,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Background color (v2.0+) ---------------------------------------- */
     /* DLL command table entry 43: 'k' = RIP_BACK_COLOR (1 arg: COL) */
-    case 'k': /* RIP_BACK_COLOR -- color:1 */
-        if (len >= 1)
+    case 'k': /* RIP_BACK_COLOR -- color:1.
+               * Per BGI/RIP semantics, back_color is the OFF-bit color in
+               * patterned fills and the clear color for RIP_ERASE_VIEW.
+               * Push the new value into the draw layer so subsequent fills
+               * pick it up without waiting for the next 'S'/'s'/'D'. */
+        if (len >= 1) {
             s->back_color = mega_digit(p[0]) & 0x0F;
+            int8_t card_pat = bgi_fill_to_card(s->fill_pattern);
+            draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
+                                s->palette[s->back_color & 0x0F]);
+        }
         break;
 
     /* -- Save icon (v2.0+) ----------------------------------------------- */
@@ -2345,16 +2682,25 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t rw  = sx1 - sx0 + 1, rh = sy1 - sy0 + 1;
             if (rw > 0 && rh > 0) {
                 draw_copy_rect(sx0, sy0, sx0 + dx, sy0 + dy, rw, rh);
-                /* Clear the exposed strip left behind by the scroll */
+                /* Clear the exposed strip(s) left behind by the scroll.
+                 * Clamp strip extent to the source rect so a delta larger
+                 * than the rect (|dx|>=rw or |dy|>=rh) clears just the
+                 * source rect rather than spilling outside. */
                 draw_set_color(s->palette[fc]);
-                if (dy > 0)
-                    draw_rect(sx0, sy0, rw, dy, true);
-                else if (dy < 0)
-                    draw_rect(sx0, sy1 + dy + 1, rw, -dy, true);
-                if (dx > 0)
-                    draw_rect(sx0, sy0, dx, rh, true);
-                else if (dx < 0)
-                    draw_rect(sx1 + dx + 1, sy0, -dx, rh, true);
+                if (dy > 0) {
+                    int16_t h = dy < rh ? dy : rh;
+                    draw_rect(sx0, sy0, rw, h, true);
+                } else if (dy < 0) {
+                    int16_t h = -dy < rh ? -dy : rh;
+                    draw_rect(sx0, (int16_t)(sy1 - h + 1), rw, h, true);
+                }
+                if (dx > 0) {
+                    int16_t w = dx < rw ? dx : rw;
+                    draw_rect(sx0, sy0, w, rh, true);
+                } else if (dx < 0) {
+                    int16_t w = -dx < rw ? -dx : rw;
+                    draw_rect((int16_t)(sx1 - w + 1), sy0, w, rh, true);
+                }
                 draw_set_color(s->palette[s->draw_color & 0x0F]);
             }
         }
@@ -2634,7 +2980,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             if (len >= 18)
                 s->fill_color = mega2(p + 16) & 0x0F;
             s->fill_pattern = 12; /* BGI USER_FILL */
-            draw_set_fill_style(11, s->palette[s->fill_color]);
+            draw_set_fill_style(11, s->palette[s->back_color]);
         }
         break;
 
@@ -2725,10 +3071,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * (9 args: XY,XY,XY,XY,2,2,1,4,3). */
     case 'b': /* RIP_EXT_TEXT_WINDOW — x0:2 y0:2 x1:2 y1:2 fore:2 back:2 font:1 size:4 flags:3 */
         if (len >= 18) {
-            s->tw_x0        = mega2(p);
-            s->tw_y0        = mega2(p + 2);
-            s->tw_x1        = mega2(p + 4);
-            s->tw_y1        = mega2(p + 6);
+            int16_t tw_x0 = mega2(p);
+            int16_t tw_y0 = mega2(p + 2);
+            int16_t tw_x1 = mega2(p + 4);
+            int16_t tw_y1 = mega2(p + 6);
+            clamp_ega_rect(&tw_x0, &tw_y0, &tw_x1, &tw_y1);
+            s->tw_x0        = tw_x0;
+            s->tw_y0        = tw_y0;
+            s->tw_x1        = tw_x1;
+            s->tw_y1        = tw_y1;
             s->etw_fore_col = mega2(p + 8)  & 0x0F;
             s->etw_back_col = mega2(p + 10) & 0x0F;
             s->etw_font_id  = mega_digit(p[12]);
@@ -2768,16 +3119,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * BYTE PROCESSING — 13-state FSM matching RIPSCRIP.DLL
+ * BYTE PROCESSING — 14-state FSM (DLL has 13; A2GSPU adds LEVEL3)
  *
  * DLL ground truth: ripParseStateMachine @ 0x10039E90
  * Jump table: 0x1003AB9C  (states 0-12, stored at pContext+0x00)
+ * State 13 (LEVEL3_LETTER) is an A2GSPU addition for the '3' prefix.
  * prevState saved at pContext+0x04 for line-continuation restore.
  * lastChar  saved at pContext+0x9F for '!' line-boundary detection.
  * ══════════════════════════════════════════════════════════════════ */
 
 void rip_process(rip_state_t *s, void *ctx, uint8_t ch) {
     comp_context_t *c = (comp_context_t *)ctx;
+    g_rip_state = s;
 
     /* DLL: suppress DEL (0x7F) only.  High bytes (0x80-0xFE) must pass through
      * for CP437 box-drawing characters in ANSI passthrough mode.  The original
@@ -2805,18 +3158,19 @@ reprocess:
          * State machine for the << … >> wrapper:
          *   preproc_state 0 = normal — watch for first '<'
          *   preproc_state 1 = got one '<' — watch for second '<'
-         *   preproc_state 2 = inside <<…>> — collect directive name
+         *   preproc_state 2 = inside <<…>> — collect directive bytes
+         *   preproc_state 3 = saw one '>' inside <<…>> — confirm closing >>
          *
          * Directive evaluation is intentionally minimal: the DLL supports
          * only simple string comparisons of $VARIABLE$ values, so we do
-         * the same.  Unknown directives are treated as false (suppress). */
+         * the same. Unknown directives are ignored. */
         if (s->preproc_state == 0 && ch == '<') {
             s->preproc_state = 1;
             return; /* swallow first '<', wait for second */
         }
         if (s->preproc_state == 1) {
             if (ch == '<') {
-                /* Got <<  — start collecting directive name */
+                /* Got <<  — start collecting directive bytes */
                 s->preproc_state = 2;
                 s->preproc_len   = 0;
                 return;
@@ -2830,45 +3184,46 @@ reprocess:
             /* Fall through to normal processing of ch below */
         }
         if (s->preproc_state == 2) {
-            /* Collecting directive bytes until '>>' */
-            if (ch == '>') {
-                /* Null-terminate and evaluate */
-                if (s->preproc_len < (int)sizeof(s->preproc_buf))
-                    s->preproc_buf[s->preproc_len] = '\0';
+            if (ch == '\r' || ch == '\n') {
                 s->preproc_state = 0;
-                const char *dir = s->preproc_buf;
-
-                if (strncmp(dir, "IF ", 3) == 0 || strcmp(dir, "IF") == 0) {
-                    /* <<IF expr>> — push nesting depth; evaluate expression.
-                     * eval_if_expr() expands $VARIABLE$ references first (matching
-                     * DLL ordering: ripTextVarEngine before condition check), then
-                     * applies comparison operators (=, !=, >, <) or plain boolean. */
-                    s->preproc_depth++;
-                    const char *expr = (dir[2] == ' ') ? dir + 3 : "";
-                    bool cond = eval_if_expr(s, expr);
-                    if (!cond) s->preproc_suppress = true;
-                } else if (strcmp(dir, "ELSE") == 0) {
-                    /* <<ELSE>> — flip suppress state at current depth */
-                    if (s->preproc_depth > 0)
-                        s->preproc_suppress = !s->preproc_suppress;
-                } else if (strcmp(dir, "ENDIF") == 0) {
-                    /* <<ENDIF>> — pop nesting depth; restore normal output */
-                    if (s->preproc_depth > 0) {
-                        s->preproc_depth--;
-                        if (s->preproc_depth == 0)
-                            s->preproc_suppress = false;
-                    }
-                }
-                /* Consume the trailing '>' of '>>' (eat one; second already consumed) */
+                s->preproc_len = 0;
+            } else if (ch == '>') {
+                s->preproc_state = 3;
+                return;
             } else {
-                /* Accumulate directive character */
-                if (s->preproc_len < (int)sizeof(s->preproc_buf) - 1)
-                    s->preproc_buf[s->preproc_len++] = ch;
+                /* Bail out on malformed oversized directives rather than
+                 * wedging the parser until a later literal >> appears. */
+                if (s->preproc_len >= (int)sizeof(s->preproc_buf) - 1) {
+                    s->preproc_state = 0;
+                    s->preproc_len = 0;
+                    return;
+                }
+                s->preproc_buf[s->preproc_len++] = (char)ch;
+                return;
             }
-            return;
+        }
+        if (s->preproc_state == 3) {
+            if (ch == '\r' || ch == '\n') {
+                s->preproc_state = 0;
+                s->preproc_len = 0;
+            } else if (ch == '>') {
+                s->preproc_state = 0;
+                preproc_finalize_directive(s);
+                return;
+            } else {
+                if (s->preproc_len >= (int)sizeof(s->preproc_buf) - 2) {
+                    s->preproc_state = 0;
+                    s->preproc_len = 0;
+                    return;
+                }
+                s->preproc_buf[s->preproc_len++] = '>';
+                s->preproc_buf[s->preproc_len++] = (char)ch;
+                s->preproc_state = 2;
+                return;
+            }
         }
 
-        /* When suppressing, swallow all output bytes except '!' (which could
+        /* When suppressing, swallow all output bytes except '<' (which could
          * start a new << sequence via preproc_state machinery above). */
         if (s->preproc_suppress && ch != '<') return;
 
@@ -2932,9 +3287,7 @@ reprocess:
         if (ch == '|') {
             s->cmd_len   = 0;
             s->cmd_char  = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             s->state = RIP_ST_COMMAND;
         } else {
             /* False alarm — emit '!' then re-process current byte in IDLE */
@@ -2973,9 +3326,7 @@ reprocess:
                 execute_rip_command(s, ctx);
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             s->last_char = ch;
             s->state     = RIP_ST_IDLE;
             break;
@@ -2983,15 +3334,18 @@ reprocess:
 
         if (ch == '|') {
             /* '|' terminates current command; more may follow in frame.
-             * Execute, reset, stay in CMD_LETTER for next command. */
+             * Execute, reset, stay in CMD_LETTER for next command — unless
+             * the dispatched command (e.g. via $ABORT$) reset state to IDLE,
+             * in which case honor that. */
             if (s->cmd_char)
                 execute_rip_command(s, ctx);
+            bool aborted = (s->state == RIP_ST_IDLE);
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
-            /* Stay in RIP_ST_COMMAND */
+            clear_levels(s);
+            if (aborted)
+                s->state = RIP_ST_IDLE;
+            /* else stay in RIP_ST_COMMAND */
             break;
         }
 
@@ -3016,7 +3370,7 @@ reprocess:
                        ch == '<' || ch == '[' || ch == ']' || ch == '_' ||
                        ch == '&' || ch == '`' || ch == '{' || ch == '"') {
                 /* Valid Level 0 command letter */
-                s->cmd_char = ch;
+                s->cmd_char = (char)ch;
                 /* A3: '!' as the command letter is the comment marker (!|!…|).
                  * Transition directly to COMMENT (state 9); no args to collect. */
                 if (ch == '!') {
@@ -3059,47 +3413,59 @@ reprocess:
                 execute_rip_command(s, ctx);
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             s->last_char = ch;
             s->state     = RIP_ST_IDLE;
             break;
         }
 
         if (ch == '|') {
-            /* Command terminator — dispatch, then accept next command letter */
+            /* Command terminator — dispatch, then accept next command letter.
+             * If the dispatched command (e.g. via $ABORT$) reset state to
+             * IDLE, honor that rather than overriding back to COMMAND. */
             if (s->cmd_char)
                 execute_rip_command(s, ctx);
+            bool aborted = (s->state == RIP_ST_IDLE);
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
-            s->state = RIP_ST_COMMAND;
+            clear_levels(s);
+            s->state = aborted ? RIP_ST_IDLE : RIP_ST_COMMAND;
             break;
         }
 
         /* Accumulate parameter byte */
         if (s->cmd_len < (int)sizeof(s->cmd_buf) - 1)
-            s->cmd_buf[s->cmd_len++] = ch;
+            s->cmd_buf[s->cmd_len++] = (char)ch;
         break;
 
     /* ── State 5: LINE_CONT ─────────────────────────────────────
      * '\' received mid-command.  Waiting for CR or LF.
      * DLL handler @ 0x1003A400.
      *
-     * CR  → state = LINE_WAIT_LF(6)   [wait for optional CRLF pair]
-     * LF  → restore prevState          [bare-LF continuation done]
-     * other → restore prevState; emit '\' literal; re-process char
+     * CR        → state = LINE_WAIT_LF(6)   [wait for optional CRLF pair]
+     * LF        → restore prevState          [bare-LF continuation done]
+     * !|\       → escape pair: push both bytes literally to cmd_buf so
+     *             unescape_text() can resolve them.  Without this, '\|'
+     *             inside a text parameter would split the command on '|'.
+     * other     → restore prevState; emit '\' literal; re-process char
      * ─────────────────────────────────────────────────────────── */
     case RIP_ST_LINE_CONT:
         if (ch == '\r') {
             s->state = RIP_ST_LINE_WAIT_LF;
         } else if (ch == '\n') {
             s->state = s->prev_state;
+        } else if (ch == '!' || ch == '|' || ch == '\\') {
+            /* Escape pair: keep both bytes in cmd_buf so unescape_text()
+             * decodes \! → !, \| → |, \\ → \ at command-execute time.
+             * Stay in prev_state so subsequent bytes resume normally. */
+            s->state = s->prev_state;
+            if (s->cmd_char != 0 &&
+                s->cmd_len + 1 < (int)sizeof(s->cmd_buf) - 1) {
+                s->cmd_buf[s->cmd_len++] = '\\';
+                s->cmd_buf[s->cmd_len++] = (char)ch;
+            }
         } else {
-            /* Non-newline: '\' was literal; re-process ch in restored state */
+            /* Non-escape, non-newline: '\' was literal; reprocess ch. */
             s->state = s->prev_state;
             if (s->cmd_char != 0 &&
                 s->cmd_len < (int)sizeof(s->cmd_buf) - 1)
@@ -3137,9 +3503,7 @@ reprocess:
                 execute_rip_command(s, ctx);
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             if (ch == '\r' || ch == '\n') {
                 s->last_char = ch;
                 s->state = RIP_ST_IDLE;
@@ -3148,7 +3512,7 @@ reprocess:
             }
         } else {
             if (s->cmd_len < (int)sizeof(s->cmd_buf) - 1)
-                s->cmd_buf[s->cmd_len++] = ch;
+                s->cmd_buf[s->cmd_len++] = (char)ch;
         }
         break;
 
@@ -3166,9 +3530,7 @@ reprocess:
         } else if (ch == '|') {
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             s->state = RIP_ST_COMMAND;
         } else if (ch < 0x20) {
             s->state = RIP_ST_IDLE;
@@ -3185,9 +3547,7 @@ reprocess:
         if (ch == '|') {
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             s->state = RIP_ST_COMMAND;
         } else if (ch == '\r' || ch == '\n') {
             s->last_char = ch;
@@ -3209,7 +3569,7 @@ reprocess:
             s->state = RIP_ST_COMMAND;
         } else {
             /* Sub-command letter acquired; collect parameters in ARG_COLLECT */
-            s->cmd_char = ch;
+            s->cmd_char = (char)ch;
             s->state = RIP_ST_ARG_COLLECT;
         }
         break;
@@ -3226,7 +3586,7 @@ reprocess:
             s->is_level2 = false;
             s->state = RIP_ST_COMMAND;
         } else {
-            s->cmd_char = ch;
+            s->cmd_char = (char)ch;
             s->state = RIP_ST_ARG_COLLECT;
         }
         break;
@@ -3244,7 +3604,7 @@ reprocess:
             s->is_level3 = false;
             s->state = RIP_ST_COMMAND;
         } else {
-            s->cmd_char = ch;
+            s->cmd_char = (char)ch;
             s->state = RIP_ST_ARG_COLLECT;
         }
         break;
@@ -3257,9 +3617,7 @@ reprocess:
         if (ch == '|') {
             s->cmd_char  = 0;
             s->cmd_len   = 0;
-            s->is_level1 = false;
-            s->is_level2 = false;
-            s->is_level3 = false;
+            clear_levels(s);
             s->state = RIP_ST_COMMAND;
         } else if (ch == '\r' || ch == '\n') {
             s->last_char = ch;
@@ -3290,7 +3648,7 @@ void rip_sync_date_byte(uint8_t data_byte) {
         int len = g_rip_state->sync_date_len;
         if (len > (int)sizeof(g_rip_state->host_date) - 1)
             len = (int)sizeof(g_rip_state->host_date) - 1;
-        memcpy(g_rip_state->host_date, g_rip_state->sync_date_buf, len);
+        memcpy(g_rip_state->host_date, g_rip_state->sync_date_buf, (size_t)len);
         g_rip_state->host_date[len] = '\0';
         g_rip_state->sync_date_len = 0;
     } else {
@@ -3308,7 +3666,7 @@ void rip_sync_time_byte(uint8_t data_byte) {
         int len = g_rip_state->sync_time_len;
         if (len > (int)sizeof(g_rip_state->host_time) - 1)
             len = (int)sizeof(g_rip_state->host_time) - 1;
-        memcpy(g_rip_state->host_time, g_rip_state->sync_time_buf, len);
+        memcpy(g_rip_state->host_time, g_rip_state->sync_time_buf, (size_t)len);
         g_rip_state->host_time[len] = '\0';
         g_rip_state->sync_time_len = 0;
     } else {
@@ -3335,7 +3693,7 @@ void rip_query_response_byte(uint8_t data_byte) {
             int idx = vn[4] - '0';
             int rlen = s->query_response_len;
             if (rlen > 31) rlen = 31;
-            memcpy(s->app_vars[idx], s->query_response, rlen);
+            memcpy(s->app_vars[idx], s->query_response, (size_t)rlen);
             s->app_vars[idx][rlen] = '\0';
             /* Send response to BBS now that we have it */
             if (rlen > 0)

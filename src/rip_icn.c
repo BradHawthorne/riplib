@@ -16,27 +16,42 @@
  * Each pixel's EGA index = (intensity<<3)|(red<<2)|(green<<1)|blue
  * mapped to palette indices 0-15.
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #include "rip_icn.h"
+#include <stddef.h>  /* size_t */
 
-bool rip_icn_parse(const uint8_t *data, int size,
-                   uint8_t *out_pixels,
-                   uint16_t *out_w, uint16_t *out_h) {
-    if (size < 6) return false;
+bool rip_icn_measure(const uint8_t *data, int size,
+                     uint16_t *out_w, uint16_t *out_h) {
+    if (!data || !out_w || !out_h || size < 6) return false;
 
-    uint16_t w = (data[0] | (data[1] << 8)) + 1;
-    uint16_t h = (data[2] | (data[3] << 8)) + 1;
+    uint32_t w_raw = (uint32_t)data[0] | ((uint32_t)data[1] << 8);
+    uint32_t h_raw = (uint32_t)data[2] | ((uint32_t)data[3] << 8);
+    uint16_t w = (uint16_t)(w_raw + 1u);
+    uint16_t h = (uint16_t)(h_raw + 1u);
     /* bytes 4-5 ignored */
 
     if (w == 0 || h == 0 || w > 640 || h > 400) return false;
 
-    int row_bytes = (w + 7) / 8;
-    int row_stride = row_bytes * 4; /* 4 planes per row */
-    int expected = 6 + row_stride * h;
-    if (size < expected) return false;
+    size_t row_bytes = ((size_t)w + 7u) / 8u;
+    size_t row_stride = row_bytes * 4u; /* 4 planes per row */
+    size_t expected = 6u + row_stride * (size_t)h;
+    if ((size_t)size < expected) return false;
+
+    *out_w = w;
+    *out_h = h;
+    return true;
+}
+
+bool rip_icn_parse(const uint8_t *data, int size,
+                   uint8_t *out_pixels,
+                   uint16_t *out_w, uint16_t *out_h) {
+    uint16_t w;
+    uint16_t h;
+    if (!out_pixels || !rip_icn_measure(data, size, &w, &h))
+        return false;
 
     *out_w = w;
     *out_h = h;
@@ -44,12 +59,14 @@ bool rip_icn_parse(const uint8_t *data, int size,
     const uint8_t *src = data + 6;
 
     for (int y = 0; y < h; y++) {
-        const uint8_t *row = src + y * row_stride;
-        const uint8_t *p0 = row;                    /* blue */
-        const uint8_t *p1 = row + row_bytes;        /* green */
-        const uint8_t *p2 = row + row_bytes * 2;    /* red */
-        const uint8_t *p3 = row + row_bytes * 3;    /* intensity */
-        uint8_t *dst = out_pixels + y * w;
+        size_t row_bytes = ((size_t)w + 7u) / 8u;
+        size_t row_stride = row_bytes * 4u;
+        const uint8_t *row = src + (size_t)y * row_stride;
+        const uint8_t *p0 = row;                        /* blue */
+        const uint8_t *p1 = row + row_bytes;            /* green */
+        const uint8_t *p2 = row + row_bytes * 2u;       /* red */
+        const uint8_t *p3 = row + row_bytes * 3u;       /* intensity */
+        uint8_t *dst = out_pixels + (size_t)y * (size_t)w;
 
         for (int x = 0; x < w; x++) {
             int byte_idx = x >> 3;

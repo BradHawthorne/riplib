@@ -2,6 +2,21 @@ cmake_minimum_required(VERSION 3.13)
 project(riplib VERSION 1.0.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 99)
+include(CTest)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    # RIPlib intentionally stores framebuffer geometry in 16-bit fields.
+    # Keep the useful warning set, but suppress low-signal conversion noise
+    # from bounded coordinate narrowing in the parser and renderer.
+    # -Werror=implicit-function-declaration catches missing prototypes
+    # (which on GCC <14 was only a warning) so they cannot slip into a release.
+    add_compile_options(
+        -Wall -Wextra
+        -Wno-conversion -Wno-sign-conversion
+        -Wno-unused-parameter
+        -Werror=implicit-function-declaration
+    )
+endif()
 
 # ── Library ─────────────────────────────────────────────────────────
 add_library(riplib
@@ -11,6 +26,8 @@ add_library(riplib
     src/ripscrip2.c
     src/rip_icons.c
     src/rip_icn.c
+    icons/rip_icons_data.c
+    icons/rip_icns_data.c
 )
 
 target_include_directories(riplib PUBLIC
@@ -31,6 +48,6 @@ if(RIPLIB_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-if(RIPLIB_BUILD_TESTS)
+if(RIPLIB_BUILD_TESTS AND BUILD_TESTING)
     add_subdirectory(tests)
 endif()

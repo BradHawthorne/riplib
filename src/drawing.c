@@ -15,8 +15,8 @@
  *   De Casteljau (1959) — Bezier subdivision
  *   Shani (1980) — scanline flood fill
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #include "drawing.h"
@@ -64,41 +64,167 @@ static uint8_t user_pattern[8] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 /* ── Dirty-row callback ──────────────────────────────────────────── */
 static draw_dirty_callback_t g_dirty_cb = NULL;
 
+/* ── Flood-fill mark bitmap (one bit per framebuffer pixel) ─────── */
+static uint8_t *g_flood_marks = NULL;
+static size_t   g_flood_marks_size = 0;
+
 void draw_set_dirty_callback(draw_dirty_callback_t cb) {
     g_dirty_cb = cb;
 }
 
+static inline bool draw_ready(void) {
+    return g_fb != NULL && g_width > 0 && g_height > 0 && g_pitch >= g_width;
+}
+
 static inline void mark_dirty(int16_t y_min, int16_t y_max) {
-    if (g_dirty_cb) g_dirty_cb(y_min, y_max);
+    int16_t max_y;
+
+    if (!g_dirty_cb || g_height == 0)
+        return;
+    if (y_min > y_max) {
+        int16_t t = y_min;
+        y_min = y_max;
+        y_max = t;
+    }
+
+    max_y = (int16_t)(g_height - 1u);
+    if (y_max < 0 || y_min > max_y)
+        return;
+    if (y_min < 0) y_min = 0;
+    if (y_max > max_y) y_max = max_y;
+
+    g_dirty_cb(y_min, y_max);
+}
+
+static inline void mark_dirty_i32(int32_t y_min, int32_t y_max) {
+    int32_t max_y;
+
+    if (g_height == 0)
+        return;
+    if (y_min > y_max) {
+        int32_t t = y_min;
+        y_min = y_max;
+        y_max = t;
+    }
+
+    max_y = (int32_t)g_height - 1;
+    if (y_max < 0 || y_min > max_y)
+        return;
+    if (y_min < 0) y_min = 0;
+    if (y_max > max_y) y_max = max_y;
+
+    mark_dirty((int16_t)y_min, (int16_t)y_max);
 }
 
 /* ── Flood fill stack ────────────────────────────────────────────── */
 #define FLOOD_STACK_SIZE 1024
 typedef struct { int16_t x, y; } flood_entry_t;
-static flood_entry_t flood_stack[FLOOD_STACK_SIZE];
+
+static bool ensure_flood_stack_capacity(flood_entry_t **stack, size_t *capacity,
+                                        size_t needed, flood_entry_t *stack_local) {
+    size_t new_capacity;
+    flood_entry_t *new_stack;
+
+    if (needed <= *capacity)
+        return true;
+
+    new_capacity = *capacity;
+    while (new_capacity < needed)
+        new_capacity *= 2u;
+
+    if (*stack == stack_local) {
+        new_stack = (flood_entry_t *)malloc(new_capacity * sizeof(*new_stack));
+        if (!new_stack)
+            return false;
+        memcpy(new_stack, stack_local, *capacity * sizeof(*new_stack));
+    } else {
+        new_stack = (flood_entry_t *)realloc(*stack, new_capacity * sizeof(*new_stack));
+        if (!new_stack)
+            return false;
+    }
+
+    *stack = new_stack;
+    *capacity = new_capacity;
+    return true;
+}
+
+static bool ensure_flood_marks(void) {
+    size_t bits = (size_t)g_pitch * (size_t)g_height;
+    size_t bytes = (bits + 7u) / 8u;
+    if (bytes == 0) return false;
+    if (bytes <= g_flood_marks_size) return true;
+
+    {
+        uint8_t *new_marks = (uint8_t *)realloc(g_flood_marks, bytes);
+        if (!new_marks) return false;
+        memset(new_marks + g_flood_marks_size, 0, bytes - g_flood_marks_size);
+        g_flood_marks = new_marks;
+        g_flood_marks_size = bytes;
+    }
+    return true;
+}
+
+static inline uint8_t apply_write_mode(uint8_t dst, uint8_t src) {
+    switch (g_write_mode) {
+    default:
+    case DRAW_MODE_COPY: return src;
+    case DRAW_MODE_OR:   return (uint8_t)(dst | src);
+    case DRAW_MODE_AND:  return (uint8_t)(dst & src);
+    case DRAW_MODE_XOR:  return (uint8_t)(dst ^ src);
+    case DRAW_MODE_NOT:  return (uint8_t)(~dst);
+    }
+}
+
+static inline size_t flood_mark_index(int16_t x, int16_t y) {
+    return (size_t)y * (size_t)g_pitch + (size_t)x;
+}
+
+static inline void flood_mark_set(int16_t x, int16_t y) {
+    size_t idx = flood_mark_index(x, y);
+    g_flood_marks[idx >> 3] |= (uint8_t)(1u << (idx & 7));
+}
+
+static inline bool flood_mark_get(int16_t x, int16_t y) {
+    size_t idx = flood_mark_index(x, y);
+    return (g_flood_marks[idx >> 3] & (uint8_t)(1u << (idx & 7))) != 0;
+}
+
+static inline void flood_mark_clear(int16_t x, int16_t y) {
+    size_t idx = flood_mark_index(x, y);
+    g_flood_marks[idx >> 3] &= (uint8_t)~(1u << (idx & 7));
+}
 
 /* ══════════════════════════════════════════════════════════════════
  * INITIALIZATION
  * ══════════════════════════════════════════════════════════════════ */
 
 void draw_init(uint8_t *framebuf, uint16_t pitch, uint16_t width, uint16_t height) {
-    g_fb = framebuf;
-    g_pitch = pitch;
-    g_width = width;
-    g_height = height;
+    if (!framebuf || pitch == 0 || width == 0 || height == 0 || pitch < width) {
+        g_fb = NULL;
+        g_pitch = 0;
+        g_width = 0;
+        g_height = 0;
+    } else {
+        g_fb = framebuf;
+        g_pitch = pitch;
+        g_width = width;
+        g_height = height;
+    }
     g_color = 0;
     g_pos_x = 0;
     g_pos_y = 0;
     g_clip_x0 = 0;
     g_clip_y0 = 0;
-    g_clip_x1 = width - 1;
-    g_clip_y1 = height - 1;
+    g_clip_x1 = draw_ready() ? (int16_t)(g_width - 1u) : -1;
+    g_clip_y1 = draw_ready() ? (int16_t)(g_height - 1u) : -1;
     g_write_mode = DRAW_MODE_COPY;
     g_line_pattern = 0xFF;
     g_line_thickness = 1;
     g_fill_pattern = 0;
     g_fill_color = 0;
     g_arc_radius = 0;
+    if (draw_ready())
+        ensure_flood_marks();
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -117,22 +243,38 @@ int16_t draw_get_clip_x1(void) { return g_clip_x1; }
 int16_t draw_get_clip_y1(void) { return g_clip_y1; }
 
 void draw_set_clip(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    if (!draw_ready()) {
+        g_clip_x0 = 0;
+        g_clip_y0 = 0;
+        g_clip_x1 = -1;
+        g_clip_y1 = -1;
+        return;
+    }
     if (x0 > x1) { int16_t t = x0; x0 = x1; x1 = t; }
     if (y0 > y1) { int16_t t = y0; y0 = y1; y1 = t; }
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
-    if (x1 >= g_width)  x1 = g_width - 1;
-    if (y1 >= g_height) y1 = g_height - 1;
+    if (x1 >= (int16_t)g_width)  x1 = (int16_t)(g_width - 1u);
+    if (y1 >= (int16_t)g_height) y1 = (int16_t)(g_height - 1u);
     g_clip_x0 = x0; g_clip_y0 = y0;
     g_clip_x1 = x1; g_clip_y1 = y1;
 }
 
 void draw_reset_clip(void) {
+    if (!draw_ready()) {
+        g_clip_x0 = 0;
+        g_clip_y0 = 0;
+        g_clip_x1 = -1;
+        g_clip_y1 = -1;
+        return;
+    }
     g_clip_x0 = 0; g_clip_y0 = 0;
-    g_clip_x1 = g_width - 1; g_clip_y1 = g_height - 1;
+    g_clip_x1 = (int16_t)(g_width - 1u);
+    g_clip_y1 = (int16_t)(g_height - 1u);
 }
 
 void draw_save_clip(draw_clip_state_t *state) {
+    if (!state) return;
     state->x0 = g_clip_x0;
     state->y0 = g_clip_y0;
     state->x1 = g_clip_x1;
@@ -140,6 +282,7 @@ void draw_save_clip(draw_clip_state_t *state) {
 }
 
 void draw_restore_clip(const draw_clip_state_t *state) {
+    if (!state) return;
     g_clip_x0 = state->x0;
     g_clip_y0 = state->y0;
     g_clip_x1 = state->x1;
@@ -147,7 +290,7 @@ void draw_restore_clip(const draw_clip_state_t *state) {
 }
 
 void draw_set_write_mode(uint8_t mode) {
-    g_write_mode = mode;
+    g_write_mode = (mode <= DRAW_MODE_NOT) ? mode : DRAW_MODE_COPY;
 }
 
 void draw_set_line_style(uint8_t pattern, uint8_t thickness) {
@@ -161,6 +304,7 @@ void draw_set_fill_style(uint8_t pattern_id, uint8_t fill_color) {
 }
 
 void draw_set_user_fill_pattern(const uint8_t *pattern) {
+    if (!pattern) return;
     for (int i = 0; i < 8; i++)
         user_pattern[i] = pattern[i];
 }
@@ -177,31 +321,27 @@ void draw_set_arc_radius(int16_t radius) {
  * ══════════════════════════════════════════════════════════════════ */
 
 static inline void put_pixel(int16_t x, int16_t y) {
+    if (!draw_ready()) return;
     if (x >= g_clip_x0 && x <= g_clip_x1 &&
         y >= g_clip_y0 && y <= g_clip_y1) {
         uint8_t *p = &g_fb[y * g_pitch + x];
-        switch (g_write_mode) {
-        default:
-        case DRAW_MODE_COPY: *p = g_color; break;
-        case DRAW_MODE_OR:   *p |= g_color; break;
-        case DRAW_MODE_AND:  *p &= g_color; break;
-        case DRAW_MODE_XOR:  *p ^= g_color; break;
-        case DRAW_MODE_NOT:  *p = ~(*p); break;
-        }
+        *p = apply_write_mode(*p, g_color);
     }
 }
 
 /* Fill a horizontal span, respecting write mode and fill pattern.
  * This is the inner loop for all filled shapes. */
 static void fill_span(int16_t x, int16_t y, int16_t len) {
+    if (!draw_ready()) return;
     if (len <= 0 || y < g_clip_y0 || y > g_clip_y1) return;
-    int16_t x0 = x, x1 = x + len - 1;
+    int16_t x0 = x;
+    int16_t x1 = (int16_t)(x + len - 1);
     if (x0 < g_clip_x0) x0 = g_clip_x0;
     if (x1 > g_clip_x1) x1 = g_clip_x1;
     if (x0 > x1) return;
 
     uint8_t *row = &g_fb[y * g_pitch];
-    int16_t count = x1 - x0 + 1;
+    size_t count = (size_t)(uint16_t)(x1 - x0 + 1);
 
     /* Fast path: solid fill + COPY mode → memset */
     if (g_fill_pattern == 0 && g_write_mode == DRAW_MODE_COPY) {
@@ -218,14 +358,7 @@ static void fill_span(int16_t x, int16_t y, int16_t len) {
 
     for (int16_t px = x0; px <= x1; px++) {
         uint8_t c = (pat_row & (0x80 >> (px & 7))) ? g_color : g_fill_color;
-        switch (g_write_mode) {
-        default:
-        case DRAW_MODE_COPY: row[px] = c; break;
-        case DRAW_MODE_OR:   row[px] |= c; break;
-        case DRAW_MODE_AND:  row[px] &= c; break;
-        case DRAW_MODE_XOR:  row[px] ^= c; break;
-        case DRAW_MODE_NOT:  row[px] = ~row[px]; break;
-        }
+        row[px] = apply_write_mode(row[px], c);
     }
 }
 
@@ -234,56 +367,48 @@ static void fill_span(int16_t x, int16_t y, int16_t len) {
  * ══════════════════════════════════════════════════════════════════ */
 
 void draw_pixel(int16_t x, int16_t y) {
+    if (!draw_ready()) return;
     put_pixel(x, y);
     mark_dirty(y, y);
 }
 
 void draw_hline(int16_t x, int16_t y, int16_t len) {
+    if (!draw_ready()) return;
     if (len <= 0 || y < g_clip_y0 || y > g_clip_y1) return;
-    int16_t x0 = x, x1 = x + len - 1;
+    int16_t x0 = x;
+    int16_t x1 = (int16_t)(x + len - 1);
     if (x0 < g_clip_x0) x0 = g_clip_x0;
     if (x1 > g_clip_x1) x1 = g_clip_x1;
     if (x0 > x1) return;
 
     uint8_t *row = &g_fb[y * g_pitch];
-    int16_t count = x1 - x0 + 1;
+    size_t count = (size_t)(uint16_t)(x1 - x0 + 1);
 
     if (g_write_mode == DRAW_MODE_COPY) {
         memset(&row[x0], g_color, count);
     } else {
-        for (int16_t px = x0; px <= x1; px++) {
-            switch (g_write_mode) {
-            case DRAW_MODE_OR:  row[px] |= g_color; break;
-            case DRAW_MODE_AND: row[px] &= g_color; break;
-            case DRAW_MODE_XOR: row[px] ^= g_color; break;
-            case DRAW_MODE_NOT: row[px] = ~row[px]; break;
-            default:            row[px] = g_color; break;
-            }
-        }
+        for (int16_t px = x0; px <= x1; px++)
+            row[px] = apply_write_mode(row[px], g_color);
     }
     mark_dirty(y, y);
 }
 
 void draw_vline(int16_t x, int16_t y, int16_t len) {
+    if (!draw_ready()) return;
     if (len <= 0 || x < g_clip_x0 || x > g_clip_x1) return;
-    int16_t y0 = y, y1 = y + len - 1;
+    int16_t y0 = y;
+    int16_t y1 = (int16_t)(y + len - 1);
     if (y0 < g_clip_y0) y0 = g_clip_y0;
     if (y1 > g_clip_y1) y1 = g_clip_y1;
     for (int16_t row = y0; row <= y1; row++) {
         uint8_t *p = &g_fb[row * g_pitch + x];
-        switch (g_write_mode) {
-        default:
-        case DRAW_MODE_COPY: *p = g_color; break;
-        case DRAW_MODE_OR:   *p |= g_color; break;
-        case DRAW_MODE_AND:  *p &= g_color; break;
-        case DRAW_MODE_XOR:  *p ^= g_color; break;
-        case DRAW_MODE_NOT:  *p = ~(*p); break;
-        }
+        *p = apply_write_mode(*p, g_color);
     }
     mark_dirty(y0, y1);
 }
 
 void draw_fill_screen(uint8_t color) {
+    if (!draw_ready()) return;
     memset(g_fb, color, g_height * g_pitch);
     mark_dirty(0, (int16_t)(g_height - 1));
 }
@@ -293,10 +418,12 @@ void draw_fill_screen(uint8_t color) {
  * a $NOREFRESH$ scene build sequence (equivalent to ripInvalidateAll()
  * in the DLL @ 0x026218). */
 void draw_mark_all_dirty(void) {
+    if (!draw_ready()) return;
     mark_dirty(0, (int16_t)(g_height - 1));
 }
 
 void draw_write_pixel(uint8_t color) {
+    if (!draw_ready()) return;
     if (g_pos_x >= 0 && g_pos_x < g_width &&
         g_pos_y >= 0 && g_pos_y < g_height) {
         g_fb[g_pos_y * g_pitch + g_pos_x] = color;
@@ -335,19 +462,20 @@ static bool clip_line(int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1) {
 
         int oc_out = oc0 ? oc0 : oc1;
         int16_t x, y;
-        int16_t dx = *x1 - *x0, dy = *y1 - *y0;
+        int16_t dx = (int16_t)(*x1 - *x0);
+        int16_t dy = (int16_t)(*y1 - *y0);
 
         if (oc_out & OC_TOP) {
-            x = *x0 + (int32_t)dx * (g_clip_y0 - *y0) / dy;
+            x = (int16_t)(*x0 + (int32_t)dx * (g_clip_y0 - *y0) / dy);
             y = g_clip_y0;
         } else if (oc_out & OC_BOTTOM) {
-            x = *x0 + (int32_t)dx * (g_clip_y1 - *y0) / dy;
+            x = (int16_t)(*x0 + (int32_t)dx * (g_clip_y1 - *y0) / dy);
             y = g_clip_y1;
         } else if (oc_out & OC_RIGHT) {
-            y = *y0 + (int32_t)dy * (g_clip_x1 - *x0) / dx;
+            y = (int16_t)(*y0 + (int32_t)dy * (g_clip_x1 - *x0) / dx);
             x = g_clip_x1;
         } else {
-            y = *y0 + (int32_t)dy * (g_clip_x0 - *x0) / dx;
+            y = (int16_t)(*y0 + (int32_t)dy * (g_clip_x0 - *x0) / dx);
             x = g_clip_x0;
         }
 
@@ -366,32 +494,28 @@ static bool clip_line(int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1) {
  * ══════════════════════════════════════════════════════════════════ */
 
 void draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+    if (!draw_ready()) return;
     if (!clip_line(&x0, &y0, &x1, &y1)) return;
 
     int16_t dy_min = y0 < y1 ? y0 : y1;
     int16_t dy_max = y0 < y1 ? y1 : y0;
 
-    int16_t dx = abs(x1 - x0);
-    int16_t dy = -abs(y1 - y0);
-    int16_t sx = (x0 < x1) ? 1 : -1;
-    int16_t sy = (y0 < y1) ? 1 : -1;
-    int16_t err = dx + dy;
+    int dx = abs(x1 - x0);
+    int dy = -abs(y1 - y0);
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
+    int err = dx + dy;
     uint8_t phase = 0;
 
     for (;;) {
         /* Dash pattern: bit in pattern selects draw vs skip */
         if ((g_line_pattern >> (phase & 7)) & 1) {
             uint8_t *p = &g_fb[y0 * g_pitch + x0];
-            switch (g_write_mode) {
-            default:
-            case DRAW_MODE_COPY: *p = g_color; break;
-            case DRAW_MODE_XOR:  *p ^= g_color; break;
-            case DRAW_MODE_OR:   *p |= g_color; break;
-            }
+            *p = apply_write_mode(*p, g_color);
         }
         if (x0 == x1 && y0 == y1) break;
         phase++;
-        int16_t e2 = 2 * err;
+        int e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
         if (e2 <= dx) { err += dx; y0 += sy; }
     }
@@ -410,9 +534,9 @@ void draw_rect(int16_t x, int16_t y, int16_t w, int16_t h, bool fill) {
         mark_dirty(y, (int16_t)(y + h - 1));
     } else {
         draw_hline(x, y, w);
-        draw_hline(x, y + h - 1, w);
+        draw_hline(x, (int16_t)(y + h - 1), w);
         draw_vline(x, y, h);
-        draw_vline(x + w - 1, y, h);
+        draw_vline((int16_t)(x + w - 1), y, h);
     }
 }
 
@@ -526,7 +650,7 @@ void draw_circle(int16_t cx, int16_t cy, int16_t r, bool fill) {
             d += 2 * (y - x) + 1;
         }
     }
-    mark_dirty((int16_t)(cy - r), (int16_t)(cy + r));
+    mark_dirty_i32((int32_t)cy - r, (int32_t)cy + r);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -536,10 +660,10 @@ void draw_circle(int16_t cx, int16_t cy, int16_t r, bool fill) {
 void draw_ellipse(int16_t cx, int16_t cy, int16_t rx, int16_t ry, bool fill) {
     if (rx <= 0 || ry <= 0) return;
 
-    int32_t rx2 = (int32_t)rx * rx;
-    int32_t ry2 = (int32_t)ry * ry;
+    int64_t rx2 = (int64_t)rx * rx;
+    int64_t ry2 = (int64_t)ry * ry;
     int16_t x = 0, y = ry;
-    int32_t d1 = ry2 - rx2 * ry + rx2 / 4;
+    int64_t d1 = ry2 - rx2 * ry + rx2 / 4;
 
     while (ry2 * x < rx2 * y) {
         if (fill) {
@@ -560,8 +684,8 @@ void draw_ellipse(int16_t cx, int16_t cy, int16_t rx, int16_t ry, bool fill) {
         }
     }
 
-    int32_t d2 = ry2 * ((int32_t)(2 * x + 1) * (2 * x + 1)) / 4
-               + rx2 * ((int32_t)(y - 1) * (y - 1))
+    int64_t d2 = ry2 * ((int64_t)(2 * x + 1) * (2 * x + 1)) / 4
+               + rx2 * ((int64_t)(y - 1) * (y - 1))
                - rx2 * ry2;
     while (y >= 0) {
         if (fill) {
@@ -581,7 +705,7 @@ void draw_ellipse(int16_t cx, int16_t cy, int16_t rx, int16_t ry, bool fill) {
             d2 += 2 * ry2 * x - 2 * rx2 * y + rx2;
         }
     }
-    mark_dirty((int16_t)(cy - ry), (int16_t)(cy + ry));
+    mark_dirty_i32((int32_t)cy - ry, (int32_t)cy + ry);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -638,7 +762,7 @@ void draw_arc(int16_t cx, int16_t cy, int16_t r,
             d += 2 * (y - x) + 1;
         }
     }
-    mark_dirty((int16_t)(cy - r), (int16_t)(cy + r));
+    mark_dirty_i32((int32_t)cy - r, (int32_t)cy + r);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -646,21 +770,28 @@ void draw_arc(int16_t cx, int16_t cy, int16_t r,
  * ══════════════════════════════════════════════════════════════════ */
 
 void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
-    if (!g_fb) return;
+    flood_entry_t stack_local[FLOOD_STACK_SIZE];
+    flood_entry_t *stack = stack_local;
+    size_t stack_capacity = FLOOD_STACK_SIZE;
+    size_t top = 0;
+
+    if (!draw_ready()) return;
     if (x < g_clip_x0 || x > g_clip_x1 || y < g_clip_y0 || y > g_clip_y1)
         return;
 
     uint8_t fill = g_color;
     uint8_t seed = g_fb[y * g_pitch + x];
     if (seed == border_color || seed == fill) return;
+    if (!ensure_flood_marks()) return;
+    if (!ensure_flood_stack_capacity(&stack, &stack_capacity, 1u, stack_local))
+        return;
 
-    int top = 0;
-    flood_stack[top++] = (flood_entry_t){x, y};
+    stack[top++] = (flood_entry_t){x, y};
 
     int16_t dirty_y0 = y, dirty_y1 = y;
 
     while (top > 0) {
-        flood_entry_t e = flood_stack[--top];
+        flood_entry_t e = stack[--top];
         int16_t px = e.x, py = e.y;
 
         uint8_t c = g_fb[py * g_pitch + px];
@@ -684,12 +815,15 @@ void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
             if (c == border_color || c == fill) break;
 
             g_fb[py * g_pitch + rx] = fill;
+            flood_mark_set(rx, py);
 
             if (py > g_clip_y0) {
                 uint8_t ca = g_fb[(py - 1) * g_pitch + rx];
                 if (ca != border_color && ca != fill) {
-                    if (!above_started && top < FLOOD_STACK_SIZE) {
-                        flood_stack[top++] = (flood_entry_t){rx, (int16_t)(py - 1)};
+                    if (!above_started &&
+                        ensure_flood_stack_capacity(&stack, &stack_capacity,
+                                                    top + 1u, stack_local)) {
+                        stack[top++] = (flood_entry_t){rx, (int16_t)(py - 1)};
                         above_started = true;
                     }
                 } else {
@@ -700,8 +834,10 @@ void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
             if (py < g_clip_y1) {
                 uint8_t cb = g_fb[(py + 1) * g_pitch + rx];
                 if (cb != border_color && cb != fill) {
-                    if (!below_started && top < FLOOD_STACK_SIZE) {
-                        flood_stack[top++] = (flood_entry_t){rx, (int16_t)(py + 1)};
+                    if (!below_started &&
+                        ensure_flood_stack_capacity(&stack, &stack_capacity,
+                                                    top + 1u, stack_local)) {
+                        stack[top++] = (flood_entry_t){rx, (int16_t)(py + 1)};
                         below_started = true;
                     }
                 } else {
@@ -727,17 +863,28 @@ void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
                 uint8_t *row = &g_fb[py * g_pitch];
                 int16_t x0 = g_clip_x0, x1 = g_clip_x1;
                 for (int16_t px = x0; px <= x1; px++) {
-                    if (row[px] == fill) {
+                    if (flood_mark_get(px, py)) {
                         if (!(pat_row & (0x80 >> (px & 7)))) {
                             row[px] = g_fill_color;
                         }
+                        flood_mark_clear(px, py);
                     }
                 }
+            }
+        }
+    } else {
+        for (int16_t py = dirty_y0; py <= dirty_y1; py++) {
+            for (int16_t px = g_clip_x0; px <= g_clip_x1; px++) {
+                if (flood_mark_get(px, py))
+                    flood_mark_clear(px, py);
             }
         }
     }
 
     mark_dirty(dirty_y0, dirty_y1);
+
+    if (stack != stack_local)
+        free(stack);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -750,11 +897,15 @@ void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
 void draw_bezier(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
                  int16_t x2, int16_t y2, int16_t x3, int16_t y3) {
     /* Adaptive step count based on curve length estimate */
-    float dx = (float)(x3 - x0), dy = (float)(y3 - y0);
-    float chord = sqrtf(dx * dx + dy * dy);
-    float ctrl = sqrtf((float)((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0))) +
-                 sqrtf((float)((x2-x1)*(x2-x1) + (y2-y1)*(y2-y1))) +
-                 sqrtf((float)((x3-x2)*(x3-x2) + (y3-y2)*(y3-y2)));
+    float dx10 = (float)x1 - (float)x0;
+    float dy10 = (float)y1 - (float)y0;
+    float dx21 = (float)x2 - (float)x1;
+    float dy21 = (float)y2 - (float)y1;
+    float dx32 = (float)x3 - (float)x2;
+    float dy32 = (float)y3 - (float)y2;
+    float ctrl = sqrtf(dx10 * dx10 + dy10 * dy10) +
+                 sqrtf(dx21 * dx21 + dy21 * dy21) +
+                 sqrtf(dx32 * dx32 + dy32 * dy32);
     int steps = (int)(ctrl * 0.5f);
     if (steps < 4) steps = 4;
     if (steps > 64) steps = 64;
@@ -792,7 +943,7 @@ void draw_bezier(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
 
 void draw_copy_rect(int16_t sx, int16_t sy, int16_t dx, int16_t dy,
                     int16_t w, int16_t h) {
-    if (w <= 0 || h <= 0 || !g_fb) return;
+    if (w <= 0 || h <= 0 || !draw_ready()) return;
     /* Clamp to framebuffer */
     if (sx < 0) { w += sx; dx -= sx; sx = 0; }
     if (sy < 0) { h += sy; dy -= sy; sy = 0; }
@@ -819,30 +970,77 @@ void draw_copy_rect(int16_t sx, int16_t sy, int16_t dx, int16_t dy,
 
 void draw_save_region(int16_t x, int16_t y, int16_t w, int16_t h,
                       uint8_t *dest) {
-    if (!g_fb || !dest || w <= 0 || h <= 0) return;
-    if (x < 0) { w += x; dest -= x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > g_width)  w = g_width - x;
-    if (y + h > g_height) h = g_height - y;
-    for (int16_t r = 0; r < h; r++)
-        memcpy(&dest[r * w], &g_fb[(y + r) * g_pitch + x], w);
+    int16_t src_x = x;
+    int16_t src_y = y;
+    int16_t copy_w = w;
+    int16_t copy_h = h;
+    int16_t dst_x_off = 0;
+    int16_t dst_y_off = 0;
+    int16_t src_stride = w;
+
+    if (!draw_ready() || !dest || w <= 0 || h <= 0) return;
+    if (src_x < 0) {
+        dst_x_off = (int16_t)(-src_x);
+        copy_w += src_x;
+        src_x = 0;
+    }
+    if (src_y < 0) {
+        dst_y_off = (int16_t)(-src_y);
+        copy_h += src_y;
+        src_y = 0;
+    }
+    if (src_x + copy_w > g_width)  copy_w = (int16_t)(g_width - src_x);
+    if (src_y + copy_h > g_height) copy_h = (int16_t)(g_height - src_y);
+    if (copy_w <= 0 || copy_h <= 0) return;
+    for (int16_t r = 0; r < copy_h; r++) {
+        size_t dst_off = (size_t)(r + dst_y_off) * (size_t)src_stride + (size_t)dst_x_off;
+        memcpy(&dest[dst_off], &g_fb[(src_y + r) * g_pitch + src_x], (size_t)copy_w);
+    }
 }
 
 void draw_restore_region(int16_t x, int16_t y, int16_t w, int16_t h,
                          const uint8_t *src) {
-    if (!g_fb || !src || w <= 0 || h <= 0) return;
-    if (x < 0) { w += x; src -= x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > g_width)  w = g_width - x;
-    if (y + h > g_height) h = g_height - y;
-    if (w <= 0 || h <= 0) return;
-    for (int16_t r = 0; r < h; r++)
-        memcpy(&g_fb[(y + r) * g_pitch + x], &src[r * w], w);
-    mark_dirty(y, (int16_t)(y + h - 1));
+    int16_t dst_x = x;
+    int16_t dst_y = y;
+    int16_t copy_w = w;
+    int16_t copy_h = h;
+    int16_t src_x_off = 0;
+    int16_t src_y_off = 0;
+    int16_t src_stride = w;
+
+    if (!draw_ready() || !src || w <= 0 || h <= 0) return;
+    if (dst_x < 0) {
+        src_x_off = (int16_t)(-dst_x);
+        copy_w += dst_x;
+        dst_x = 0;
+    }
+    if (dst_y < 0) {
+        src_y_off = (int16_t)(-dst_y);
+        copy_h += dst_y;
+        dst_y = 0;
+    }
+    if (dst_x + copy_w > g_width)  copy_w = (int16_t)(g_width - dst_x);
+    if (dst_y + copy_h > g_height) copy_h = (int16_t)(g_height - dst_y);
+    if (copy_w <= 0 || copy_h <= 0) return;
+    if (g_write_mode == DRAW_MODE_COPY) {
+        for (int16_t r = 0; r < copy_h; r++) {
+            size_t src_off = (size_t)(r + src_y_off) * (size_t)src_stride + (size_t)src_x_off;
+            memcpy(&g_fb[(dst_y + r) * g_pitch + dst_x], &src[src_off], (size_t)copy_w);
+        }
+    } else {
+        for (int16_t r = 0; r < copy_h; r++) {
+            size_t src_off = (size_t)(r + src_y_off) * (size_t)src_stride + (size_t)src_x_off;
+            uint8_t *dst_row = &g_fb[(dst_y + r) * g_pitch + dst_x];
+            const uint8_t *src_row = &src[src_off];
+            for (int16_t c = 0; c < copy_w; c++)
+                dst_row[c] = apply_write_mode(dst_row[c], src_row[c]);
+        }
+    }
+    mark_dirty(dst_y, (int16_t)(dst_y + copy_h - 1));
 }
 
 uint8_t draw_get_pixel(int16_t x, int16_t y) {
-    if (!g_fb || x < 0 || x >= g_width || y < 0 || y >= g_height) return 0;
+    if (!draw_ready() || x < 0 || x >= g_width || y < 0 || y >= g_height) return 0;
     return g_fb[y * g_pitch + x];
 }
 
@@ -865,7 +1063,7 @@ uint8_t draw_get_pixel(int16_t x, int16_t y) {
 void draw_text(int16_t x, int16_t y, const char *str, int len,
                const uint8_t *font, uint8_t font_height,
                uint8_t fg, uint8_t bg) {
-    if (!g_fb || !font || !str || len <= 0) return;
+    if (!draw_ready() || !font || !str || len <= 0) return;
 
     uint8_t font_width = 8;  /* all our fonts are 8px wide max */
 
@@ -932,7 +1130,10 @@ void draw_polyline(const int16_t *points, int n) {
  * ══════════════════════════════════════════════════════════════════ */
 
 void draw_polygon(const int16_t *points, int n, bool fill) {
-    if (!points || n < 3) return;
+    int16_t stack_ints[64];
+    int16_t *x_ints = stack_ints;
+
+    if (!draw_ready() || !points || n < 3) return;
 
     if (!fill) {
         /* Outline: draw edges + closing segment */
@@ -956,15 +1157,19 @@ void draw_polygon(const int16_t *points, int n, bool fill) {
     /* Clamp to clip rect */
     if (y_min < g_clip_y0) y_min = g_clip_y0;
     if (y_max > g_clip_y1) y_max = g_clip_y1;
+    if (y_min > y_max)
+        return;
 
-    /* For each scanline, collect X intersections with all edges */
-    #define MAX_POLY_INTERSECTIONS 64
-    int16_t x_ints[MAX_POLY_INTERSECTIONS];
+    if (n > (int)(sizeof(stack_ints) / sizeof(stack_ints[0]))) {
+        x_ints = (int16_t *)malloc((size_t)n * sizeof(*x_ints));
+        if (!x_ints)
+            return;
+    }
 
     for (int16_t y = y_min; y <= y_max; y++) {
         int num_ints = 0;
 
-        for (int i = 0; i < n && num_ints < MAX_POLY_INTERSECTIONS; i++) {
+        for (int i = 0; i < n; i++) {
             int j = (i + 1) % n;
             int16_t y0 = points[i * 2 + 1];
             int16_t y1 = points[j * 2 + 1];
@@ -1001,7 +1206,10 @@ void draw_polygon(const int16_t *points, int n, bool fill) {
                 fill_span(xl, y, xr - xl + 1);
         }
     }
-    #undef MAX_POLY_INTERSECTIONS
+    mark_dirty(y_min, y_max);
+
+    if (x_ints != stack_ints)
+        free(x_ints);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1081,10 +1289,10 @@ void draw_elliptical_arc(int16_t cx, int16_t cy, int16_t rx, int16_t ry,
                           int16_t start_deg, int16_t end_deg) {
     if (rx <= 0 || ry <= 0) return;
 
-    int32_t rx2 = (int32_t)rx * rx;
-    int32_t ry2 = (int32_t)ry * ry;
+    int64_t rx2 = (int64_t)rx * rx;
+    int64_t ry2 = (int64_t)ry * ry;
     int16_t x = 0, y = ry;
-    int32_t d1 = ry2 - rx2 * ry + rx2 / 4;
+    int64_t d1 = ry2 - rx2 * ry + rx2 / 4;
 
     /* Region 1 */
     while (ry2 * x < rx2 * y) {
@@ -1102,8 +1310,8 @@ void draw_elliptical_arc(int16_t cx, int16_t cy, int16_t rx, int16_t ry,
     }
 
     /* Region 2 */
-    int32_t d2 = ry2 * ((int32_t)(2 * x + 1) * (2 * x + 1)) / 4
-               + rx2 * ((int32_t)(y - 1) * (y - 1))
+    int64_t d2 = ry2 * ((int64_t)(2 * x + 1) * (2 * x + 1)) / 4
+               + rx2 * ((int64_t)(y - 1) * (y - 1))
                - rx2 * ry2;
     while (y >= 0) {
         earc_pixel(cx, cy,  x,  y, start_deg, end_deg);
@@ -1118,7 +1326,7 @@ void draw_elliptical_arc(int16_t cx, int16_t cy, int16_t rx, int16_t ry,
             d2 += 2 * ry2 * x - 2 * rx2 * y + rx2;
         }
     }
-    mark_dirty((int16_t)(cy - ry), (int16_t)(cy + ry));
+    mark_dirty_i32((int32_t)cy - ry, (int32_t)cy + ry);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1153,26 +1361,26 @@ void draw_elliptical_pie(int16_t cx, int16_t cy, int16_t rx, int16_t ry,
 
     /* Scanline-based sector fill for elliptical pie. */
     if (fill) {
-        int32_t rx2 = (int32_t)rx * rx;
-        int32_t ry2 = (int32_t)ry * ry;
+        int64_t rx2 = (int64_t)rx * rx;
+        int64_t ry2 = (int64_t)ry * ry;
         int16_t y0 = (cy - ry < g_clip_y0) ? g_clip_y0 : cy - ry;
         int16_t y1 = (cy + ry > g_clip_y1) ? g_clip_y1 : cy + ry;
         for (int16_t py = y0; py <= y1; py++) {
-            int32_t dy = py - cy;
+            int64_t dy = py - cy;
             /* Ellipse equation: dx²/rx² + dy²/ry² <= 1
              * → dx² <= rx²(1 - dy²/ry²) = rx²(ry² - dy²)/ry² */
-            int32_t num = rx2 * (ry2 - dy * dy);
+            int64_t num = rx2 * (ry2 - dy * dy);
             if (num < 0) continue;
-            int32_t dx_max2 = num / ry2;
+            int64_t dx_max2 = num / ry2;
             int16_t dx_max = (int16_t)sqrtf((float)dx_max2);
             int16_t x0 = (cx - dx_max < g_clip_x0) ? g_clip_x0 : cx - dx_max;
             int16_t x1 = (cx + dx_max > g_clip_x1) ? g_clip_x1 : cx + dx_max;
             for (int16_t px = x0; px <= x1; px++) {
-                int16_t ddx = px - cx, ddy = py - cy;
+                int64_t ddx = px - cx, ddy = py - cy;
                 /* Check inside ellipse */
-                if ((int32_t)ddx * ddx * ry2 + (int32_t)ddy * ddy * rx2 > rx2 * ry2)
+                if (ddx * ddx * ry2 + ddy * ddy * rx2 > rx2 * ry2)
                     continue;
-                int16_t a = pixel_angle(ddx, -ddy);
+                int16_t a = pixel_angle((int16_t)ddx, (int16_t)-ddy);
                 if (angle_in_range(a, start_deg, end_deg))
                     put_pixel(px, py);
             }
@@ -1182,10 +1390,14 @@ void draw_elliptical_pie(int16_t cx, int16_t cy, int16_t rx, int16_t ry,
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * THICK LINE — perpendicular brush stamp
+ * THICK LINE — Bresenham + square brush stamp at each pixel.
  *
- * For thickness N, draw N parallel lines offset perpendicular to
- * the line direction by ±N/2. Uses integer perpendicular offset.
+ * Stamping a t×t square at every Bresenham step gives uniform
+ * perpendicular thickness at all angles, including 45° where
+ * parallel-line offset approaches collapse on integer rounding.
+ * Cost O(N × t²) — fine for typical t < 10.  Honors clip via put_pixel,
+ * so brush stamps that fall outside the clip rect are silently dropped.
+ * Axis-aligned fast paths kept (parallel lines are cheaper than t² stamps).
  * ══════════════════════════════════════════════════════════════════ */
 
 void draw_thick_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
@@ -1193,31 +1405,44 @@ void draw_thick_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
         draw_line(x0, y0, x1, y1);
         return;
     }
+    if (!draw_ready()) return;
 
-    int16_t dx = x1 - x0, dy = y1 - y0;
+    int16_t dx_axis = x1 - x0, dy_axis = y1 - y0;
     int16_t t = g_line_thickness;
     int16_t half = t / 2;
 
-    if (dx == 0) {
-        /* Vertical: thicken horizontally */
+    if (dx_axis == 0) {
+        /* Vertical: t parallel verticals (cheaper than brush stamping). */
         for (int16_t i = -half; i < t - half; i++)
-            draw_line(x0 + i, y0, x1 + i, y1);
-    } else if (dy == 0) {
-        /* Horizontal: thicken vertically */
-        for (int16_t i = -half; i < t - half; i++)
-            draw_line(x0, y0 + i, x1, y1 + i);
-    } else {
-        /* Diagonal: offset perpendicular. For simplicity, approximate
-         * by offsetting in the shorter axis direction. */
-        int16_t ax = abs(dx), ay = abs(dy);
-        if (ax >= ay) {
-            /* More horizontal: offset in Y */
-            for (int16_t i = -half; i < t - half; i++)
-                draw_line(x0, y0 + i, x1, y1 + i);
-        } else {
-            /* More vertical: offset in X */
-            for (int16_t i = -half; i < t - half; i++)
-                draw_line(x0 + i, y0, x1 + i, y1);
-        }
+            draw_line((int16_t)(x0 + i), y0, (int16_t)(x1 + i), y1);
+        return;
     }
+    if (dy_axis == 0) {
+        /* Horizontal: t parallel horizontals. */
+        for (int16_t i = -half; i < t - half; i++)
+            draw_line(x0, (int16_t)(y0 + i), x1, (int16_t)(y1 + i));
+        return;
+    }
+
+    /* Diagonal: brush-stamp Bresenham. */
+    int16_t cx0 = x0, cy0 = y0, cx1 = x1, cy1 = y1;
+    if (!clip_line(&cx0, &cy0, &cx1, &cy1)) return;
+    int dx = abs(cx1 - cx0);
+    int dy = -abs(cy1 - cy0);
+    int sx = (cx0 < cx1) ? 1 : -1;
+    int sy = (cy0 < cy1) ? 1 : -1;
+    int err = dx + dy;
+    int16_t y_min = cy0 < cy1 ? cy0 : cy1;
+    int16_t y_max = cy0 < cy1 ? cy1 : cy0;
+
+    for (;;) {
+        for (int16_t by = -half; by < t - half; by++)
+            for (int16_t bx = -half; bx < t - half; bx++)
+                put_pixel((int16_t)(cx0 + bx), (int16_t)(cy0 + by));
+        if (cx0 == cx1 && cy0 == cy1) break;
+        int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; cx0 = (int16_t)(cx0 + sx); }
+        if (e2 <= dx) { err += dx; cy0 = (int16_t)(cy0 + sy); }
+    }
+    mark_dirty_i32((int32_t)y_min - half, (int32_t)y_max + (t - half));
 }

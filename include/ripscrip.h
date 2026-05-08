@@ -5,14 +5,15 @@
  * Vector graphics + text overlay for BBS systems. 640×350 EGA coordinates
  * scaled to 640×400 framebuffer. Base-36 "MegaNum" parameter encoding.
  *
- * Copyright (c) 2026 Brad Hawthorne
- * Licensed under GPL-3.0
+ * Copyright (c) 2026 SimVU (Brad Hawthorne)
+ * Licensed under the MIT License. See LICENSE.
  */
 
 #pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "rip_icons.h"
 #include "riplib_platform.h"
 
 /* Maximum mouse regions (RIPscrip spec: 128) */
@@ -24,7 +25,11 @@
 /* Maximum text block lines */
 #define RIP_MAX_TEXT_LINES    64
 
-/* Parser states — 13-state FSM matching RIPSCRIP.DLL ripParseStateMachine
+/* Maximum nested <<IF>> depth tracked by the stream preprocessor. */
+#define RIP_PREPROC_MAX_DEPTH 8
+
+/* Parser states — 14 states (DLL has 13; state 13 LEVEL3_LETTER added
+ * by A2GSPU for the '3' prefix).  Maps to RIPSCRIP.DLL ripParseStateMachine
  * (DLL states 0-12 at 0x10039E90; jump table at 0x1003AB9C)
  *
  * State 0  IDLE         — scanning for '!'  (was PASSTHROUGH)
@@ -119,6 +124,38 @@ typedef struct {
     bool     active;            /* Currently inside a text block */
 } rip_text_block_t;
 
+typedef struct {
+    /* 256-color VGA palette */
+    uint8_t vga_palette[256];   /* Palette index → RGB332 mapping */
+    bool    palette_custom;     /* true if palette has been modified */
+
+    /* GUI widget state */
+    bool    window_active;
+    int16_t win_x, win_y, win_w, win_h;
+
+    /* Scalable text */
+    uint8_t text_scale;     /* 1-8x scale factor */
+    int16_t text_rotation;  /* degrees */
+
+    /* Extended button table */
+    uint16_t num_buttons;
+
+    /* A2GSPU v3.1: Overflow pagination */
+    uint8_t *overflow_buf;        /* PSRAM article buffer */
+    uint32_t overflow_len;        /* Current article length */
+    uint16_t overflow_page;       /* Current page number */
+    uint16_t overflow_total;      /* Total pages */
+
+    /* A2GSPU v3.1: Engine capabilities */
+    uint8_t  caps_mask;           /* Capability bitmask */
+
+    /* A2GSPU v3.1: Per-port extended attributes (36 slots, one per port index).
+     * Added to match ripscrip2.c init/dispatch that references these arrays. */
+    uint8_t  port_alpha[36];      /* 0=transparent, 35=fully opaque */
+    uint8_t  port_comp_mode[36];  /* Compositing mode per port (0=COPY) */
+    uint8_t  port_zorder[36];     /* Z-order per port */
+} ripscrip2_state_t;
+
 /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────────── *
  *
  * The DLL maintains 36 independent GDI DCs (one per port slot) backed
@@ -141,15 +178,6 @@ typedef struct {
 #define RIP_MAX_PORTS              36
 #define RIP_PORT_FLAG_PROTECTED    0x01
 #define RIP_PORT_FLAG_FULLSCREEN   0x02
-
-/* Sentinel values for the 1-digit MegaNum port_num field in Delete/Copy.
- * In a 1-digit MegaNum, 'z'=35 is the highest valid port index.
- * Values above 35 in a 1-digit field are used as sentinels:
- *   DLL uses 0xFFFF/0xFFFE/0xFFFD as 16-bit sentinels; here mapped to
- *   the byte-range values that would appear in a 1-digit MegaNum. */
-#define RIP_PORT_IDX_CURRENT  0xFF   /* -1: use the current active port */
-#define RIP_PORT_IDX_ALL      0xFE   /* -2: all ports (bulk operation) */
-#define RIP_PORT_IDX_FIRST    0xFD   /* -3: first allocated unprotected port */
 
 typedef struct {
     bool     allocated;          /* Port slot is in use */
@@ -175,6 +203,10 @@ typedef struct {
     uint8_t  font_dir;
     uint8_t  font_hjust;   /* 0=left, 1=center, 2=right (v3.0 extension) */
     uint8_t  font_vjust;   /* 0=bottom, 1=center, 2=top, 3=baseline */
+    uint8_t  font_attrib;  /* bit0=bold, bit1=italic, bit2=underline, bit3=shadow */
+    uint8_t  font_ext_id;
+    uint8_t  font_ext_attr;
+    uint32_t font_ext_size;
 
     /* A2GSPU v3.1 extended attributes (set by !|2F port-flags command) */
     uint8_t  alpha;              /* 0=transparent, 35=fully opaque */
@@ -246,6 +278,8 @@ typedef struct {
     rip_button_style_t button_style;   /* Current button style (set by 1B) */
     rip_clipboard_t    clipboard;      /* Image clipboard (GET/PUT_IMAGE) */
     rip_text_block_t   text_block;     /* Active text block (1T/1t/1E) */
+    rip_icon_state_t   icon_state;     /* Session-scoped runtime icon cache + request queue */
+    ripscrip2_state_t  rip2_state;     /* Per-session RIPscrip 2.0 / v3.x state */
 
     /* Fix Q1/A7: last_char tracks previous byte for '!' line-boundary check */
     uint8_t  last_char;                /* previous byte received in PASSTHROUGH state */
@@ -260,11 +294,15 @@ typedef struct {
      * Directives are detected before normal byte routing.  When preproc_suppress
      * is true all output bytes (and command bytes) are swallowed except for
      * additional << directive starts needed to maintain nesting depth. */
-    uint8_t  preproc_state;    /* 0=normal, 1=got first '<', 2=collecting directive */
+    uint8_t  preproc_state;    /* 0=normal, 1=got first '<', 2=collecting, 3=got first '>' */
     char     preproc_buf[32];  /* Directive name accumulator */
     uint8_t  preproc_len;      /* Bytes written into preproc_buf */
     bool     preproc_suppress; /* true = inside false <<IF>> branch — suppress output */
-    uint8_t  preproc_depth;    /* Nesting depth for nested <<IF>> blocks */
+    uint8_t  preproc_depth;    /* Active stack depth, capped at RIP_PREPROC_MAX_DEPTH */
+    uint8_t  preproc_overflow; /* Nested levels beyond RIP_PREPROC_MAX_DEPTH */
+    bool     preproc_parent_suppress[RIP_PREPROC_MAX_DEPTH];
+    bool     preproc_branch_active[RIP_PREPROC_MAX_DEPTH];
+    bool     preproc_branch_taken[RIP_PREPROC_MAX_DEPTH];
 
     /* A2GSPU v3.1: Application variables */
     char app_vars[10][32];   /* $APP0$ through $APP9$ */
@@ -310,6 +348,15 @@ typedef struct {
      * Never reset on a mid-session protocol switch (rip_activate). */
     psram_arena_t psram_arena;
 
+    /* Per-session file-upload staging for dynamic BMP/ICN cache fills. */
+    uint8_t *upload_buf;
+    int      upload_pos;
+    char     upload_name[16];
+    int      upload_name_len;
+    uint8_t  upload_name_remaining;
+    bool     upload_name_overflow;
+    bool     upload_reading_name;
+
     /* FIX TX1: $RAND$ LCG seed — seeded from frame_count in rip_init_first().
      * Uses the same Knuth/POSIX LCG as MSVC rand(): multiplier 1103515245,
      * addend 12345.  ripTextVarEngine @ 0x026218 calls rand() for $RAND$. */
@@ -348,9 +395,20 @@ typedef struct {
     uint8_t    active_port;           /* Index of current active port (0-35) */
 } rip_state_t;
 
+/* Map a BGI fill style (0=EMPTY .. 12=USER) to the card-native fill
+ * pattern index used by drawing.c::fill_span().  Returns -1 for EMPTY
+ * (caller must skip the fill entirely). */
+int8_t rip_bgi_fill_to_card(uint8_t bgi_style);
+
 /* Codex FIX 1: Boot-time init — call ONCE at power-on.
  * Does memset, arena reservation, BGI font parse, and drawing defaults.
- * rip_init() is kept as a backward-compat alias for rip_init_first(). */
+ * rip_init() is kept as a backward-compat alias for rip_init_first().
+ *
+ * CONTRACT: caller MUST zero `*s` (e.g. via memset, calloc, or static
+ * storage) before the FIRST call.  The implementation snapshots the
+ * existing psram_arena before memset so re-initialization does not
+ * leak the allocated block; that snapshot reads from `*s` and would
+ * be UB on uninitialized memory. */
 void rip_init_first(rip_state_t *s);
 
 /* Codex FIX 1: Protocol-switch activation — called every time the
@@ -369,6 +427,18 @@ void rip_init(rip_state_t *s);
 
 void rip_process(rip_state_t *s, void *ctx, uint8_t ch);
 
+/* Stateful host-event helpers for multi-session integrations. */
+void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked);
+void rip_file_upload_begin_state(rip_state_t *s, uint8_t name_len);
+void rip_file_upload_byte_state(rip_state_t *s, uint8_t data_byte);
+void rip_file_upload_end_state(rip_state_t *s);
+
+/* Backward-compatible active-session wrappers. */
+void rip_mouse_event_ext(int16_t x, int16_t y, bool clicked);
+void rip_file_upload_begin(uint8_t name_len);
+void rip_file_upload_byte(uint8_t data_byte);
+void rip_file_upload_end(void);
+
 /* FIX V1/M4: Host callback shims — called from main.c Mosaic CMD handlers.
  * These accumulate one byte per call and commit on the NUL terminator.
  * main.c uses extern declarations; rip_state_t stays opaque outside ripscrip.c. */
@@ -381,6 +451,10 @@ void rip_query_response_byte(uint8_t data_byte); /* CMD_QUERY_RESPONSE — CB_IN
  * so that BBS-customized colors (set via RIP_SET_PALETTE / RIP_ONE_PALETTE) survive
  * a temporary switch to VT100 or another protocol.
  * rip_apply_palette() writes saved_palette_rgb565 back to hardware; falls back to
- * EGA defaults if no snapshot has been taken yet (saved_palette_rgb565 all zero). */
+ * EGA defaults if no snapshot has been taken yet (saved_palette_rgb565 all zero).
+ *
+ * NOTE: API asymmetry — save takes an explicit `s`, apply uses the active
+ * (last-initialized) session via the internal g_rip_state pointer.  Single-
+ * session in practice; if multi-session ever lands, change apply to take `s`. */
 void rip_save_palette(rip_state_t *s);
 void rip_apply_palette(void);
