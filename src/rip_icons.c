@@ -43,6 +43,84 @@ static bool name_match(const char *a, int alen, const char *b) {
     return true;
 }
 
+static int normalize_name(char *dst, const char *name, int name_len) {
+    int nlen = name_len;
+    if (!dst || !name || name_len <= 0)
+        return 0;
+    for (int i = 0; i < nlen; i++) {
+        if (name[i] == '.') {
+            nlen = i;
+            break;
+        }
+    }
+    if (nlen > RIP_ICON_NAME_MAX)
+        nlen = RIP_ICON_NAME_MAX;
+    if (nlen <= 0)
+        return 0;
+    for (int i = 0; i < nlen; i++) {
+        char c = name[i];
+        dst[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+    }
+    dst[nlen] = '\0';
+    return nlen;
+}
+
+static int runtime_cache_find(const rip_icon_state_t *state,
+                              const char *name, int name_len) {
+    char key[RIP_ICON_NAME_MAX + 1];
+    int key_len;
+
+    if (!state || !name_is_safe(name, name_len))
+        return -1;
+
+    key_len = normalize_name(key, name, name_len);
+    if (key_len <= 0)
+        return -1;
+
+    for (int i = 0; i < state->cache_count; i++) {
+        if (name_match(key, key_len, state->cache[i].name))
+            return i;
+    }
+    return -1;
+}
+
+static bool runtime_cache_store(rip_icon_state_t *state,
+                                const char *name, int name_len,
+                                uint8_t *pixels,
+                                uint16_t w, uint16_t h,
+                                bool replace) {
+    char key[RIP_ICON_NAME_MAX + 1];
+    int key_len;
+    int existing;
+    rip_icon_cache_entry_t *e;
+
+    if (!state || !name_is_safe(name, name_len) || !pixels)
+        return false;
+    if (w == 0 || h == 0 || w > 640 || h > 400)
+        return false;
+
+    key_len = normalize_name(key, name, name_len);
+    if (key_len <= 0)
+        return false;
+
+    existing = runtime_cache_find(state, key, key_len);
+    if (existing >= 0) {
+        if (!replace)
+            return true;
+        e = &state->cache[existing];
+    } else {
+        if (state->cache_count >= RIP_ICON_CACHE_MAX)
+            return false;
+        e = &state->cache[state->cache_count++];
+        memcpy(e->name, key, (size_t)key_len + 1u);
+    }
+
+    e->pixels = pixels;
+    e->width  = w;
+    e->height = h;
+    return true;
+}
+
 /* ── Arena binding + cache reset ─────────────────────────────────── */
 
 void rip_icon_set_arena(rip_icon_state_t *state, psram_arena_t *arena) {
@@ -57,17 +135,32 @@ void rip_icon_set_arena(rip_icon_state_t *state, psram_arena_t *arena) {
 
 bool rip_icon_lookup(const rip_icon_state_t *state,
                      const char *name, int name_len, rip_icon_t *out) {
+    char key[RIP_ICON_NAME_MAX + 1];
+    int key_len;
+
     if (!name || name_len <= 0 || !out || !name_is_safe(name, name_len))
         return false;
 
-    /* Strip extension if present */
-    for (int i = 0; i < name_len; i++) {
-        if (name[i] == '.') { name_len = i; break; }
+    key_len = normalize_name(key, name, name_len);
+    if (key_len <= 0)
+        return false;
+
+    /* 1. Check PSRAM runtime cache so uploaded/generated assets can
+     * supersede same-named bundled icons for the current session. */
+    if (state) {
+        for (int i = 0; i < state->cache_count; i++) {
+            if (name_match(key, key_len, state->cache[i].name)) {
+                out->pixels = state->cache[i].pixels;
+                out->width  = state->cache[i].width;
+                out->height = state->cache[i].height;
+                return true;
+            }
+        }
     }
 
-    /* 1. Check flash-embedded BMP table */
+    /* 2. Check flash-embedded BMP table */
     for (int i = 0; i < RIP_ICON_COUNT; i++) {
-        if (name_match(name, name_len, rip_icon_table[i].filename)) {
+        if (name_match(key, key_len, rip_icon_table[i].filename)) {
             out->pixels = rip_icon_table[i].pixels;
             out->width  = rip_icon_table[i].width;
             out->height = rip_icon_table[i].height;
@@ -75,23 +168,12 @@ bool rip_icon_lookup(const rip_icon_state_t *state,
         }
     }
 
-    /* 1b. Check flash-embedded ICN table */
+    /* 2b. Check flash-embedded ICN table */
     for (int i = 0; i < RIP_ICN_COUNT; i++) {
-        if (name_match(name, name_len, rip_icn_table[i].filename)) {
+        if (name_match(key, key_len, rip_icn_table[i].filename)) {
             out->pixels = rip_icn_table[i].pixels;
             out->width  = rip_icn_table[i].width;
             out->height = rip_icn_table[i].height;
-            return true;
-        }
-    }
-
-    /* 2. Check PSRAM runtime cache */
-    if (!state) return false;
-    for (int i = 0; i < state->cache_count; i++) {
-        if (name_match(name, name_len, state->cache[i].name)) {
-            out->pixels = state->cache[i].pixels;
-            out->width  = state->cache[i].width;
-            out->height = state->cache[i].height;
             return true;
         }
     }
@@ -101,18 +183,20 @@ bool rip_icon_lookup(const rip_icon_state_t *state,
 
 /* ── BMP parser + PSRAM cache ────────────────────────────────────── */
 
-bool rip_icon_cache_bmp(rip_icon_state_t *state,
-                        const char *name, int name_len,
-                        const uint8_t *data, int size) {
-    rip_icon_t existing;
+static bool rip_icon_cache_bmp_impl(rip_icon_state_t *state,
+                                    const char *name, int name_len,
+                                    const uint8_t *data, int size,
+                                    bool replace) {
+    int existing;
 
     if (!state || !name_is_safe(name, name_len) || !data || size < 54)
         return false;
     if (size < 54 || data[0] != 'B' || data[1] != 'M')
         return false;
-    if (rip_icon_lookup(state, name, name_len, &existing))
+    existing = runtime_cache_find(state, name, name_len);
+    if (existing >= 0 && !replace)
         return true;
-    if (state->cache_count >= RIP_ICON_CACHE_MAX)
+    if (existing < 0 && state->cache_count >= RIP_ICON_CACHE_MAX)
         return false;
 
     /* Parse BMP header */
@@ -177,57 +261,37 @@ bool rip_icon_cache_bmp(rip_icon_state_t *state,
         }
     }
 
-    /* Store in cache */
-    rip_icon_cache_entry_t *e = &state->cache[state->cache_count];
-    int nlen = name_len;
-    /* Strip extension */
-    for (int i = 0; i < nlen; i++) {
-        if (name[i] == '.') { nlen = i; break; }
-    }
-    if (nlen > RIP_ICON_NAME_MAX) nlen = RIP_ICON_NAME_MAX;
-    for (int i = 0; i < nlen; i++) {
-        char c = name[i];
-        e->name[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
-    }
-    e->name[nlen] = '\0';
-    e->pixels = pixels;
-    e->width  = (uint16_t)width;
-    e->height = (uint16_t)height;
-    state->cache_count++;
+    return runtime_cache_store(state, name, name_len, pixels,
+                               (uint16_t)width, (uint16_t)height, replace);
+}
 
-    return true;
+bool rip_icon_cache_bmp(rip_icon_state_t *state,
+                        const char *name, int name_len,
+                        const uint8_t *data, int size) {
+    return rip_icon_cache_bmp_impl(state, name, name_len, data, size, false);
+}
+
+bool rip_icon_cache_bmp_replace(rip_icon_state_t *state,
+                                const char *name, int name_len,
+                                const uint8_t *data, int size) {
+    return rip_icon_cache_bmp_impl(state, name, name_len, data, size, true);
 }
 
 bool rip_icon_cache_pixels(rip_icon_state_t *state,
                            const char *name, int name_len,
                            uint8_t *pixels, uint16_t w, uint16_t h) {
-    rip_icon_t existing;
+    return runtime_cache_store(state, name, name_len, pixels, w, h, false);
+}
 
-    if (!state || !name_is_safe(name, name_len) || !pixels)
-        return false;
-    if (w == 0 || h == 0 || w > 640 || h > 400)
-        return false;
-    if (rip_icon_lookup(state, name, name_len, &existing))
-        return true;
-    if (state->cache_count >= RIP_ICON_CACHE_MAX)
-        return false;
+bool rip_icon_cache_pixels_replace(rip_icon_state_t *state,
+                                   const char *name, int name_len,
+                                   uint8_t *pixels, uint16_t w, uint16_t h) {
+    return runtime_cache_store(state, name, name_len, pixels, w, h, true);
+}
 
-    rip_icon_cache_entry_t *e = &state->cache[state->cache_count];
-    int nlen = name_len;
-    for (int i = 0; i < nlen; i++) {
-        if (name[i] == '.') { nlen = i; break; }
-    }
-    if (nlen > RIP_ICON_NAME_MAX) nlen = RIP_ICON_NAME_MAX;
-    for (int i = 0; i < nlen; i++) {
-        char c = name[i];
-        e->name[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
-    }
-    e->name[nlen] = '\0';
-    e->pixels = pixels;
-    e->width  = w;
-    e->height = h;
-    state->cache_count++;
-    return true;
+bool rip_icon_cache_has_runtime(const rip_icon_state_t *state,
+                                const char *name, int name_len) {
+    return runtime_cache_find(state, name, name_len) >= 0;
 }
 
 int rip_icon_cache_count(const rip_icon_state_t *state) {

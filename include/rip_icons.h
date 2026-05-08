@@ -51,7 +51,7 @@ typedef struct {
 void rip_icon_set_arena(rip_icon_state_t *state, psram_arena_t *arena);
 
 /* Look up an icon by filename (uppercase, no extension).
- * Checks flash-embedded table first, then PSRAM cache.
+ * Checks PSRAM runtime cache first, then flash-embedded tables.
  * Returns true + fills out icon descriptor, or false if not found. */
 bool rip_icon_lookup(const rip_icon_state_t *state,
                      const char *name, int name_len, rip_icon_t *out);
@@ -64,11 +64,26 @@ bool rip_icon_cache_bmp(rip_icon_state_t *state,
                         const char *name, int name_len,
                         const uint8_t *bmp_data, int bmp_size);
 
+/* Parse a BMP and cache/replace the runtime entry.  Used for file uploads,
+ * where a newer transfer of the same icon name should win. */
+bool rip_icon_cache_bmp_replace(rip_icon_state_t *state,
+                                const char *name, int name_len,
+                                const uint8_t *bmp_data, int bmp_size);
+
 /* Cache pre-parsed pixel data directly (from ICN parser or other sources).
  * pixels must be PSRAM-allocated (not freed by cache). */
 bool rip_icon_cache_pixels(rip_icon_state_t *state,
                            const char *name, int name_len,
                            uint8_t *pixels, uint16_t w, uint16_t h);
+
+/* Cache or replace pre-parsed pixel data.  Used by write-style protocol
+ * commands where a later save to the same name must supersede earlier data. */
+bool rip_icon_cache_pixels_replace(rip_icon_state_t *state,
+                                   const char *name, int name_len,
+                                   uint8_t *pixels, uint16_t w, uint16_t h);
+
+bool rip_icon_cache_has_runtime(const rip_icon_state_t *state,
+                                const char *name, int name_len);
 
 /* Runtime cache stats */
 int rip_icon_cache_count(const rip_icon_state_t *state);

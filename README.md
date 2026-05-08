@@ -13,7 +13,7 @@
 
 *31-page diagnostic harness running on RP2350 HSTX → DVI at 720×480 60fps. Click to watch.*
 
-RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a full RIPscrip protocol parser supporting **all protocol versions**: v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, and v3.1 (A2GSPU extensions). It renders to any `uint8_t*` framebuffer with zero platform dependencies.
+RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a broad RIPscrip protocol parser for v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, and v3.1 (A2GSPU extensions). Storage-oriented client features are mapped to an in-memory icon/clipboard cache and host request queue on embedded targets. It renders to any `uint8_t*` framebuffer with zero platform dependencies.
 
 ### Comparison
 
@@ -33,18 +33,18 @@ RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 B
 | Alpha/Transparency | No | Yes (SDL) | No | **Per-port (v3.1)** |
 | Multiple Windows | No | Yes (SDL) | No | **36 Drawing Ports** |
 | Mouse Regions | No | Yes (SDL) | Yes | **Yes + hit testing** |
-| Protocol Parser | No | No | No | **Full RIPscrip v1.54-v3.1** |
+| Protocol Parser | No | No | No | **Broad RIPscrip v1.54-v3.1** |
 | Platform | DOS only | SDL2/SDL3 | Windows | **Any C99 + framebuffer** |
 | Dependencies | DOS/BIOS | SDL2 | Win32 | **None** |
 
 ### Protocol Version Support
 
-| Version | Year | Coverage | Notes |
-|---------|------|----------|-------|
-| **v1.54** | 1993 | 100% | Full Level 0 (35 drawing commands) + Level 1 (17 interactive commands) |
-| **v2.0** | 1994 | 100% | Extended commands (rounded rect, scroll, poly bezier, bounded text, etc.) + Level 2 Drawing Port system (36 ports with state save/restore) |
-| **v3.0** | 1995 | 100% | Font justification, extended text windows, gradient fill, scalable text, menu/dialog/scrollbar widgets |
-| **v3.1** | 2026 | 100% | A2GSPU extensions: AND/NOT write modes, vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
+| Version | Year | Status | Notes |
+|---------|------|--------|-------|
+| **v1.54** | 1993 | Implemented | Level 0 drawing plus Level 1 interactive commands, icon cache lookup, clipboard capture/paste, file query, variables, and host callback fallbacks |
+| **v2.0** | 1994 | Implemented with embedded fallbacks | Extended drawing commands, icon slots/style, scaled region copy, and Level 2 Drawing Ports with state save/restore |
+| **v3.0** | 1995 | Implemented with approximations | Font justification, extended text windows, gradient fill, scalable text state, menu/dialog/scrollbar widgets, palette query, and indexed-color alpha approximation |
+| **v3.1** | 2026 | Implemented extensions | A2GSPU extensions: AND/NOT write modes, vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
 
 ## Features
 

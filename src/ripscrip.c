@@ -123,6 +123,15 @@ static int32_t mega4(const char *p) {
                      mega_digit(p[2]) * 36 + mega_digit(p[3]));
 }
 
+static size_t rip_strnlen(const char *s, size_t max_len) {
+    size_t n = 0;
+    if (!s)
+        return 0;
+    while (n < max_len && s[n] != '\0')
+        n++;
+    return n;
+}
+
 /* Scale RIPscrip Y (640×350) to card Y (640×400).
  * Two variants prevent gaps between adjacent rectangles:
  * scale_y  = floor (for top edges, y-positions, single coords)
@@ -188,7 +197,6 @@ static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_le
     uint16_t icn_h;
     size_t pixel_count;
     uint8_t *pixels;
-    rip_icon_t existing;
 
     if (!s || !data || !rip_filename_is_safe(name, name_len))
         return;
@@ -198,9 +206,8 @@ static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_le
     pixel_count = (size_t)icn_w * (size_t)icn_h;
     if (pixel_count == 0 || pixel_count > RIP_CLIPBOARD_MAX)
         return;
-    if (rip_icon_lookup(&s->icon_state, name, name_len, &existing))
-        return;
-    if (rip_icon_cache_count(&s->icon_state) >= RIP_ICON_CACHE_MAX)
+    if (rip_icon_cache_count(&s->icon_state) >= RIP_ICON_CACHE_MAX &&
+        !rip_icon_cache_has_runtime(&s->icon_state, name, name_len))
         return;
 
     pixels = (uint8_t *)psram_arena_alloc(&s->psram_arena, (uint32_t)pixel_count);
@@ -210,11 +217,359 @@ static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_le
     if (!rip_icn_parse(data, size, pixels, &icn_w, &icn_h))
         return;
 
-    (void)rip_icon_cache_pixels(&s->icon_state, name, name_len, pixels, icn_w, icn_h);
+    (void)rip_icon_cache_pixels_replace(&s->icon_state, name, name_len,
+                                         pixels, icn_w, icn_h);
 }
 
 static uint8_t palette_slot(int idx) {
     return (uint8_t)(240 + idx);
+}
+
+static bool rip_clipboard_alloc(rip_state_t *s) {
+    if (!s)
+        return false;
+    if (!s->clipboard.data) {
+        s->clipboard.data = (uint8_t *)psram_arena_alloc(&s->psram_arena,
+                                                         RIP_CLIPBOARD_MAX);
+    }
+    return s->clipboard.data != NULL;
+}
+
+static bool rip_clipboard_store_pixels(rip_state_t *s,
+                                       const uint8_t *pixels,
+                                       uint16_t width,
+                                       uint16_t height) {
+    size_t bytes;
+
+    if (!s || !pixels || width == 0 || height == 0)
+        return false;
+
+    bytes = (size_t)width * (size_t)height;
+    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
+        return false;
+    if (!rip_clipboard_alloc(s))
+        return false;
+
+    memmove(s->clipboard.data, pixels, bytes);
+    s->clipboard.width = (int16_t)width;
+    s->clipboard.height = (int16_t)height;
+    s->clipboard.valid = true;
+    return true;
+}
+
+static bool rip_clipboard_capture(rip_state_t *s,
+                                  int16_t x, int16_t y,
+                                  int16_t width, int16_t height) {
+    size_t bytes;
+
+    if (!s || width <= 0 || height <= 0)
+        return false;
+
+    bytes = (size_t)(uint16_t)width * (size_t)(uint16_t)height;
+    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
+        return false;
+    if (!rip_clipboard_alloc(s))
+        return false;
+
+    draw_save_region(x, y, width, height, s->clipboard.data);
+    s->clipboard.width = width;
+    s->clipboard.height = height;
+    s->clipboard.valid = true;
+    return true;
+}
+
+static bool rip_cache_clipboard_as_icon(rip_state_t *s,
+                                        const char *name,
+                                        int name_len,
+                                        rip_icon_t *out_icon) {
+    size_t bytes;
+    uint8_t *pixels;
+
+    if (!s || !s->clipboard.valid || !s->clipboard.data ||
+        !rip_filename_is_safe(name, name_len))
+        return false;
+
+    bytes = (size_t)(uint16_t)s->clipboard.width *
+            (size_t)(uint16_t)s->clipboard.height;
+    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
+        return false;
+
+    pixels = (uint8_t *)psram_arena_alloc(&s->psram_arena, (uint32_t)bytes);
+    if (!pixels)
+        return false;
+
+    memcpy(pixels, s->clipboard.data, bytes);
+    if (!rip_icon_cache_pixels_replace(&s->icon_state, name, name_len, pixels,
+                                       (uint16_t)s->clipboard.width,
+                                       (uint16_t)s->clipboard.height))
+        return false;
+
+    if (out_icon) {
+        out_icon->pixels = pixels;
+        out_icon->width = (uint16_t)s->clipboard.width;
+        out_icon->height = (uint16_t)s->clipboard.height;
+    }
+    return true;
+}
+
+static bool rip_save_clipboard_slot(rip_state_t *s, uint16_t slot) {
+    size_t bytes;
+    uint8_t *pixels;
+    char slot_name[RIP_ICON_NAME_MAX + 1];
+
+    if (!s || slot >= RIP_ICON_SLOT_MAX ||
+        !s->clipboard.valid || !s->clipboard.data)
+        return false;
+
+    bytes = (size_t)(uint16_t)s->clipboard.width *
+            (size_t)(uint16_t)s->clipboard.height;
+    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
+        return false;
+
+    pixels = (uint8_t *)psram_arena_alloc(&s->psram_arena, (uint32_t)bytes);
+    if (!pixels)
+        return false;
+    memcpy(pixels, s->clipboard.data, bytes);
+
+    s->icon_slots[slot].pixels = pixels;
+    s->icon_slots[slot].width = (uint16_t)s->clipboard.width;
+    s->icon_slots[slot].height = (uint16_t)s->clipboard.height;
+    s->icon_slot_valid[slot] = true;
+
+    snprintf(slot_name, sizeof(slot_name), "SLOT%02u", (unsigned)slot);
+    (void)rip_icon_cache_pixels_replace(&s->icon_state, slot_name,
+                                        (int)strlen(slot_name),
+                                        pixels,
+                                        (uint16_t)s->clipboard.width,
+                                        (uint16_t)s->clipboard.height);
+    return true;
+}
+
+static void rip_blit_pixels(rip_state_t *s,
+                            int16_t dx, int16_t dy,
+                            const uint8_t *pixels,
+                            uint16_t src_w, uint16_t src_h,
+                            int16_t dst_w, int16_t dst_h,
+                            uint8_t write_mode) {
+    uint8_t old_color;
+
+    if (!pixels || src_w == 0 || src_h == 0 || dst_w <= 0 || dst_h <= 0)
+        return;
+    if (write_mode > DRAW_MODE_NOT)
+        write_mode = DRAW_MODE_COPY;
+
+    old_color = draw_get_color();
+    draw_set_write_mode(write_mode);
+
+    if (dst_w == (int16_t)src_w && dst_h == (int16_t)src_h) {
+        draw_restore_region(dx, dy, dst_w, dst_h, pixels);
+    } else {
+        for (int16_t yy = 0; yy < dst_h; yy++) {
+            uint16_t sy = (uint16_t)(((uint32_t)(uint16_t)yy * src_h) /
+                                     (uint16_t)dst_h);
+            for (int16_t xx = 0; xx < dst_w; xx++) {
+                uint16_t sx = (uint16_t)(((uint32_t)(uint16_t)xx * src_w) /
+                                         (uint16_t)dst_w);
+                draw_set_color(pixels[(size_t)sy * src_w + sx]);
+                draw_pixel((int16_t)(dx + xx), (int16_t)(dy + yy));
+            }
+        }
+    }
+
+    draw_set_write_mode(s ? s->write_mode : DRAW_MODE_COPY);
+    draw_set_color(old_color);
+}
+
+static void rip_blit_pixels_tiled(rip_state_t *s,
+                                  int16_t x0, int16_t y0,
+                                  int16_t x1, int16_t y1,
+                                  const uint8_t *pixels,
+                                  uint16_t src_w, uint16_t src_h,
+                                  uint8_t write_mode) {
+    draw_clip_state_t saved_clip;
+
+    if (!pixels || src_w == 0 || src_h == 0 || x1 < x0 || y1 < y0)
+        return;
+
+    draw_save_clip(&saved_clip);
+    draw_set_clip(x0, y0, x1, y1);
+    for (int16_t y = y0; y <= y1; y = (int16_t)(y + src_h)) {
+        for (int16_t x = x0; x <= x1; x = (int16_t)(x + src_w)) {
+            rip_blit_pixels(s, x, y, pixels, src_w, src_h,
+                            (int16_t)src_w, (int16_t)src_h, write_mode);
+            if (src_w == 0)
+                break;
+        }
+        if (src_h == 0)
+            break;
+    }
+    draw_restore_clip(&saved_clip);
+}
+
+static void rip_draw_icon_pixels(rip_state_t *s,
+                                 int16_t x, int16_t y,
+                                 const uint8_t *pixels,
+                                 uint16_t src_w, uint16_t src_h,
+                                 int16_t requested_w,
+                                 int16_t requested_h,
+                                 uint8_t write_mode) {
+    bool has_box;
+    int16_t bx0;
+    int16_t by0;
+    int16_t bx1;
+    int16_t by1;
+    int16_t dst_w;
+    int16_t dst_h;
+    uint8_t mode;
+
+    if (!s || !pixels || src_w == 0 || src_h == 0)
+        return;
+
+    has_box = (requested_w > 0 && requested_h > 0);
+    if (has_box) {
+        bx0 = x;
+        by0 = y;
+        bx1 = (int16_t)(x + requested_w - 1);
+        by1 = (int16_t)(y + requested_h - 1);
+    } else if (s->icon_style_active) {
+        bx0 = s->icon_style_x0;
+        by0 = s->icon_style_y0;
+        bx1 = s->icon_style_x1;
+        by1 = s->icon_style_y1;
+    } else {
+        rip_blit_pixels(s, x, y, pixels, src_w, src_h,
+                        (int16_t)src_w, (int16_t)src_h, write_mode);
+        return;
+    }
+
+    if (bx0 > bx1) { int16_t t = bx0; bx0 = bx1; bx1 = t; }
+    if (by0 > by1) { int16_t t = by0; by0 = by1; by1 = t; }
+    dst_w = (int16_t)(bx1 - bx0 + 1);
+    dst_h = (int16_t)(by1 - by0 + 1);
+    if (dst_w <= 0 || dst_h <= 0)
+        return;
+
+    mode = s->icon_style_active ? (uint8_t)(s->icon_style_style & 0x03u)
+                                : (uint8_t)(s->image_style & 0x03u);
+
+    if (mode == 1) {
+        rip_blit_pixels_tiled(s, bx0, by0, bx1, by1, pixels, src_w, src_h,
+                              write_mode);
+        return;
+    }
+
+    if (mode == 2) {
+        dst_w = (int16_t)src_w;
+        dst_h = (int16_t)src_h;
+        if ((s->icon_style_align & 0x03u) == 2u) {
+            bx0 = (int16_t)(bx1 - dst_w + 1);
+            by0 = (int16_t)(by1 - dst_h + 1);
+        } else {
+            bx0 = (int16_t)(bx0 + ((bx1 - bx0 + 1) - dst_w) / 2);
+            by0 = (int16_t)(by0 + ((by1 - by0 + 1) - dst_h) / 2);
+        }
+    } else if (mode == 3) {
+        int32_t w_fit = (int32_t)(bx1 - bx0 + 1);
+        int32_t h_fit = ((int32_t)w_fit * src_h) / src_w;
+        if (h_fit > (int32_t)(by1 - by0 + 1)) {
+            h_fit = (int32_t)(by1 - by0 + 1);
+            w_fit = ((int32_t)h_fit * src_w) / src_h;
+        }
+        if (w_fit <= 0) w_fit = 1;
+        if (h_fit <= 0) h_fit = 1;
+        dst_w = (int16_t)w_fit;
+        dst_h = (int16_t)h_fit;
+        bx0 = (int16_t)(bx0 + ((bx1 - bx0 + 1) - dst_w) / 2);
+        by0 = (int16_t)(by0 + ((by1 - by0 + 1) - dst_h) / 2);
+    }
+
+    rip_blit_pixels(s, bx0, by0, pixels, src_w, src_h, dst_w, dst_h,
+                    write_mode);
+}
+
+static void rip_copy_screen_region_scaled(rip_state_t *s,
+                                          int16_t sx, int16_t sy,
+                                          int16_t sw, int16_t sh,
+                                          int16_t dx, int16_t dy,
+                                          int16_t dw, int16_t dh,
+                                          uint8_t write_mode) {
+    size_t bytes;
+    uint8_t *scratch;
+
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
+        return;
+    if (write_mode > DRAW_MODE_NOT)
+        write_mode = DRAW_MODE_COPY;
+
+    if (sw == dw && sh == dh && write_mode == DRAW_MODE_COPY) {
+        draw_copy_rect(sx, sy, dx, dy, sw, sh);
+        return;
+    }
+
+    bytes = (size_t)(uint16_t)sw * (size_t)(uint16_t)sh;
+    if (bytes == 0)
+        return;
+
+    scratch = (uint8_t *)malloc(bytes);
+    if (!scratch)
+        return;
+    draw_save_region(sx, sy, sw, sh, scratch);
+    rip_blit_pixels(s, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
+                    dw, dh, write_mode);
+    free(scratch);
+}
+
+static int rip_font_id_from_name(const char *name, int len) {
+    static const struct {
+        const char *tag;
+        int id;
+    } fonts[] = {
+        { "TRIP", BGI_FONT_TRIPLEX },
+        { "LITT", BGI_FONT_SMALL },
+        { "SANS", BGI_FONT_SANS },
+        { "GOTH", BGI_FONT_GOTHIC },
+        { "SCRI", BGI_FONT_SCRIPT },
+        { "SIMP", BGI_FONT_SIMPLEX },
+        { "TSCR", BGI_FONT_TRIPLEX_SCR },
+        { "LCOM", BGI_FONT_COMPLEX },
+        { "EURO", BGI_FONT_EUROPEAN },
+        { "BOLD", BGI_FONT_BOLD },
+    };
+    int start = 0;
+    int end = len;
+
+    if (!name || len <= 0)
+        return -1;
+    for (int i = 0; i < len; i++) {
+        if (name[i] == '/' || name[i] == '\\' || name[i] == ':')
+            start = i + 1;
+    }
+    for (int i = start; i < len; i++) {
+        if (name[i] == '.') {
+            end = i;
+            break;
+        }
+    }
+
+    for (size_t fi = 0; fi < sizeof(fonts) / sizeof(fonts[0]); fi++) {
+        const char *tag = fonts[fi].tag;
+        size_t tag_len = strlen(tag);
+        if ((size_t)(end - start) != tag_len)
+            continue;
+        bool match = true;
+        for (size_t j = 0; j < tag_len; j++) {
+            char c = name[start + (int)j];
+            if (c >= 'a' && c <= 'z')
+                c = (char)(c - 32);
+            if (c != tag[j]) {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+            return fonts[fi].id;
+    }
+    return -1;
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -501,6 +856,16 @@ void rip_session_reset(rip_state_t *s) {
     s->clipboard.valid = false;
     s->clipboard.width = 0;
     s->clipboard.height = 0;
+    memset(s->icon_slots, 0, sizeof(s->icon_slots));
+    memset(s->icon_slot_valid, 0, sizeof(s->icon_slot_valid));
+    s->icon_style_active = false;
+    s->icon_style_x0 = 0;
+    s->icon_style_y0 = 0;
+    s->icon_style_x1 = 0;
+    s->icon_style_y1 = 0;
+    s->icon_style_style = 0;
+    s->icon_style_align = 0;
+    s->icon_style_scale = 0;
 
     /* Clear application variables. */
     memset(s->app_vars, 0, sizeof(s->app_vars));
@@ -721,7 +1086,7 @@ static int rip_expand_variables(rip_state_t *s,
              * which may drift from the BBS host clock — the callback model
              * fixes this by making the IIgs the sole clock authority. */
             if (s->host_date[0] != '\0') {
-                vval_len = (int)strnlen(s->host_date, sizeof(s->host_date) - 1);
+                vval_len = (int)rip_strnlen(s->host_date, sizeof(s->host_date) - 1);
                 if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
                 memcpy(val, s->host_date, (size_t)vval_len);
             } else {
@@ -736,7 +1101,7 @@ static int rip_expand_variables(rip_state_t *s,
             /* $TIME$ — FIX V1: use host-supplied time (CB_GET_TIME equivalent).
              * Falls back to RP2350 RTC when host has not synced yet. */
             if (s->host_time[0] != '\0') {
-                vval_len = (int)strnlen(s->host_time, sizeof(s->host_time) - 1);
+                vval_len = (int)rip_strnlen(s->host_time, sizeof(s->host_time) - 1);
                 if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
                 memcpy(val, s->host_time, (size_t)vval_len);
             } else {
@@ -760,7 +1125,7 @@ static int rip_expand_variables(rip_state_t *s,
                    vname[2] == 'P' && vname[3] >= '0' && vname[3] <= '9') {
             /* $APP0$-$APP9$ — application-defined variables */
             int idx = vname[3] - '0';
-            vval_len = (int)strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
+            vval_len = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
             if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
             memcpy(val, s->app_vars[idx], (size_t)vval_len);
 
@@ -1175,9 +1540,9 @@ void rip_file_upload_end_state(rip_state_t *s) {
                      * DLL: ripLoadResource copies raw data and the caller
                      * (e.g. ripImageLoad) dispatches by file extension / magic. */
                     if (scratch[0] == 'B' && scratch[1] == 'M') {
-                        rip_icon_cache_bmp(&s->icon_state,
-                                           me->name, (int)strlen(me->name),
-                                           scratch, (int)nbytes);
+                        rip_icon_cache_bmp_replace(&s->icon_state,
+                                                   me->name, (int)strlen(me->name),
+                                                   scratch, (int)nbytes);
                     } else if (nbytes >= 6) {
                         rip_cache_icn_if_valid(s, me->name, (int)strlen(me->name),
                                                scratch, (int)nbytes);
@@ -1200,9 +1565,9 @@ void rip_file_upload_end_state(rip_state_t *s) {
 
     /* Try BMP first (check 'BM' magic) */
     if (s->upload_buf[0] == 'B' && s->upload_buf[1] == 'M') {
-        rip_icon_cache_bmp(&s->icon_state,
-                           s->upload_name, s->upload_name_len,
-                           s->upload_buf, s->upload_pos);
+        rip_icon_cache_bmp_replace(&s->icon_state,
+                                   s->upload_name, s->upload_name_len,
+                                   s->upload_buf, s->upload_pos);
     } else {
         rip_cache_icn_if_valid(s, s->upload_name, s->upload_name_len,
                                s->upload_buf, s->upload_pos);
@@ -1434,6 +1799,66 @@ static void rip_render_text(rip_state_t *s, const char *raw, int raw_len) {
     }
     if (s->font_dir == 0) s->draw_x = (int16_t)(s->draw_x + adv);
     else                  s->draw_y = (int16_t)(s->draw_y + adv);
+}
+
+static void rip_render_text_box(rip_state_t *s,
+                                int16_t x0, int16_t y0,
+                                int16_t x1, int16_t y1,
+                                uint8_t flags,
+                                const char *raw, int raw_len) {
+    draw_clip_state_t saved_clip;
+    int16_t cx0;
+    int16_t cy0;
+    int16_t cx1;
+    int16_t cy1;
+    uint8_t old_hjust;
+    uint8_t old_vjust;
+
+    if (!s || !raw || raw_len <= 0)
+        return;
+    if (x0 > x1) { int16_t t = x0; x0 = x1; x1 = t; }
+    if (y0 > y1) { int16_t t = y0; y0 = y1; y1 = t; }
+
+    draw_save_clip(&saved_clip);
+    cx0 = x0 > saved_clip.x0 ? x0 : saved_clip.x0;
+    cy0 = y0 > saved_clip.y0 ? y0 : saved_clip.y0;
+    cx1 = x1 < saved_clip.x1 ? x1 : saved_clip.x1;
+    cy1 = y1 < saved_clip.y1 ? y1 : saved_clip.y1;
+    if (cx0 > cx1 || cy0 > cy1)
+        return;
+
+    old_hjust = s->font_hjust;
+    old_vjust = s->font_vjust;
+
+    s->font_hjust = 0;
+    if (flags & 0x02u) s->font_hjust = 1;
+    if (flags & 0x04u) s->font_hjust = 2;
+
+    s->font_vjust = 2; /* top, matching a bounded text box default */
+    if (flags & 0x10u) s->font_vjust = 1;
+    if (flags & 0x20u) s->font_vjust = 2;
+    if (flags & 0x40u) s->font_vjust = 3;
+
+    if (s->font_hjust == 1)
+        s->draw_x = (int16_t)(x0 + (x1 - x0 + 1) / 2);
+    else if (s->font_hjust == 2)
+        s->draw_x = (int16_t)(x1 + 1);
+    else
+        s->draw_x = x0;
+
+    if (s->font_vjust == 0)
+        s->draw_y = (int16_t)(y1 + 1);
+    else if (s->font_vjust == 1)
+        s->draw_y = (int16_t)(y0 + (y1 - y0 + 1) / 2);
+    else
+        s->draw_y = y0;
+
+    draw_set_clip(cx0, cy0, cx1, cy1);
+    rip_render_text(s, raw, raw_len);
+    draw_restore_clip(&saved_clip);
+
+    s->font_hjust = old_hjust;
+    s->font_vjust = old_vjust;
 }
 
 static void apply_session_draw_state(rip_state_t *s) {
@@ -1710,18 +2135,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int16_t gx0 = mega2(p), gy0 = scale_y(mega2(p + 2));
                 int16_t gx1 = mega2(p + 4), gy1 = scale_y1(mega2(p + 6));
                 int16_t gw = gx1 - gx0 + 1, gh = gy1 - gy0 + 1;
-                if (gw > 0 && gh > 0 && (uint32_t)(gw * gh) <= RIP_CLIPBOARD_MAX) {
-                    /* Lazy-allocate clipboard from session arena */
-                    if (!s->clipboard.data)
-                        s->clipboard.data = (uint8_t *)psram_arena_alloc(&s->psram_arena,
-                                                                          RIP_CLIPBOARD_MAX);
-                    if (s->clipboard.data) {
-                        draw_save_region(gx0, gy0, gw, gh, s->clipboard.data);
-                        s->clipboard.width = gw;
-                        s->clipboard.height = gh;
-                        s->clipboard.valid = true;
-                    }
-                }
+                (void)rip_clipboard_capture(s, gx0, gy0, gw, gh);
             }
             break;
         case 'P': /* RIP_PUT_IMAGE — paste clipboard to screen
@@ -1731,10 +2145,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 /* mode at p+4: 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT */
                 uint8_t mode = (len >= 6) ? mega2(p + 4) : 0;
                 if (mode > 4) mode = 0;
-                draw_set_write_mode(mode);
-                draw_restore_region(px, py, s->clipboard.width,
-                                    s->clipboard.height, s->clipboard.data);
-                draw_set_write_mode(s->write_mode); /* restore */
+                rip_blit_pixels(s, px, py, s->clipboard.data,
+                                (uint16_t)s->clipboard.width,
+                                (uint16_t)s->clipboard.height,
+                                s->clipboard.width, s->clipboard.height, mode);
             }
             break;
 
@@ -1795,6 +2209,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         case 'I': /* RIP_LOAD_ICON — x:2 y:2 mode:2 clipboard:1 res:2 filename */
             if (len >= 9) {
                 int16_t ix = mega2(p), iy = scale_y(mega2(p + 2));
+                uint8_t mode = (uint8_t)(mega2(p + 4) & 0xFF);
+                bool copy_to_clipboard = (mega_digit(p[6]) != 0);
                 /* mode at p+4, clipboard at p+6, res at p+7:8 */
                 int fname_start = 9;
                 int fname_len = len - fname_start;
@@ -1802,25 +2218,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     const char *path = p + fname_start;
                     if (!rip_filename_is_safe(path, fname_len))
                         break;
+                    if (mode > DRAW_MODE_NOT)
+                        mode = DRAW_MODE_COPY;
 
                     rip_icon_t icon;
                     if (rip_icon_lookup(&s->icon_state, path, fname_len, &icon)) {
-                        /* Blit icon to framebuffer */
-                        draw_restore_region(ix, iy, icon.width, icon.height,
-                                            icon.pixels);
-                        /* If clipboard flag set, also copy to clipboard */
-                        if (mega_digit(p[6]) && !s->clipboard.data)
-                            s->clipboard.data = (uint8_t *)psram_arena_alloc(&s->psram_arena,
-                                                                              RIP_CLIPBOARD_MAX);
-                        if (mega_digit(p[6]) && s->clipboard.data) {
-                            int sz = icon.width * icon.height;
-                            if ((uint32_t)sz <= RIP_CLIPBOARD_MAX) {
-                                memcpy(s->clipboard.data, icon.pixels, (size_t)sz);
-                                s->clipboard.width = icon.width;
-                                s->clipboard.height = icon.height;
-                                s->clipboard.valid = true;
-                            }
-                        }
+                        rip_draw_icon_pixels(s, ix, iy, icon.pixels,
+                                             icon.width, icon.height,
+                                             0, 0, mode);
+                        if (copy_to_clipboard)
+                            (void)rip_clipboard_store_pixels(s, icon.pixels,
+                                                             icon.width,
+                                                             icon.height);
                     } else {
                         /* Icon not found — queue file request + draw placeholder */
                         rip_icon_request_file(&s->icon_state, path, fname_len);
@@ -1831,7 +2240,16 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 }
             }
             break;
-        case 'W': /* RIP_WRITE_ICON — no-op on embedded card (no writable fs) */
+        case 'W': /* RIP_WRITE_ICON — cache current clipboard under a filename */
+            if (len > 0 && s->clipboard.valid && s->clipboard.data) {
+                const char *name = p;
+                int name_len = len;
+                if (name_len > 2 && p[0] == '0' && p[1] == '0') {
+                    name = p + 2;
+                    name_len -= 2;
+                }
+                (void)rip_cache_clipboard_as_icon(s, name, name_len, NULL);
+            }
             break;
 
         /* ── Audio playback commands ───────────────────────────── */
@@ -1896,12 +2314,25 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
-        /* ── Font loading stub ──────────────────────────────────── */
+        /* ── Font loading ───────────────────────────────────────── */
         case 'O': /* RIP_FONT_LOAD — load BGI/RFF font from file.
                    * DLL: loads font into the per-instance font table.
-                   * A2GSPU: all fonts are pre-compiled in flash; ignore.
-                   * TODO: if a CHR filename matches a known slot, record it. */
-            /* stub — no dynamic font loading on embedded card */
+                   * A2GSPU: built-in BGI fonts are pre-compiled in flash.
+                   * If the requested CHR name matches one, make it active;
+                   * otherwise queue a file request for the host side. */
+            if (len > 0) {
+                int off = 0;
+                int fid;
+                if (len > 2 && p[0] == '0' && p[1] == '0')
+                    off = 2;
+                fid = rip_font_id_from_name(p + off, len - off);
+                if (fid >= 0 && fid < BGI_FONT_COUNT) {
+                    s->font_id = (uint8_t)fid;
+                    s->font_ext_id = (uint8_t)fid;
+                } else if (rip_filename_is_safe(p + off, len - off)) {
+                    rip_icon_request_file(&s->icon_state, p + off, len - off);
+                }
+            }
             break;
 
         /* ── Extended query routing ─────────────────────────────── */
@@ -1919,7 +2350,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     vname[2] == 'P' && vname[3] == 'P' &&
                     vname[4] >= '0' && vname[4] <= '9' && vname[5] == '$') {
                     int idx = vname[4] - '0';
-                    rlen = (int)strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
+                    rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
                     if (rlen > 0)
                         card_tx_push(s->app_vars[idx], rlen);
                 } else {
@@ -1953,12 +2384,73 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * DLL: provides compound clipboard operations (blend, mask,
                    * flip, rotate) beyond the basic GET/PUT_IMAGE pair.
                    * Format: op:2 [params vary by op].
-                   * TODO: implement blend/flip when draw layer supports it. */
-            /* stub — basic GET/PUT via 1C/1P already implemented */
+                   * Embedded fallback ops:
+                   *   0=clear, 1=flip horizontal, 2=flip vertical,
+                   *   3=rotate 180, 4=invert palette bytes,
+                   *   5=capture x0/y0/x1/y1, 6=paste x/y/mode. */
+            if (len >= 2) {
+                uint8_t op = (uint8_t)(mega2(p) & 0xFF);
+                if (op == 0) {
+                    s->clipboard.valid = false;
+                    s->clipboard.width = 0;
+                    s->clipboard.height = 0;
+                } else if (s->clipboard.valid && s->clipboard.data &&
+                           op >= 1 && op <= 4) {
+                    int16_t cw = s->clipboard.width;
+                    int16_t ch = s->clipboard.height;
+                    if (op == 1 || op == 3) {
+                        for (int16_t yy = 0; yy < ch; yy++) {
+                            uint8_t *row = s->clipboard.data + (size_t)yy * (uint16_t)cw;
+                            for (int16_t xx = 0; xx < cw / 2; xx++) {
+                                uint8_t t = row[xx];
+                                row[xx] = row[cw - 1 - xx];
+                                row[cw - 1 - xx] = t;
+                            }
+                        }
+                    }
+                    if (op == 2 || op == 3) {
+                        for (int16_t yy = 0; yy < ch / 2; yy++) {
+                            uint8_t *top = s->clipboard.data + (size_t)yy * (uint16_t)cw;
+                            uint8_t *bot = s->clipboard.data + (size_t)(ch - 1 - yy) * (uint16_t)cw;
+                            for (int16_t xx = 0; xx < cw; xx++) {
+                                uint8_t t = top[xx];
+                                top[xx] = bot[xx];
+                                bot[xx] = t;
+                            }
+                        }
+                    }
+                    if (op == 4) {
+                        size_t n = (size_t)(uint16_t)cw * (size_t)(uint16_t)ch;
+                        for (size_t i = 0; i < n; i++)
+                            s->clipboard.data[i] = (uint8_t)~s->clipboard.data[i];
+                    }
+                } else if (op == 5 && len >= 10) {
+                    int16_t x0 = mega2(p + 2);
+                    int16_t y0 = scale_y(mega2(p + 4));
+                    int16_t x1 = mega2(p + 6);
+                    int16_t y1 = scale_y1(mega2(p + 8));
+                    (void)rip_clipboard_capture(s, x0, y0,
+                                                (int16_t)(x1 - x0 + 1),
+                                                (int16_t)(y1 - y0 + 1));
+                } else if (op == 6 && len >= 8 &&
+                           s->clipboard.valid && s->clipboard.data) {
+                    int16_t x = mega2(p + 2);
+                    int16_t y = scale_y(mega2(p + 4));
+                    uint8_t mode = (uint8_t)(mega2(p + 6) & 0xFF);
+                    if (mode > DRAW_MODE_NOT) mode = DRAW_MODE_COPY;
+                    rip_blit_pixels(s, x, y, s->clipboard.data,
+                                    (uint16_t)s->clipboard.width,
+                                    (uint16_t)s->clipboard.height,
+                                    s->clipboard.width, s->clipboard.height,
+                                    mode);
+                }
+            }
             break;
 
         /* ── Scene / file operations (no filesystem) ──────────── */
-        case 'R': /* RIP_READ_SCENE — no-op (no scene file loading) */
+        case 'R': /* RIP_READ_SCENE — request scene file from host side */
+            if (len > 0 && rip_filename_is_safe(p, len))
+                rip_icon_request_file(&s->icon_state, p, len);
             break;
         case 'F': /* RIP_FILE_QUERY — mode:2 res:4 filename
                    * E5: DLL extended response format (rip_images.c):
@@ -2085,7 +2577,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     vname[2] == 'P' && vname[3] == 'P' &&
                     vname[4] >= '0' && vname[4] <= '9' && vname[5] == '$') {
                     int idx = vname[4] - '0';
-                    rlen = (int)strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
+                    rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
                     if (rlen == 0 && !s->query_pending) {
                         /* Empty variable — BBS wants user input.  Start round-trip:
                          * push 0x3E (CMD_QUERY_PROMPT marker) + variable name + NUL
@@ -2289,6 +2781,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         /* Level 1 state → cleared */
         memset(&s->button_style, 0, sizeof(s->button_style));
         s->clipboard.valid = false;
+        memset(s->icon_slot_valid, 0, sizeof(s->icon_slot_valid));
+        s->icon_style_active = false;
+        s->icon_style_style = 0;
+        s->icon_style_align = 0;
+        s->icon_style_scale = 0;
         s->text_block.active = false;
         /* Screen → cleared directly. Also reset rip_has_drawn so that
          * any ANSI ESC[2J arriving before the next RIP drawing command
@@ -2698,10 +3195,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* -- Save icon (v2.0+) ----------------------------------------------- */
     /* DLL command table entry 40: 'J' = RIP_SAVE_ICON (1 arg: 2-digit slot) */
     case 'J': /* RIP_SAVE_ICON -- slot:2 */
-        /* TODO: save clipboard contents to named icon slot.
-         * Requires a persistent icon slot table indexed by mega2(p).
-         * The clipboard must already be valid (populated by 1C GET_IMAGE).
-         * No filesystem write is performed on this embedded card. */
+        if (len >= 2)
+            (void)rip_save_clipboard_slot(s, (uint16_t)mega2(p));
         break;
 
     /* -- Scroll region (v2.0+) ------------------------------------------- */
@@ -2743,34 +3238,37 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* -- Copy region (v2.0+) --------------------------------------------- */
     /* DLL command table entry 8: ',' = RIP_COPY_REGION (10 args: XY*10) */
     case ',': /* RIP_COPY_REGION -- sx0:2 sy0:2 sx1:2 sy1:2 dx:2 dy:2 dx1:2 dy1:2 res:2 res:2 */
-        if (len >= 20) {
+        if (len >= 12) {
             int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
             int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
-            int16_t dx  = mega2(p + 8),  dy  = scale_y(mega2(p + 10));
+            int16_t dx0 = mega2(p + 8),  dy0 = scale_y(mega2(p + 10));
             int16_t rw  = sx1 - sx0 + 1, rh  = sy1 - sy0 + 1;
-            if (rw > 0 && rh > 0)
-                draw_copy_rect(sx0, sy0, dx, dy, rw, rh);
+            int16_t dw = rw, dh = rh;
+            if (len >= 16) {
+                int16_t dx1 = mega2(p + 12);
+                int16_t dy1 = scale_y1(mega2(p + 14));
+                if (!(dx1 == 0 && dy1 == 0)) {
+                    if (dx0 > dx1) { int16_t t = dx0; dx0 = dx1; dx1 = t; }
+                    if (dy0 > dy1) { int16_t t = dy0; dy0 = dy1; dy1 = t; }
+                    dw = (int16_t)(dx1 - dx0 + 1);
+                    dh = (int16_t)(dy1 - dy0 + 1);
+                }
+            }
+            rip_copy_screen_region_scaled(s, sx0, sy0, rw, rh,
+                                          dx0, dy0, dw, dh, DRAW_MODE_COPY);
         }
         break;
 
     /* -- Extended positioned text (v2.0+) -------------------------------- */
-    /* DLL command table entry 9: '-' = RIP_TEXT_XY_EXT (5 args: XY,XY,XY,XY,2 + text)
-     *
-     * L14: previously this case had its own copy of the text-rendering
-     * logic that (a) skipped variable expansion and (b) passed NULL as
-     * the bitmap font to draw_text, which makes draw_text early-return
-     * — silently dropping any glyph in the bitmap-font branch.  Route
-     * through rip_render_text so escapes, $variables, justification,
-     * and font selection all match RIP_TEXT/RIP_TEXT_XY exactly.
-     *
-     * The bounding box (x1,y1) and flags (p+8) are still not honored —
-     * documented as a deliberate gap; the DLL clips text to the box and
-     * applies horizontal/vertical justification within it. */
+    /* DLL command table entry 9: '-' = RIP_TEXT_XY_EXT (5 args: XY,XY,XY,XY,2 + text).
+     * Route through the shared text renderer inside the supplied box so
+     * escapes, variables, clipping, and justification stay consistent. */
     case '-': /* RIP_TEXT_XY_EXT -- x0:2 y0:2 x1:2 y1:2 flags:2 text */
         if (len >= 10) {
-            s->draw_x = mega2(p);
-            s->draw_y = scale_y(mega2(p + 2));
-            rip_render_text(s, p + 10, len - 10);
+            int16_t bx0 = mega2(p),     by0 = scale_y(mega2(p + 2));
+            int16_t bx1 = mega2(p + 4), by1 = scale_y1(mega2(p + 6));
+            uint8_t flags = (uint8_t)(mega2(p + 8) & 0xFF);
+            rip_render_text_box(s, bx0, by0, bx1, by1, flags, p + 10, len - 10);
         }
         break;
 
@@ -2934,17 +3432,47 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL binary: 0x60 (backtick) = RIP_COMPOSITE_ICON (11 args: XY x 10, 1) */
     case 0x60: /* RIP_COMPOSITE_ICON -- 5 src/dst rect pairs (XY x 10) + mode:1 */
         /* Multi-region screen compositing: 5 rect pairs blit source regions
-         * to destination regions using the specified raster op.
-         * TODO: implement all 5 pairs when multi-region compositing is needed.
-         * Currently performs only the first src->dst blit. */
-        if (len >= 20) {
+         * to destination regions using the specified raster op.  Historical
+         * docs disagree on whether later entries are 12-byte rect records or
+         * 8-byte point pairs; accept complete rect records and use the first
+         * rect size for trailing point pairs. */
+        if (len >= 12) {
+            int offset = 0;
+            int pairs = 0;
+            int mode_pos = (len >= 41) ? 40 : len;
+            uint8_t mode = (len >= 41) ? (uint8_t)mega_digit(p[40])
+                                       : s->write_mode;
             int16_t cx0 = mega2(p),      cy0 = scale_y(mega2(p + 2));
             int16_t cx1 = mega2(p + 4),  cy1 = scale_y1(mega2(p + 6));
-            int16_t cdx = mega2(p + 8),  cdy = scale_y(mega2(p + 10));
             int16_t cw  = cx1 - cx0 + 1, ch  = cy1 - cy0 + 1;
-            if (cw > 0 && ch > 0)
-                draw_copy_rect(cx0, cy0, cdx, cdy, cw, ch);
-            /* Pairs 2-5 (p+12..p+39) and mode (p+40) not yet processed */
+            if (mode > DRAW_MODE_NOT)
+                mode = DRAW_MODE_COPY;
+            while (offset + 12 <= mode_pos && pairs < 5) {
+                int16_t sx0 = mega2(p + offset);
+                int16_t sy0 = scale_y(mega2(p + offset + 2));
+                int16_t sx1 = mega2(p + offset + 4);
+                int16_t sy1 = scale_y1(mega2(p + offset + 6));
+                int16_t dx = mega2(p + offset + 8);
+                int16_t dy = scale_y(mega2(p + offset + 10));
+                int16_t sw = (int16_t)(sx1 - sx0 + 1);
+                int16_t sh = (int16_t)(sy1 - sy0 + 1);
+                rip_copy_screen_region_scaled(s, sx0, sy0, sw, sh,
+                                              dx, dy, sw, sh, mode);
+                cw = sw;
+                ch = sh;
+                offset += 12;
+                pairs++;
+            }
+            while (offset + 8 <= mode_pos && pairs < 5 && cw > 0 && ch > 0) {
+                int16_t sx = mega2(p + offset);
+                int16_t sy = scale_y(mega2(p + offset + 2));
+                int16_t dx = mega2(p + offset + 4);
+                int16_t dy = scale_y(mega2(p + offset + 6));
+                rip_copy_screen_region_scaled(s, sx, sy, cw, ch,
+                                              dx, dy, cw, ch, mode);
+                offset += 8;
+                pairs++;
+            }
         }
         break;
 
@@ -3016,40 +3544,63 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t gx0 = mega2(p),     gy0 = scale_y(mega2(p + 2));
             int16_t gx1 = mega2(p + 4), gy1 = scale_y1(mega2(p + 6));
             int16_t gw = gx1 - gx0 + 1, gh = gy1 - gy0 + 1;
-            if (gw > 0 && gh > 0 &&
-                (uint32_t)gw * (uint32_t)gh <= RIP_CLIPBOARD_MAX) {
-                if (!s->clipboard.data)
-                    s->clipboard.data = (uint8_t *)psram_arena_alloc(
-                                            &s->psram_arena, RIP_CLIPBOARD_MAX);
-                if (s->clipboard.data) {
-                    draw_save_region(gx0, gy0, gw, gh, s->clipboard.data);
-                    s->clipboard.width  = gw;
-                    s->clipboard.height = gh;
-                    s->clipboard.valid  = true;
-                }
-            }
+            (void)rip_clipboard_capture(s, gx0, gy0, gw, gh);
         }
         break;
 
     /* ── Icon display style (v2.0+) ──────────────────────────── */
     /* DLL command table entry 3: '&' = RIP_ICON_STYLE (5 args: XY,XY,2,2,2). */
     case '&': /* RIP_ICON_STYLE — x0:2 y0:2 x1:2 y1:2 style:2 align:2 scale:2 */
-        /* TODO: icon display style controls scaling/alignment of subsequently
-         * stamped icons.  Arguments not yet consumed.  Accepted to prevent
-         * ERROR_RECOVERY from consuming the rest of the frame. */
-        (void)len;
+        if (len >= 14) {
+            int16_t x0 = mega2(p),     y0 = scale_y(mega2(p + 2));
+            int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
+            if (x0 > x1) { int16_t t = x0; x0 = x1; x1 = t; }
+            if (y0 > y1) { int16_t t = y0; y0 = y1; y1 = t; }
+            s->icon_style_x0 = x0;
+            s->icon_style_y0 = y0;
+            s->icon_style_x1 = x1;
+            s->icon_style_y1 = y1;
+            s->icon_style_style = (uint8_t)(mega2(p + 8) & 0x03);
+            s->icon_style_align = (uint8_t)(mega2(p + 10) & 0x03);
+            s->icon_style_scale = (uint8_t)(mega2(p + 12) & 0xFF);
+            s->icon_style_active = true;
+        } else {
+            s->icon_style_active = false;
+        }
         break;
 
     /* ── Stamp icon from slot (v2.0+) ───────────────────────── */
     /* DLL command table entry 10: '.' = RIP_STAMP_ICON (6 args: XY×6). */
     case '.': /* RIP_STAMP_ICON — slot:2 x:2 y:2 w:2 h:2 flags:2 */
-        /* Stamps the clipboard icon at (x,y).  The first arg is the icon slot
-         * number (currently ignored — only the clipboard is supported). */
-        if (len >= 8 && s->clipboard.valid && s->clipboard.data) {
+        if (len >= 6) {
+            uint16_t slot = (uint16_t)mega2(p);
             int16_t dx = mega2(p + 2);
             int16_t dy = scale_y(mega2(p + 4));
-            draw_restore_region(dx, dy, s->clipboard.width, s->clipboard.height,
-                                s->clipboard.data);
+            int16_t dw = 0;
+            int16_t dh = 0;
+            rip_icon_t icon;
+            bool have_icon = false;
+
+            if (len >= 10) {
+                dw = mega2(p + 6);
+                dh = scale_y(mega2(p + 8));
+            }
+
+            if (slot < RIP_ICON_SLOT_MAX && s->icon_slot_valid[slot]) {
+                icon = s->icon_slots[slot];
+                have_icon = true;
+            } else if (s->clipboard.valid && s->clipboard.data) {
+                icon.pixels = s->clipboard.data;
+                icon.width = (uint16_t)s->clipboard.width;
+                icon.height = (uint16_t)s->clipboard.height;
+                have_icon = true;
+            }
+
+            if (have_icon) {
+                rip_draw_icon_pixels(s, dx, dy, icon.pixels,
+                                     icon.width, icon.height,
+                                     dw, dh, s->write_mode);
+            }
         }
         break;
 

@@ -43,8 +43,141 @@
 #include "drawing.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 extern void palette_write_rgb565(uint8_t index, uint16_t rgb565);
+extern void card_tx_push(const char *buf, int len);
+
+static uint8_t rip2_rgb332_r(uint8_t rgb) {
+    return (uint8_t)((((rgb >> 5) & 0x07u) * 255u) / 7u);
+}
+
+static uint8_t rip2_rgb332_g(uint8_t rgb) {
+    return (uint8_t)((((rgb >> 2) & 0x07u) * 255u) / 7u);
+}
+
+static uint8_t rip2_rgb332_b(uint8_t rgb) {
+    return (uint8_t)(((rgb & 0x03u) * 255u) / 3u);
+}
+
+static uint8_t rip2_nearest_palette_index(const ripscrip2_state_t *s,
+                                          uint8_t rgb332) {
+    int best_idx = 0;
+    int best_dist = 32767;
+    int tr = (rgb332 >> 5) & 7;
+    int tg = (rgb332 >> 2) & 7;
+    int tb = rgb332 & 3;
+
+    for (int i = 0; i < 256; i++) {
+        uint8_t pal = s->vga_palette[i];
+        int dr = ((pal >> 5) & 7) - tr;
+        int dg = ((pal >> 2) & 7) - tg;
+        int db = (pal & 3) - tb;
+        int dist = dr * dr * 4 + dg * dg * 4 + db * db * 9;
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_idx = i;
+            if (dist == 0)
+                break;
+        }
+    }
+    return (uint8_t)best_idx;
+}
+
+static bool rip2_clipboard_alloc(rip_state_t *rs) {
+    if (!rs)
+        return false;
+    if (!rs->clipboard.data) {
+        rs->clipboard.data = (uint8_t *)psram_arena_alloc(&rs->psram_arena,
+                                                          RIP_CLIPBOARD_MAX);
+    }
+    return rs->clipboard.data != NULL;
+}
+
+static bool rip2_clipboard_capture(rip_state_t *rs,
+                                   int16_t x, int16_t y,
+                                   int16_t w, int16_t h) {
+    size_t bytes;
+
+    if (!rs || w <= 0 || h <= 0)
+        return false;
+    bytes = (size_t)(uint16_t)w * (size_t)(uint16_t)h;
+    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
+        return false;
+    if (!rip2_clipboard_alloc(rs))
+        return false;
+
+    draw_save_region(x, y, w, h, rs->clipboard.data);
+    rs->clipboard.width = w;
+    rs->clipboard.height = h;
+    rs->clipboard.valid = true;
+    return true;
+}
+
+static void rip2_blit_pixels(rip_state_t *rs,
+                             int16_t dx, int16_t dy,
+                             const uint8_t *pixels,
+                             uint16_t src_w, uint16_t src_h,
+                             int16_t dst_w, int16_t dst_h,
+                             uint8_t write_mode) {
+    uint8_t old_color;
+
+    if (!pixels || src_w == 0 || src_h == 0 || dst_w <= 0 || dst_h <= 0)
+        return;
+    if (write_mode > DRAW_MODE_NOT)
+        write_mode = DRAW_MODE_COPY;
+
+    old_color = draw_get_color();
+    draw_set_write_mode(write_mode);
+    if (dst_w == (int16_t)src_w && dst_h == (int16_t)src_h) {
+        draw_restore_region(dx, dy, dst_w, dst_h, pixels);
+    } else {
+        for (int16_t yy = 0; yy < dst_h; yy++) {
+            uint16_t sy = (uint16_t)(((uint32_t)(uint16_t)yy * src_h) /
+                                     (uint16_t)dst_h);
+            for (int16_t xx = 0; xx < dst_w; xx++) {
+                uint16_t sx = (uint16_t)(((uint32_t)(uint16_t)xx * src_w) /
+                                         (uint16_t)dst_w);
+                draw_set_color(pixels[(size_t)sy * src_w + sx]);
+                draw_pixel((int16_t)(dx + xx), (int16_t)(dy + yy));
+            }
+        }
+    }
+    draw_set_write_mode(rs ? rs->write_mode : DRAW_MODE_COPY);
+    draw_set_color(old_color);
+}
+
+static void rip2_copy_scaled(rip_state_t *rs,
+                             int16_t sx, int16_t sy,
+                             int16_t sw, int16_t sh,
+                             int16_t dx, int16_t dy,
+                             int16_t dw, int16_t dh,
+                             uint8_t write_mode) {
+    size_t bytes;
+    uint8_t *scratch;
+
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
+        return;
+    if (write_mode > DRAW_MODE_NOT)
+        write_mode = DRAW_MODE_COPY;
+
+    if (sw == dw && sh == dh && write_mode == DRAW_MODE_COPY) {
+        draw_copy_rect(sx, sy, dx, dy, sw, sh);
+        return;
+    }
+
+    bytes = (size_t)(uint16_t)sw * (size_t)(uint16_t)sh;
+    if (bytes == 0)
+        return;
+    scratch = (uint8_t *)malloc(bytes);
+    if (!scratch)
+        return;
+
+    draw_save_region(sx, sy, sw, sh, scratch);
+    rip2_blit_pixels(rs, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
+                     dw, dh, write_mode);
+    free(scratch);
+}
 
 /* =====================================================================
  * MegaNum helpers (local -- not exported from ripscrip.c)
@@ -241,7 +374,7 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
     draw_set_line_style(p->line_style, p->line_thick);
     card_pat = bgi_fill_to_card(p->fill_pattern);
     draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
-                        rs->palette[p->fill_color & 0x0F]);
+                        rs->palette[p->back_color & 0x0F]);
 }
 
 /*
@@ -428,7 +561,8 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
  *
  * Source/dest coords of all zeros = use entire viewport of that port.
  * If dx1,dy1 = 0 -- no scaling (verbatim copy to dx0,dy0 position).
- * Scaling is not implemented (no off-screen surfaces available).
+ * If the destination rectangle has a different size, scale nearest-neighbor
+ * through a scratch copy so overlapping source/dest regions remain stable.
  * Input coordinates are in EGA (640x350) space; scaled to card here.
  */
 static void rip_port_copy(rip_state_t *rs,
@@ -458,31 +592,33 @@ static void rip_port_copy(rip_state_t *rs,
         rsx1 = sx1;         rsy1 = scale_y1(sy1);
     }
 
-    /* Resolve destination position (all-zero = upper-left of dest viewport) */
-    int16_t rdx, rdy;
+    /* Resolve destination position/rectangle (all-zero = upper-left). */
+    int16_t rdx, rdy, rdx1, rdy1;
+    bool dest_rect = false;
     if (dx0 == 0 && dy0 == 0 && dx1 == 0 && dy1 == 0) {
         rdx = dp->vp_x0; rdy = dp->vp_y0;
+        rdx1 = 0; rdy1 = 0;
     } else {
         rdx = dx0; rdy = scale_y(dy0);
+        rdx1 = dx1; rdy1 = scale_y1(dy1);
+        dest_rect = !(dx1 == 0 && dy1 == 0);
     }
 
     int16_t w = (int16_t)(rsx1 - rsx0 + 1);
     int16_t h = (int16_t)(rsy1 - rsy0 + 1);
+    int16_t dw = w;
+    int16_t dh = h;
     if (w <= 0 || h <= 0)
         return;
 
-    if (write_mode == DRAW_MODE_COPY) {
-        draw_copy_rect(rsx0, rsy0, rdx, rdy, w, h);
-    } else {
-        size_t bytes = (size_t)w * (size_t)h;
-        uint8_t *scratch = (uint8_t *)malloc(bytes);
-        if (!scratch)
-            return;
-        draw_save_region(rsx0, rsy0, w, h, scratch);
-        draw_set_write_mode(write_mode);
-        draw_restore_region(rdx, rdy, w, h, scratch);
-        free(scratch);
+    if (dest_rect) {
+        if (rdx > rdx1) { int16_t t = rdx; rdx = rdx1; rdx1 = t; }
+        if (rdy > rdy1) { int16_t t = rdy; rdy = rdy1; rdy1 = t; }
+        dw = (int16_t)(rdx1 - rdx + 1);
+        dh = (int16_t)(rdy1 - rdy + 1);
     }
+
+    rip2_copy_scaled(rs, rsx0, rsy0, w, h, rdx, rdy, dw, dh, write_mode);
 
     /* Restore active port's write mode */
     draw_set_write_mode(rs->ports[rs->active_port].write_mode);
@@ -656,15 +792,17 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     case RIP2_CMD_SET_WINDOW: {
         if (param_count < 4)
             break;
+        uint8_t old_color = draw_get_color();
         s->win_x = params[0];
         s->win_y = scale_y(params[1]);
         s->win_w = params[2];
         s->win_h = scale_y(params[3]);
         s->window_active = true;
-        draw_set_color(s->vga_palette[7]);
+        draw_set_color(7);
         draw_rect(s->win_x, s->win_y, s->win_w, s->win_h, false);
-        draw_set_color(s->vga_palette[1]);
+        draw_set_color(1);
         draw_rect(s->win_x + 1, s->win_y + 1, s->win_w - 2, 14, true);
+        draw_set_color(old_color);
         break;
     }
 
@@ -686,22 +824,25 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         uint8_t c1 = s->vga_palette[params[4] & 0xFF];
         uint8_t c2 = s->vga_palette[params[5] & 0xFF];
         bool vertical = (params[6] != 0);
+        uint8_t old_color = draw_get_color();
 
         int steps = vertical ? gh : gw;
         if (steps <= 0) steps = 1;
+        int denom = (steps > 1) ? (steps - 1) : 1;
         int r1 = (c1 >> 5) & 7, g1 = (c1 >> 2) & 7, b1 = c1 & 3;
         int r2 = (c2 >> 5) & 7, g2 = (c2 >> 2) & 7, b2 = c2 & 3;
         for (int i = 0; i < steps; i++) {
-            int r = r1 + (r2 - r1) * i / steps;
-            int g = g1 + (g2 - g1) * i / steps;
-            int b = b1 + (b2 - b1) * i / steps;
+            int r = r1 + (r2 - r1) * i / denom;
+            int g = g1 + (g2 - g1) * i / denom;
+            int b = b1 + (b2 - b1) * i / denom;
             uint8_t color = (uint8_t)(((r & 7) << 5) | ((g & 7) << 2) | (b & 3));
-            draw_set_color(color);
+            draw_set_color(rip2_nearest_palette_index(s, color));
             if (vertical)
                 draw_hline(gx, (int16_t)(gy + i), gw);
             else
                 draw_vline((int16_t)(gx + i), gy, gh);
         }
+        draw_set_color(old_color);
         break;
     }
 
@@ -760,7 +901,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     /* ── !|2R -- Host-triggered screen refresh ──────────────────── */
     case RIP2_CMD_SET_REFRESH: {
         /* Mark all rows dirty for refresh — platform-specific */
-        (void)c;
+        draw_mark_all_dirty();
         break;
     }
 
@@ -771,10 +912,11 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     case RIP2_CMD_SCROLLBAR: {
         if (param_count < 8)
             break;
+        uint8_t old_color = draw_get_color();
         int16_t sx = params[0], sy = scale_y(params[1]);
         int16_t sw = params[2], sh = scale_y(params[3]);
         /* Draw track */
-        draw_set_color(s->vga_palette[7]);  /* light gray */
+        draw_set_color(7);  /* light gray */
         draw_rect(sx, sy, sw, sh, true);
         /* Draw thumb */
         int range = params[5] - params[4];
@@ -782,12 +924,13 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
             int thumb_h = sh * params[7] / range;
             if (thumb_h < 8) thumb_h = 8;
             int thumb_y = sy + (sh - thumb_h) * (params[6] - params[4]) / range;
-            draw_set_color(s->vga_palette[8]);  /* dark gray */
+            draw_set_color(8);  /* dark gray */
             draw_rect(sx, (int16_t)thumb_y, sw, (int16_t)thumb_h, true);
         }
         /* Draw border */
-        draw_set_color(s->vga_palette[0]);
+        draw_set_color(0);
         draw_rect(sx, sy, sw, sh, false);
+        draw_set_color(old_color);
         break;
     }
 
@@ -798,13 +941,15 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     case RIP2_CMD_MENU: {
         if (param_count < 4)
             break;
+        uint8_t old_color = draw_get_color();
         int16_t my = scale_y(params[0]);
         int16_t mh = scale_y(params[1]);
-        draw_set_color(s->vga_palette[params[2] & 0xFF]);
+        draw_set_color((uint8_t)(params[2] & 0xFF));
         draw_rect(0, my, 640, mh, true);
         /* Bottom border */
-        draw_set_color(s->vga_palette[0]);
+        draw_set_color(0);
         draw_hline(0, (int16_t)(my + mh - 1), 640);
+        draw_set_color(old_color);
         break;
     }
 
@@ -815,28 +960,125 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     case RIP2_CMD_DIALOG: {
         if (param_count < 6)
             break;
+        uint8_t old_color = draw_get_color();
         int16_t dx = params[0], dy = scale_y(params[1]);
         int16_t dw = params[2], dh = scale_y(params[3]);
         /* Shadow */
-        draw_set_color(s->vga_palette[0]);
+        draw_set_color(0);
         draw_rect((int16_t)(dx + 2), (int16_t)(dy + 2), dw, dh, true);
         /* Background */
-        draw_set_color(s->vga_palette[params[5] & 0xFF]);
+        draw_set_color((uint8_t)(params[5] & 0xFF));
         draw_rect(dx, dy, dw, dh, true);
         /* Title bar */
-        draw_set_color(s->vga_palette[params[4] & 0xFF]);
+        draw_set_color((uint8_t)(params[4] & 0xFF));
         draw_rect(dx, dy, dw, 16, true);
         /* Border */
-        draw_set_color(s->vga_palette[0]);
+        draw_set_color(0);
         draw_rect(dx, dy, dw, dh, false);
+        draw_set_color(old_color);
         break;
     }
 
-    /* ── Stub cases: recognized but not yet implemented ─────────── */
-    case RIP2_CMD_CLIPBOARD:
-    case RIP2_CMD_ALPHA_BLEND:
-    case RIP2_CMD_QUERY_PALETTE:
+    /* ── !|21 -- Query VGA palette entry ───────────────────────── */
+    case RIP2_CMD_QUERY_PALETTE: {
+        if (param_count >= 1) {
+            uint8_t idx = (uint8_t)(params[0] & 0xFF);
+            uint8_t rgb = s->vga_palette[idx];
+            char resp[32];
+            int n = snprintf(resp, sizeof(resp), "%u %u %u %u\r",
+                             (unsigned)idx,
+                             (unsigned)rip2_rgb332_r(rgb),
+                             (unsigned)rip2_rgb332_g(rgb),
+                             (unsigned)rip2_rgb332_b(rgb));
+            if (n > 0)
+                card_tx_push(resp, n);
+        }
         break;
+    }
+
+    /* ── !|27 -- Level 2 clipboard operations ────────────────────
+     * params: op [x y w h mode]
+     * op 0=clear, 1=capture rect, 2=paste at x/y, 3=paste scaled. */
+    case RIP2_CMD_CLIPBOARD: {
+        if (param_count < 1)
+            break;
+        {
+            uint8_t op = (uint8_t)(params[0] & 0xFF);
+            if (op == 0) {
+                rs->clipboard.valid = false;
+                rs->clipboard.width = 0;
+                rs->clipboard.height = 0;
+            } else if (op == 1 && param_count >= 5) {
+                int16_t x = params[1];
+                int16_t y = scale_y(params[2]);
+                int16_t w = params[3];
+                int16_t h = scale_y(params[4]);
+                (void)rip2_clipboard_capture(rs, x, y, w, h);
+            } else if (op == 2 && param_count >= 3 &&
+                       rs->clipboard.valid && rs->clipboard.data) {
+                int16_t x = params[1];
+                int16_t y = scale_y(params[2]);
+                uint8_t mode = (param_count >= 4)
+                             ? (uint8_t)(params[3] & 0xFF)
+                             : DRAW_MODE_COPY;
+                rip2_blit_pixels(rs, x, y, rs->clipboard.data,
+                                 (uint16_t)rs->clipboard.width,
+                                 (uint16_t)rs->clipboard.height,
+                                 rs->clipboard.width, rs->clipboard.height,
+                                 mode);
+            } else if (op == 3 && param_count >= 5 &&
+                       rs->clipboard.valid && rs->clipboard.data) {
+                int16_t x = params[1];
+                int16_t y = scale_y(params[2]);
+                int16_t w = params[3];
+                int16_t h = scale_y(params[4]);
+                uint8_t mode = (param_count >= 6)
+                             ? (uint8_t)(params[5] & 0xFF)
+                             : DRAW_MODE_COPY;
+                rip2_blit_pixels(rs, x, y, rs->clipboard.data,
+                                 (uint16_t)rs->clipboard.width,
+                                 (uint16_t)rs->clipboard.height,
+                                 w, h, mode);
+            }
+        }
+        break;
+    }
+
+    /* ── !|29 -- Alpha fill approximation ────────────────────────
+     * params: x y w h color alpha.  The framebuffer is indexed-color, so
+     * this uses ordered coverage instead of true RGB blending. */
+    case RIP2_CMD_ALPHA_BLEND: {
+        if (param_count >= 6) {
+            int16_t ax = params[0];
+            int16_t ay = scale_y(params[1]);
+            int16_t aw = params[2];
+            int16_t ah = scale_y(params[3]);
+            uint8_t color = (uint8_t)(params[4] & 0xFF);
+            int alpha = params[5];
+            uint8_t old_color = draw_get_color();
+            if (alpha > 35)
+                alpha = (alpha * 35) / 255;
+            if (alpha < 0) alpha = 0;
+            if (alpha > 35) alpha = 35;
+
+            draw_set_write_mode(DRAW_MODE_COPY);
+            draw_set_color(color);
+            if (alpha == 35) {
+                draw_rect(ax, ay, aw, ah, true);
+            } else if (alpha > 0 && aw > 0 && ah > 0) {
+                for (int16_t yy = 0; yy < ah; yy++) {
+                    for (int16_t xx = 0; xx < aw; xx++) {
+                        int threshold = ((xx * 17 + yy * 31) % 35);
+                        if (threshold < alpha)
+                            draw_pixel((int16_t)(ax + xx), (int16_t)(ay + yy));
+                    }
+                }
+            }
+            draw_set_write_mode(rs->write_mode);
+            draw_set_color(old_color);
+        }
+        break;
+    }
 
     default:
         break;

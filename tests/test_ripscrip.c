@@ -274,6 +274,40 @@ static void test_upload_name_length_respected(void) {
         FAIL("upload parser consumed image bytes as filename");
 }
 
+static void test_icn_upload_replaces_cached_name(void) {
+    static const char icon_name[] = "UPTEST02";
+    static const uint8_t icn_blue[10] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x80, 0x00, 0x00, 0x00
+    };
+    static const uint8_t icn_green[10] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x80, 0x00, 0x00
+    };
+    rip_state_t s;
+    comp_context_t ctx;
+    rip_icon_t icon;
+
+    TEST("ICN upload replaces an existing runtime icon");
+    init_fixture(&s, &ctx);
+    rip_file_upload_begin_state(&s, 8);
+    feed_upload_bytes(&s, (const uint8_t *)icon_name, 8);
+    feed_upload_bytes(&s, icn_blue, sizeof(icn_blue));
+    rip_file_upload_end_state(&s);
+
+    rip_file_upload_begin_state(&s, 8);
+    feed_upload_bytes(&s, (const uint8_t *)icon_name, 8);
+    feed_upload_bytes(&s, icn_green, sizeof(icn_green));
+    rip_file_upload_end_state(&s);
+
+    if (rip_icon_cache_count(&s.icon_state) == 1 &&
+        rip_icon_lookup(&s.icon_state, icon_name, 8, &icon) &&
+        icon.width == 1 && icon.height == 1 && icon.pixels[0] == 2)
+        PASS();
+    else
+        FAIL("second ICN upload left stale pixels cached");
+}
+
 static void test_invalid_icn_upload_does_not_grow_arena(void) {
     static const uint8_t bad_icn[7] = {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80
@@ -1004,6 +1038,28 @@ static void test_text_xy_ext_renders_via_shared_helper(void) {
         PASS();
     else
         FAIL("- did not run shared text rendering (still uses old broken code)");
+}
+
+static void test_text_xy_ext_clips_to_box(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    int inside = 0;
+    int outside = 0;
+
+    TEST("- (TEXT_XY_EXT) clips glyphs to its bounding box");
+    init_fixture(&s, &ctx);
+    /* Box (5,5)-(12,20), flags=00, long text would extend past x=12. */
+    feed_script(&s, &ctx, "!|-05050C0K00AAAA|");
+    for (int y = 5; y <= 23 && !inside; y++)
+        for (int x = 5; x <= 12 && !inside; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) inside = 1;
+    for (int y = 5; y <= 23 && !outside; y++)
+        for (int x = 13; x <= 40 && !outside; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) outside = 1;
+    if (inside && !outside)
+        PASS();
+    else
+        FAIL("TEXT_XY_EXT ignored its clipping box");
 }
 
 static void test_draw_to_moves_cursor(void) {
@@ -1893,6 +1949,232 @@ static void test_l2_set_palette_writes_hardware(void) {
         FAIL("20 did not write palette entry");
 }
 
+static void test_l2_widgets_draw_palette_indices(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("Level 2 widgets draw palette indices, not RGB332 values");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2200000A0A|");
+    if (draw_get_pixel(0, 0) == 7 &&
+        draw_get_pixel(1, 1) == 1)
+        PASS();
+    else
+        FAIL("2.0 window wrote RGB332 values as framebuffer indices");
+}
+
+static void test_l2_special_draws_preserve_color(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint8_t expected;
+
+    TEST("Level 2 widgets/gradient preserve active draw color");
+    init_fixture(&s, &ctx);
+    expected = s.palette[s.draw_color & 0x0F];
+
+    feed_script(&s, &ctx, "!|2200000A0A|");
+    feed_script(&s, &ctx, "!|X0K0K|");
+    if (draw_get_pixel(20, 22) != expected) {
+        FAIL("window command leaked its temporary draw color");
+        return;
+    }
+
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|2800000A0A010201|");
+    feed_script(&s, &ctx, "!|X0K0K|");
+    if (draw_get_pixel(20, 22) == expected)
+        PASS();
+    else
+        FAIL("gradient command leaked its temporary draw color");
+}
+
+static void test_l2_clipboard_capture_paste(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("27 clipboard captures and pastes pixels");
+    init_fixture(&s, &ctx);
+    draw_set_color(42);
+    draw_rect(2, 2, 2, 2, true);
+    feed_script(&s, &ctx, "!|270102020202|");
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|27020A0A00|");
+    if (draw_get_pixel(10, 11) == 42)
+        PASS();
+    else
+        FAIL("27 clipboard paste did not restore captured pixels");
+}
+
+static void test_l2_alpha_preserves_write_mode(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint8_t expected;
+
+    TEST("29 alpha blend restores color and write mode");
+    init_fixture(&s, &ctx);
+    expected = s.palette[s.draw_color & 0x0F];
+    draw_fill_screen(0xFF);
+    s.write_mode = DRAW_MODE_XOR;
+    draw_set_write_mode(DRAW_MODE_XOR);
+    draw_set_color(expected);
+    feed_script(&s, &ctx, "!|2900000101050F|");
+    feed_script(&s, &ctx, "!|X0K0K|");
+    if (draw_get_pixel(20, 22) == 0)
+        PASS();
+    else
+        FAIL("29 alpha blend leaked COPY mode or temporary color");
+}
+
+static void test_l2_port_copy_scales_destination_rect(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("2C port copy scales to destination rectangle");
+    init_fixture(&s, &ctx);
+    draw_set_color(55);
+    draw_rect(2, 2, 1, 2, true);
+    feed_script(&s, &ctx, "!|2C00202020200K0K0M0M0|");
+    if (draw_get_pixel(20, 22) == 55 &&
+        draw_get_pixel(22, 25) == 55)
+        PASS();
+    else
+        FAIL("2C did not scale the copied port region");
+}
+
+static void test_l2_query_palette_replies(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("21 query-palette replies with RGB components");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "!|2107|");
+    if (tx_len > 0 && tx_capture[0] == '7' &&
+        tx_capture[tx_len - 1] == '\r')
+        PASS();
+    else
+        FAIL("21 did not emit a palette query response");
+}
+
+static void test_port_switch_restores_pattern_back_color(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("port restore keeps patterned fill OFF bits on back_color");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|S020C|");
+    feed_script(&s, &ctx, "!|k3|");
+    feed_script(&s, &ctx, "!|2P1000A140U00|");
+    feed_script(&s, &ctx, "!|2s100|");
+    feed_script(&s, &ctx, "!|2s000|");
+    feed_script(&s, &ctx, "!|B05050F0F|");
+    if (draw_get_pixel(10, 5) == 243)
+        PASS();
+    else
+        FAIL("port restore used fill_color as patterned-fill background");
+}
+
+static void test_write_icon_caches_clipboard_for_load_icon(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1W caches clipboard pixels for later 1I load");
+    init_fixture(&s, &ctx);
+    draw_set_color(77);
+    draw_rect(2, 2, 2, 2, true);
+    feed_script(&s, &ctx, "!|1C02020202 |");
+    feed_script(&s, &ctx, "!|1WTESTICON|");
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|1I0A0A00000TESTICON|");
+    if (draw_get_pixel(10, 11) == 77)
+        PASS();
+    else
+        FAIL("1W cached icon could not be loaded by 1I");
+}
+
+static void test_write_icon_replaces_cached_name(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1W replaces an existing runtime icon name");
+    init_fixture(&s, &ctx);
+    draw_set_color(77);
+    draw_rect(2, 2, 2, 2, true);
+    feed_script(&s, &ctx, "!|1C02020202 |");
+    feed_script(&s, &ctx, "!|1WTESTICON|");
+
+    draw_set_color(66);
+    draw_rect(2, 2, 2, 2, true);
+    feed_script(&s, &ctx, "!|1C02020202 |");
+    feed_script(&s, &ctx, "!|1WTESTICON|");
+
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|1I0A0A00000TESTICON|");
+    if (draw_get_pixel(10, 11) == 66)
+        PASS();
+    else
+        FAIL("1W left stale pixels for an existing icon name");
+}
+
+static void test_save_and_stamp_icon_slot(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("J save-icon slot can be stamped with '.'");
+    init_fixture(&s, &ctx);
+    draw_set_color(88);
+    draw_rect(2, 2, 2, 2, true);
+    feed_script(&s, &ctx, "!|<02020202|");
+    feed_script(&s, &ctx, "!|J05|");
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|.050U0U000000|");
+    if (draw_get_pixel(30, 34) == 88)
+        PASS();
+    else
+        FAIL("saved icon slot did not stamp");
+}
+
+static void test_save_icon_slot_updates_load_alias(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("J save-icon updates the SLOTnn load alias");
+    init_fixture(&s, &ctx);
+    draw_set_color(88);
+    draw_rect(2, 2, 2, 2, true);
+    feed_script(&s, &ctx, "!|<02020202|");
+    feed_script(&s, &ctx, "!|J05|");
+
+    draw_set_color(99);
+    draw_rect(2, 2, 2, 2, true);
+    feed_script(&s, &ctx, "!|<02020202|");
+    feed_script(&s, &ctx, "!|J05|");
+
+    draw_fill_screen(0);
+    feed_script(&s, &ctx, "!|1I0A0A00000SLOT05|");
+    if (draw_get_pixel(10, 11) == 99)
+        PASS();
+    else
+        FAIL("J left stale pixels in the SLOTnn load alias");
+}
+
+static void test_l0_copy_region_scales_destination_rect(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("extended copy-region scales to destination rectangle");
+    init_fixture(&s, &ctx);
+    draw_set_color(99);
+    draw_rect(2, 2, 2, 2, true);
+    /* src (2,2)-(2,2), dest (20,20)-(22,22), reserved 0000 */
+    feed_script(&s, &ctx, "!|,020202020K0K0M0M0000|");
+    if (draw_get_pixel(20, 22) == 99 &&
+        draw_get_pixel(22, 25) == 99)
+        PASS();
+    else
+        FAIL("extended copy-region did not scale source pixels");
+}
+
 static void test_l1_file_query_missing_returns_zero(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1989,6 +2271,7 @@ int main(void) {
     test_truncated_bmp_rejected();
     test_zero_height_bmp_rejected();
     test_upload_name_length_respected();
+    test_icn_upload_replaces_cached_name();
     test_invalid_icn_upload_does_not_grow_arena();
     test_overlong_upload_name_rejected();
     test_viewport_clamps_to_screen();
@@ -2031,6 +2314,12 @@ int main(void) {
     test_l2_port_flags_set_alpha();
     test_l2_scale_text();
     test_l2_set_palette_writes_hardware();
+    test_l2_widgets_draw_palette_indices();
+    test_l2_special_draws_preserve_color();
+    test_l2_clipboard_capture_paste();
+    test_l2_alpha_preserves_write_mode();
+    test_l2_port_copy_scales_destination_rect();
+    test_l2_query_palette_replies();
     test_sync_date_byte_commits_on_nul();
     test_sync_time_byte_commits_on_nul();
     test_query_response_round_trip();
@@ -2044,6 +2333,7 @@ int main(void) {
     test_region_text_expands_variables();
     test_region_text_renders_bitmap();
     test_text_xy_ext_renders_via_shared_helper();
+    test_text_xy_ext_clips_to_box();
     test_draw_to_moves_cursor();
     test_icon_request_queue_dequeue();
     test_fuzz_multiple_seeds();
@@ -2078,8 +2368,14 @@ int main(void) {
     test_back_color_visible_in_pattern_fill();
     test_erase_view_uses_back_color();
     test_back_color_command_propagates_to_draw_layer();
+    test_port_switch_restores_pattern_back_color();
     test_l1_copy_region_blits_pixels();
+    test_l0_copy_region_scales_destination_rect();
     test_l1_clipboard_get_put_roundtrip();
+    test_write_icon_caches_clipboard_for_load_icon();
+    test_write_icon_replaces_cached_name();
+    test_save_and_stamp_icon_slot();
+    test_save_icon_slot_updates_load_alias();
     test_l1_text_block_lifecycle();
     test_text_xy_expands_variables();
     test_l1_audio_pushes_marker();

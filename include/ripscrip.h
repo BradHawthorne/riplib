@@ -19,8 +19,11 @@
 /* Maximum mouse regions (RIPscrip spec: 128) */
 #define RIP_MAX_MOUSE_REGIONS 128
 
-/* Maximum clipboard size (640×350 = 224000 bytes, stored in PSRAM) */
+/* Maximum clipboard size (640×400 = 256000 bytes, stored in PSRAM) */
 #define RIP_CLIPBOARD_MAX     (640 * 400)
+
+/* Numbered icon slots used by v2.0 SAVE_ICON / STAMP_ICON. */
+#define RIP_ICON_SLOT_MAX     36
 
 /* Maximum text block lines */
 #define RIP_MAX_TEXT_LINES    64
@@ -277,6 +280,8 @@ typedef struct {
     /* Level 1 state */
     rip_button_style_t button_style;   /* Current button style (set by 1B) */
     rip_clipboard_t    clipboard;      /* Image clipboard (GET/PUT_IMAGE) */
+    rip_icon_t         icon_slots[RIP_ICON_SLOT_MAX];  /* SAVE_ICON slot table */
+    bool               icon_slot_valid[RIP_ICON_SLOT_MAX];
     rip_text_block_t   text_block;     /* Active text block (1T/1t/1E) */
     rip_icon_state_t   icon_state;     /* Session-scoped runtime icon cache + request queue */
     ripscrip2_state_t  rip2_state;     /* Per-session RIPscrip 2.0 / v3.x state */
@@ -378,6 +383,15 @@ typedef struct {
      * 2=center).  Stored so subsequent icon-load / PUT_IMAGE calls can honour
      * the BBS-requested presentation.  DLL GFXSTYLE imageStyle field. */
     uint8_t image_style;
+
+    /* RIP_ICON_STYLE ('&') parameters for subsequent icon rendering.
+     * Coordinates are stored as card pixels.  style follows 1S where possible:
+     * 0=stretch-to-box, 1=tile, 2=center, 3=proportional fit. */
+    bool     icon_style_active;
+    int16_t  icon_style_x0, icon_style_y0, icon_style_x1, icon_style_y1;
+    uint8_t  icon_style_style;
+    uint8_t  icon_style_align;
+    uint8_t  icon_style_scale;
 
     /* FIX L1-7: 1V extended viewport scale factor (0=none, 1-35 in MegaNum).
      * Stored alongside the viewport rect; ignored on this fixed-res card but
