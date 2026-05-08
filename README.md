@@ -5,6 +5,7 @@
 ![Build: CMake](https://img.shields.io/badge/Build-CMake-red.svg)
 ![Platform: Any](https://img.shields.io/badge/Platform-Independent-orange.svg)
 ![Protocol: RIPscrip v3.1](https://img.shields.io/badge/RIPscrip-v3.1-purple.svg)
+[![Build & Test](https://github.com/BradHawthorne/riplib/actions/workflows/build.yml/badge.svg)](https://github.com/BradHawthorne/riplib/actions/workflows/build.yml)
 
 **A platform-independent RIPscrip-compatible drawing library in pure C99.**
 
@@ -141,29 +142,32 @@ void palette_write_rgb565(uint8_t index, uint16_t rgb565);
 // Read a palette color
 uint16_t palette_read_rgb565(uint8_t index);
 
-// Allocate memory for caching (malloc on desktop, PSRAM on embedded)
-void *gpu_psram_alloc(uint32_t size);
-
 // Send bytes to BBS (TCP send, serial write, etc.)
 void card_tx_push(const char *buf, int len);
 ```
 
 See `examples/platform_stubs.c` for a minimal desktop implementation.
+The PSRAM arena allocator is provided as `static inline` in
+`riplib_platform.h` and uses `malloc()` on desktop platforms.
 
 ## RIPscrip Protocol Usage
 
 ```c
 #include "ripscrip.h"
 
-rip_state_t rip;
+rip_state_t rip = {0};        // caller MUST zero-init before first use
+comp_context_t ctx = {0};
 rip_init_first(&rip);
 
 // Feed bytes from a BBS connection:
 while (connected) {
     uint8_t byte = read_from_bbs();
-    rip_process_byte(&rip, byte);
+    rip_process(&rip, &ctx, byte);
     // Drawing commands automatically render to the framebuffer
 }
+
+// On disconnect (preserves PSRAM arena, clears session state):
+rip_session_reset(&rip);
 ```
 
 ## File Structure
@@ -203,6 +207,24 @@ RIPlib is proven on:
 - **Any C99 platform** with a framebuffer
 
 The library uses single-precision FPU (`sinf`, `cosf`, `atan2f`, `sqrtf`) for accurate curve and angle calculations. On platforms without hardware FPU, the compiler provides software implementations — no code changes needed.
+
+## Testing
+
+```bash
+cmake -B build -DRIPLIB_BUILD_TESTS=ON -DBUILD_TESTING=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The suite ships ~130 individual checks across three binaries:
+- `test_drawing` — rendering primitives, fonts, edge cases.
+- `test_ripscrip` — FSM transitions, every dispatched command, mouse
+  hit-testing, variable expansion, host callbacks, port system.
+- `test_compat` — fixture replay with FNV-1a frame-hash lockdown so
+  pixel-level regressions show up immediately.
+
+CI runs the matrix on Linux, macOS, and Windows in both Debug and
+Release, plus dedicated UBSan/ASan and `-fanalyzer` jobs.
 
 ## Origins
 
