@@ -138,7 +138,7 @@ bool rip_icon_cache_bmp(rip_icon_state_t *state,
 
     bool bottom_up = (height > 0);
     if (height < 0) height = -height;
-    if (height > 400) return false;
+    if (height == 0 || height > 400) return false;
     if (pixel_offset >= (uint32_t)size) return false;
 
     uint64_t row_bytes;

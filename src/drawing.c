@@ -309,8 +309,13 @@ void draw_set_user_fill_pattern(const uint8_t *pattern) {
         user_pattern[i] = pattern[i];
 }
 
+/* draw_set_arc_radius is kept for ABI continuity but the value is no
+ * longer consulted anywhere — modern arc/pie callers pass radius
+ * explicitly to draw_arc / draw_pie / draw_elliptical_arc.  Marking the
+ * stored value (void)-cast so any -Wunused warning stays silent. */
 void draw_set_arc_radius(int16_t radius) {
     g_arc_radius = radius;
+    (void)g_arc_radius;
 }
 
 /* ══════════════════════════════════════════════════════════════════

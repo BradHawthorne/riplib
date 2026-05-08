@@ -226,6 +226,32 @@ static void test_truncated_bmp_rejected(void) {
         FAIL("truncated BMP was cached");
 }
 
+static void test_zero_height_bmp_rejected(void) {
+    /* Minimum-size 8bpp 1x0 BMP — height field is zero.  Should fail
+     * rip_icon_cache_bmp (was a soft-spot before L13). */
+    static const uint8_t bmp_zero_h[54] = {
+        [0] = 'B', [1] = 'M',
+        [2] = 54,
+        [10] = 54,
+        [14] = 40,
+        [18] = 1,                  /* width = 1 */
+        [22] = 0, [23] = 0, [24] = 0, [25] = 0,  /* height = 0 */
+        [26] = 1,
+        [28] = 8,
+    };
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("BMP with height=0 is rejected");
+    init_fixture(&s, &ctx);
+    if (!rip_icon_cache_bmp(&s.icon_state, "ZEROH", 5,
+                            bmp_zero_h, (int)sizeof(bmp_zero_h)) &&
+        rip_icon_cache_count(&s.icon_state) == 0)
+        PASS();
+    else
+        FAIL("zero-height BMP was cached");
+}
+
 static void test_upload_name_length_respected(void) {
     static const char icon_name[] = "UPTEST01";
     static const uint8_t icn_1x1[10] = {
@@ -1733,6 +1759,7 @@ int main(void) {
     test_port_text_justification_roundtrip();
     test_icon_state_isolation();
     test_truncated_bmp_rejected();
+    test_zero_height_bmp_rejected();
     test_upload_name_length_respected();
     test_invalid_icn_upload_does_not_grow_arena();
     test_overlong_upload_name_rejected();
