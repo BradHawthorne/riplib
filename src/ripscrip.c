@@ -1747,18 +1747,23 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 s->text_block.active = true;
             }
             break;
-        case 't': /* RIP_REGION_TEXT — one line in text block
-                   * justify:1, text */
+        case 't': /* RIP_REGION_TEXT — one line in text block (Level 1).
+                   * justify:1, text.
+                   * L16: previously passed NULL font to draw_text, which made
+                   * draw_text early-return — every byte in the bitmap path
+                   * was silently dropped.  Also missed $variable expansion.
+                   * Now matches the Level 0 't' code path. */
             if (s->text_block.active && len >= 1) {
-                /* justify: p[0] (0=left, 1=justified — we do left for now) */
                 int tstart = 1;
                 if (tstart < len) {
                     char tbuf[256];
+                    char vbuf[256];
                     int tlen = unescape_text(p + tstart, len - tstart, tbuf);
+                    tlen = rip_expand_variables(s, tbuf, tlen, vbuf, sizeof(vbuf));
                     uint8_t tc = s->palette[s->draw_color & 0x0F];
                     draw_text(s->text_block.x0, s->text_block.cur_y,
-                              tbuf, tlen, NULL, 16, tc, 0xFF);
-                    s->text_block.cur_y += 16; /* advance one line */
+                              vbuf, tlen, cp437_8x16, 16, tc, 0xFF);
+                    s->text_block.cur_y += 16;
                 }
             }
             break;
@@ -2579,16 +2584,19 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
     /* v1.54 spec: 't' = RIP_REGION_TEXT — display a line of text in a
-     * previously defined text region (Level 0, used with 'T' begin/end). */
+     * previously defined text region (Level 0, used with 'T' begin/end).
+     * L16: also missed $variable expansion before this fix. */
     case 't': /* RIP_REGION_TEXT — justify:1 text */
         if (s->text_block.active && len >= 1) {
             int tstart = 1;
             if (tstart < len) {
                 char tbuf_t[256];
+                char vbuf_t[256];
                 int tlen_t = unescape_text(p + tstart, len - tstart, tbuf_t);
+                tlen_t = rip_expand_variables(s, tbuf_t, tlen_t, vbuf_t, sizeof(vbuf_t));
                 uint8_t tc_t = s->palette[s->draw_color & 0x0F];
                 draw_text(s->text_block.x0, s->text_block.cur_y,
-                          tbuf_t, tlen_t, cp437_8x16, 16, tc_t, 0xFF);
+                          vbuf_t, tlen_t, cp437_8x16, 16, tc_t, 0xFF);
                 s->text_block.cur_y += 16;
             }
         }

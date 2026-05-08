@@ -898,6 +898,47 @@ static void test_l1_audio_pushes_marker(void) {
         FAIL("1A did not push CMD_PLAY_SOUND marker");
 }
 
+static void test_region_text_expands_variables(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1t REGION_TEXT expands $BEEP$ (regression for L16)");
+    init_fixture(&s, &ctx);
+    /* Open a text block, then 1t with body containing $BEEP$. */
+    feed_script(&s, &ctx, "!|1T0000141400|");  /* begin block */
+    if (!s.text_block.active) { FAIL("setup: 1T did not open block"); return; }
+    tx_reset();
+    feed_script(&s, &ctx, "!|1t0$BEEP$|");
+    int has_bel = 0;
+    for (size_t i = 0; i < tx_len; i++)
+        if (tx_capture[i] == 0x07) { has_bel = 1; break; }
+    if (has_bel)
+        PASS();
+    else
+        FAIL("1t did not expand $BEEP$");
+}
+
+static void test_region_text_renders_bitmap(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1t REGION_TEXT bitmap path renders pixels (L16 NULL-font fix)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1T0000141400|");
+    if (!s.text_block.active) { FAIL("setup: 1T did not open block"); return; }
+    /* Render a non-empty literal — before L16 this dropped silently. */
+    feed_script(&s, &ctx, "!|1t0HELLO|");
+    /* Look for any non-zero pixel in the text block region. */
+    int hit = 0;
+    for (int y = s.text_block.y0; y < s.text_block.y0 + 16 && !hit; y++)
+        for (int x = s.text_block.x0; x < s.text_block.x0 + 50 && !hit; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) hit = 1;
+    if (hit)
+        PASS();
+    else
+        FAIL("1t bitmap rendering produced no pixels");
+}
+
 static void test_text_xy_ext_renders_via_shared_helper(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1953,6 +1994,8 @@ int main(void) {
     test_eval_if_le_3_5();
     test_eval_if_ne_strings();
     test_scroll_clears_only_source_rect();
+    test_region_text_expands_variables();
+    test_region_text_renders_bitmap();
     test_text_xy_ext_renders_via_shared_helper();
     test_draw_to_moves_cursor();
     test_icon_request_queue_dequeue();
