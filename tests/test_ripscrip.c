@@ -1198,6 +1198,25 @@ static void test_session_reset_clears_state(void) {
         FAIL("session reset left state behind");
 }
 
+static void test_session_reset_then_resume(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("rip_session_reset leaves state usable for the next session");
+    init_fixture(&s, &ctx);
+    /* Run a real command, mutate state. */
+    feed_script(&s, &ctx, "!|cF|!|S0204|!|k7|!|B05050F0F|");
+    /* Disconnect. */
+    rip_session_reset(&s);
+    /* New session immediately starts drawing.  Must work. */
+    feed_script(&s, &ctx, "!|X0303|");
+    /* scale_y(3) = 3, so pixel at (3, 3). */
+    if (draw_get_pixel(3, 3) != 0)
+        PASS();
+    else
+        FAIL("session unusable after reset");
+}
+
 static void test_session_reset_preserves_arena(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -1927,6 +1946,7 @@ int main(void) {
     test_bounded_text_wraps();
     test_polygon_all_outside_clip_no_draw();
     test_session_reset_clears_state();
+    test_session_reset_then_resume();
     test_session_reset_preserves_arena();
     test_reset_windows_full_defaults();
     test_palette_save_apply_round_trip();
