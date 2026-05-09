@@ -2880,25 +2880,31 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         dlen = tlen - q2 - 1;
                     }
 
-                    /* Check if variable name is $APPn$ (appears before ':' or '?') */
+                    /* L18: Only run the legacy "$APPn$:?prompt?default" /
+                     * "$NAME$" parsing if the "name=value" path above didn't
+                     * already store the variable.  Without this guard the
+                     * $APPn$ branch would re-overwrite app_vars[idx] with
+                     * the raw, unparsed "$APPn$=value" string. */
                     int colon = -1;
                     for (int i = 0; i < tlen; i++) {
                         if (tbuf[i] == ':' || tbuf[i] == '?') { colon = i; break; }
                     }
                     int name_end = (colon >= 0) ? colon : tlen;
-                    if (name_end >= 6 && tbuf[0] == '$' && tbuf[1] == 'A' &&
-                        tbuf[2] == 'P' && tbuf[3] == 'P' &&
-                        tbuf[4] >= '0' && tbuf[4] <= '9' && tbuf[5] == '$') {
-                        /* Store default value into app_vars[idx] */
-                        int idx = tbuf[4] - '0';
-                        int vlen = dlen < 31 ? dlen : 31;
-                        memcpy(s->app_vars[idx], display, (size_t)vlen);
-                        s->app_vars[idx][vlen] = '\0';
-                        handled_define = true;
-                    } else if (name_end >= 3 && tbuf[0] == '$' &&
-                               tbuf[name_end - 1] == '$') {
-                        handled_define = rip_user_var_set(s, tbuf, name_end,
-                                                          display, dlen);
+                    if (!handled_define) {
+                        if (name_end >= 6 && tbuf[0] == '$' && tbuf[1] == 'A' &&
+                            tbuf[2] == 'P' && tbuf[3] == 'P' &&
+                            tbuf[4] >= '0' && tbuf[4] <= '9' && tbuf[5] == '$') {
+                            /* Store default value into app_vars[idx] */
+                            int idx = tbuf[4] - '0';
+                            int vlen = dlen < 31 ? dlen : 31;
+                            memcpy(s->app_vars[idx], display, (size_t)vlen);
+                            s->app_vars[idx][vlen] = '\0';
+                            handled_define = true;
+                        } else if (name_end >= 3 && tbuf[0] == '$' &&
+                                   tbuf[name_end - 1] == '$') {
+                            handled_define = rip_user_var_set(s, tbuf, name_end,
+                                                              display, dlen);
+                        }
                     }
                     if (!handled_define) {
                         char rawbuf[128];

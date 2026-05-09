@@ -1845,6 +1845,51 @@ static void test_metadata_commands_store_state_and_vars(void) {
         FAIL("metadata command state or query variable mismatch");
 }
 
+static void test_header_reenables_filled_borders(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("'h' RIP_HEADER restores filled_borders_enabled");
+    init_fixture(&s, &ctx);
+    /* Disable borders explicitly. */
+    feed_script(&s, &ctx, "!|N00|");
+    if (s.filled_borders_enabled) { FAIL("setup: N00 didn't disable"); return; }
+    /* Send a header — Codex's handler resets borders=true per the comment
+     * "header that resets the environment also restores filled-object
+     * borders". */
+    feed_script(&s, &ctx, "!|h00000000|");
+    if (s.filled_borders_enabled)
+        PASS();
+    else
+        FAIL("'h' did not restore filled_borders_enabled");
+}
+
+static void test_reset_windows_preserves_user_vars(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("'*' RIP_RESET_WINDOWS preserves user_var and app_vars");
+    init_fixture(&s, &ctx);
+    /* Set both kinds. */
+    feed_script(&s, &ctx, "!|1D000  $APP0$=alpha|");
+    feed_script(&s, &ctx, "!|1D000  CITY=Austin|");
+    if (strcmp(s.app_vars[0], "alpha") != 0 ||
+        s.user_var_count != 1 ||
+        strcmp(s.user_var_values[0], "Austin") != 0) {
+        FAIL("setup: vars not stored");
+        return;
+    }
+    /* Window reset (NOT session reset). */
+    feed_script(&s, &ctx, "!|*|");
+    /* Application data must survive — only window/draw state resets. */
+    if (strcmp(s.app_vars[0], "alpha") == 0 &&
+        s.user_var_count == 1 &&
+        strcmp(s.user_var_values[0], "Austin") == 0)
+        PASS();
+    else
+        FAIL("'*' clobbered application/user vars");
+}
+
 static void test_user_var_overflow_returns_false(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2720,6 +2765,8 @@ int main(void) {
     test_set_one_palette_entry();
     test_group_markers_accepted();
     test_metadata_commands_store_state_and_vars();
+    test_header_reenables_filled_borders();
+    test_reset_windows_preserves_user_vars();
     test_user_var_overflow_returns_false();
     test_user_var_name_with_dollar_normalizes();
     test_user_var_name_with_invalid_char_rejected();
