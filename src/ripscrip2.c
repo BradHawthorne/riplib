@@ -825,10 +825,34 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         break;
     }
 
-    /* ── !|26 -- Scalable text ──────────────────────────────────── */
+    /* ── !|26 -- Scalable text ──────────────────────────────────────
+     *
+     * Stores text_scale and text_rotation in ripscrip2_state_t for
+     * introspection AND projects them onto the BGI rendering knobs
+     * that subsequent text commands actually read:
+     *   - text_scale (1..7) → rs->font_size (BGI integer scale 1-10)
+     *   - text_rotation snapped to the nearest 90° quadrant →
+     *     rs->font_dir (0=horizontal, 1=vertical CW, 2=vertical CCW)
+     *
+     * 180° has no font_dir mapping — the BGI renderer doesn't support
+     * upside-down text — so it falls back to horizontal, matching what
+     * legacy clients did with the unsupported angle. */
     case RIP2_CMD_SCALE_TEXT: {
-        if (param_count >= 1) s->text_scale    = (uint8_t)(params[0] & 0x07);
-        if (param_count >= 2) s->text_rotation = params[1];
+        if (param_count >= 1) {
+            s->text_scale = (uint8_t)(params[0] & 0x07);
+            if (rs && s->text_scale > 0)
+                rs->font_size = s->text_scale;
+        }
+        if (param_count >= 2) {
+            s->text_rotation = params[1];
+            if (rs) {
+                int rot = ((int)s->text_rotation % 360 + 360) % 360;
+                if (rot < 45 || rot >= 315)       rs->font_dir = 0;
+                else if (rot < 135)               rs->font_dir = 1;
+                else if (rot >= 225)              rs->font_dir = 2;
+                else                              rs->font_dir = 0;
+            }
+        }
         break;
     }
 

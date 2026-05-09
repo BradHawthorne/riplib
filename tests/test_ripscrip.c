@@ -2229,6 +2229,67 @@ static void test_l2_scale_text(void) {
         FAIL("26 did not update scale/rotation");
 }
 
+static void test_l2_scale_text_applies_rotation(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    int hits;
+
+    TEST("26 rotation 90 sets font_dir=1, scale sets font_size");
+    init_fixture(&s, &ctx);
+    /* scale=05 (font_size=5), rotation=2I (90): mega2("2I") = 2*36+18 = 90. */
+    feed_script(&s, &ctx, "!|26052I|");
+    if (s.font_size != 5 || s.font_dir != 1) {
+        FAIL("scale or rotation not applied to BGI render state");
+        return;
+    }
+    /* rotation=7I (270) should map to font_dir=2 (CCW). */
+    feed_script(&s, &ctx, "!|26057I|");
+    if (s.font_dir != 2) {
+        FAIL("rotation 270 did not map to font_dir 2");
+        return;
+    }
+    /* rotation back near 0 should reset to horizontal. */
+    feed_script(&s, &ctx, "!|26050A|");  /* rotation=10 → snap to 0 */
+    hits = (s.font_dir == 0) ? 1 : 0;
+    if (hits)
+        PASS();
+    else
+        FAIL("rotation near 0 did not reset font_dir");
+}
+
+static void test_icon_style_tile_mode_repeats(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint8_t *pixels;
+    int hits;
+
+    TEST("ICON_STYLE mode 1 (tile) stamps the icon multiple times");
+    init_fixture(&s, &ctx);
+    /* Cache a 4x4 solid 0x60 runtime icon. */
+    pixels = (uint8_t *)psram_arena_alloc(&s.psram_arena, 16);
+    if (!pixels) { FAIL("setup: arena"); return; }
+    for (int i = 0; i < 16; i++) pixels[i] = 0x60;
+    if (!rip_icon_cache_pixels_replace(&s.icon_state, "TILEME", 6, pixels, 4, 4)) {
+        FAIL("setup: cache"); return;
+    }
+    /* ICON_STYLE box (0,0)-(15,7) — 16x8 box, mode=01 (tile),
+     * align=00 scale=00.  Each field is 2 chars. */
+    feed_script(&s, &ctx, "!|&00000F0701000000|");
+    if (!s.icon_style_active) { FAIL("setup: & not active"); return; }
+    feed_script(&s, &ctx, "!|1I000000000TILEME|");
+    /* In tile mode the 4x4 icon should appear at multiple cell origins
+     * within the box.  Sample the four cell-origins at (0,0), (4,0),
+     * (8,0), (12,0). */
+    hits = 0;
+    for (int x = 0; x < 16; x += 4) {
+        if (draw_get_pixel((int16_t)x, 0) == 0x60) hits++;
+    }
+    if (hits >= 2)
+        PASS();
+    else
+        FAIL("tile mode did not produce repeated icon stamps");
+}
+
 static void test_l2_set_palette_writes_hardware(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2709,6 +2770,8 @@ int main(void) {
     test_l2_port_switch_changes_active();
     test_l2_port_flags_set_alpha();
     test_l2_scale_text();
+    test_l2_scale_text_applies_rotation();
+    test_icon_style_tile_mode_repeats();
     test_l2_set_palette_writes_hardware();
     test_l2_widgets_draw_palette_indices();
     test_l2_special_draws_preserve_color();

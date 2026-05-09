@@ -3708,14 +3708,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* -- Group markers (v2.0+) ------------------------------------------- */
-    /* DLL command table entry 4: '(' = RIP_GROUP_BEGIN (0 args) -- no-op stub */
+    /* DLL command table entry 4/5: '(' / ')' RIP_GROUP_BEGIN / END.
+     *
+     * The wire protocol takes 0 args, so there is no group identifier we
+     * could match against a client-side cache.  Real "skip if cached"
+     * grouping in the original DLL was driven by an out-of-band header/
+     * checksum table that RIPlib does not expose.  We therefore accept
+     * the markers (so a stream that bracket-wraps frames doesn't fall
+     * into ERROR_RECOVERY) and otherwise treat them as no-ops; every
+     * group is rendered every time.  Wire-format compatible, no
+     * bandwidth optimization. */
     case '(':
-    /* DLL command table entry 5: ')' = RIP_GROUP_END (0 args) -- no-op stub */
     case ')':
-        /* Group begin/end markers support conditional rendering: a host can
-         * omit a group if the client has a cached copy.  DLL handler is a
-         * single RET -- group-skip logic lives in the parser layer.
-         * A2GSPU: accept and ignore. */
         break;
 
     /* -- Undocumented commands (confirmed in DLL binary) ----------------- */
