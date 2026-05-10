@@ -5,6 +5,7 @@
  * found during the production-readiness audit.
  */
 
+#include "bgi_font.h"
 #include "drawing.h"
 #include "rip_icons.h"
 #include "ripscrip.h"
@@ -2712,6 +2713,153 @@ static void test_duplicate_icon_insert_is_deduplicated(void) {
         FAIL("duplicate insert consumed a new cache slot");
 }
 
+/* COVERAGE: rip_iso_week + rip_parse_host_date + rip_day_of_year
+ * + rip_weekday_monday0 + rip_days_from_civil. Jan 15, 2026 is a
+ * Thursday in ISO week 3 (Jan 12–18 is week 3 of 2026). The IF
+ * expression triggers rip_expand_variables which is the only public
+ * surface that resolves $WOYM$ (1Q only handles $APPn$/user vars). */
+static void test_iso_week_var_expansion(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("$WOYM$ expansion uses ISO week from host_date");
+    init_fixture(&s, &ctx);
+    strcpy(s.host_date, "01/15/26");
+    feed_script(&s, &ctx, "<<IF $WOYM$=03>>!|X0303|<<ENDIF>>");
+    if (draw_get_pixel(3, 3) != 0)
+        PASS();
+    else
+        FAIL("$WOYM$ did not resolve to 03 for 2026-01-15");
+}
+
+/* COVERAGE: iso_weeks_in_year + week>weeks_in_year branch.
+ * Dec 31 2024 (Tue) belongs to ISO week 1 of 2025 — the wrap branch. */
+static void test_iso_week_year_wrap(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("$WOYM$ wraps Dec 31 2024 into ISO week 01 of 2025");
+    init_fixture(&s, &ctx);
+    strcpy(s.host_date, "12/31/24");
+    feed_script(&s, &ctx, "<<IF $WOYM$=01>>!|X0404|<<ENDIF>>");
+    if (draw_get_pixel(4, 4) != 0)
+        PASS();
+    else
+        FAIL("$WOYM$ did not wrap into week 01 for 2024-12-31");
+}
+
+/* COVERAGE: rip_font_id_from_name. 1O (RIP_FONT_LOAD) with TRIP.CHR
+ * should map to BGI_FONT_TRIPLEX (=1) and update s->font_id. */
+static void test_font_load_resolves_bgi_name(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1O TRIP.CHR resolves to BGI_FONT_TRIPLEX");
+    init_fixture(&s, &ctx);
+    s.font_id = 0;
+    feed_script(&s, &ctx, "!|1OTRIP.CHR|");
+    if (s.font_id == BGI_FONT_TRIPLEX && s.font_ext_id == BGI_FONT_TRIPLEX)
+        PASS();
+    else
+        FAIL("1O did not pick up TRIP→TRIPLEX font name");
+}
+
+/* COVERAGE: rip_font_id_from_name lower-case + path-prefix branches.
+ * Confirms case folding ('trip') and leading directory ('FONTS\\') strip. */
+static void test_font_load_resolves_path_and_case(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1O case-insensitive + strips leading path");
+    init_fixture(&s, &ctx);
+    s.font_id = 0;
+    feed_script(&s, &ctx, "!|1OFONTS\\sans.chr|");
+    if (s.font_id == BGI_FONT_SANS)
+        PASS();
+    else
+        FAIL("1O did not strip path/lowercase to SANS font");
+}
+
+/* COVERAGE: rip_clipboard_store_pixels. 1I LOAD_ICON with the
+ * clipboard flag set must mirror the loaded icon into s->clipboard. */
+static void test_load_icon_clipboard_flag_stores_pixels(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t px[4] = { 1, 2, 3, 4 };
+    uint8_t *cached;
+
+    TEST("1I clipboard flag stores icon pixels in clipboard");
+    init_fixture(&s, &ctx);
+    cached = (uint8_t *)psram_arena_alloc(&s.psram_arena, 4);
+    if (!cached) { FAIL("setup: arena alloc"); return; }
+    memcpy(cached, px, 4);
+    if (!rip_icon_cache_pixels(&s.icon_state, "FOO", 3, cached, 2, 2)) {
+        FAIL("setup: cache_pixels");
+        return;
+    }
+    /* 1I  x:00 y:00 mode:00 clip:1 res:00 name:FOO */
+    feed_script(&s, &ctx, "!|1I000000100FOO|");
+    if (s.clipboard.valid &&
+        s.clipboard.width == 2 && s.clipboard.height == 2 &&
+        s.clipboard.data &&
+        memcmp(s.clipboard.data, px, 4) == 0)
+        PASS();
+    else
+        FAIL("clipboard not populated from 1I clipboard flag");
+}
+
+/* COVERAGE: rip_mouse_event_ext (global wrapper).
+ * Verifies the extern-C entrypoint that dispatches via g_rip_state
+ * works end-to-end after rip_init bound the singleton. */
+static void test_global_mouse_event_dispatches(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("rip_mouse_event_ext routes through g_rip_state");
+    init_fixture(&s, &ctx);
+    rip_init(&s);
+    /* Define mouse region #0 at (10,10)-(50,50) hotkey=0 flags=0
+     * host="X".  Expect "X\r" pushed to TX on a click inside. */
+    feed_script(&s, &ctx, "!|1M000A0A1E1E0000000X|");
+    if (s.num_mouse_regions != 1) { FAIL("setup: 1M missed"); return; }
+    tx_reset();
+    rip_mouse_event_ext(20, 20, true);
+    if (tx_len == 2 && memcmp(tx_capture, "X\r", 2) == 0)
+        PASS();
+    else
+        FAIL("rip_mouse_event_ext did not dispatch host string");
+}
+
+/* COVERAGE: rip_file_upload_begin/byte/end (global wrappers).
+ * Same payload as test_icn_upload_replaces_cached_name but via the
+ * non-state, g_rip_state-based public API. */
+static void test_global_file_upload_caches_icn(void) {
+    static const char icon_name[] = "GLOBALUP";
+    static const uint8_t icn_blue[10] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x80, 0x00, 0x00, 0x00
+    };
+    rip_state_t s;
+    comp_context_t ctx;
+    rip_icon_t icon;
+
+    TEST("global rip_file_upload_* wrappers cache an ICN");
+    init_fixture(&s, &ctx);
+    rip_init(&s);
+    rip_file_upload_begin(8);
+    for (size_t i = 0; i < 8; i++)
+        rip_file_upload_byte((uint8_t)icon_name[i]);
+    for (size_t i = 0; i < sizeof(icn_blue); i++)
+        rip_file_upload_byte(icn_blue[i]);
+    rip_file_upload_end();
+    if (rip_icon_cache_count(&s.icon_state) == 1 &&
+        rip_icon_lookup(&s.icon_state, icon_name, 8, &icon) &&
+        icon.width == 1 && icon.height == 1)
+        PASS();
+    else
+        FAIL("global upload wrappers did not cache ICN");
+}
+
 int main(void) {
     printf("RIPlib v1.0 — RIPscrip Regression Tests\n");
     printf("======================================\n\n");
@@ -2854,6 +3002,13 @@ int main(void) {
     test_l1_text_block_lifecycle();
     test_text_xy_expands_variables();
     test_l1_audio_pushes_marker();
+    test_iso_week_var_expansion();
+    test_iso_week_year_wrap();
+    test_font_load_resolves_bgi_name();
+    test_font_load_resolves_path_and_case();
+    test_load_icon_clipboard_flag_stores_pixels();
+    test_global_mouse_event_dispatches();
+    test_global_file_upload_caches_icn();
 
     cleanup_all_arenas();
 
