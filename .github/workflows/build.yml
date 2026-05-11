@@ -51,16 +51,15 @@ jobs:
         set +e
         ctest --test-dir build-san --output-on-failure 2>&1 | tee sanitizer.log
         rc=${PIPESTATUS[0]}
-        echo "ctest exit=$rc"
+        if [ $rc -ne 0 ]; then
+          echo "===== SANITIZER LOG (full) ====="
+          cat sanitizer.log
+          echo "===== INDIVIDUAL TEST LOGS ====="
+          for f in build-san/Testing/Temporary/*.log; do
+            [ -f "$f" ] && echo "--- $f ---" && cat "$f"
+          done
+        fi
         exit $rc
-
-    - name: Upload sanitizer log on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: sanitizer-log
-        path: sanitizer.log
-        retention-days: 7
 
   static-analysis:
     runs-on: ubuntu-latest
