@@ -15,6 +15,8 @@
 
 RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a broad RIPscrip protocol parser for v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, v3.1 (A2GSPU §A2G.1-7 extensions), and v3.2 (§A2G.8-13 quality-of-life refinements). Storage-oriented client features are mapped to an in-memory icon/clipboard cache and host request queue on embedded targets, and hardware/host-only protocol features use documented embedded fallbacks. It renders to any `uint8_t*` framebuffer with zero platform dependencies.
 
+RIPlib is a portable rendering/parser core, not a complete terminal application. A host app still owns transport, real filesystem transfer, sound playback, external URL/program launch, and OS clipboard integration.
+
 ### Comparison
 
 | Feature | Original BGI | SDL_bgi | WinBGIm | **RIPlib** |
@@ -42,9 +44,9 @@ RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 B
 
 | Version | Year | Status | Notes |
 |---------|------|--------|-------|
-| **v1.54** | 1993 | Core implemented | Level 0 drawing plus Level 1 interactive commands, icon cache lookup, clipboard capture/paste, file query, variables, and host callback fallbacks |
-| **v2.0** | 1994 | Core implemented with embedded fallbacks | Extended drawing commands, header/mode metadata, filled-object border control, icon slots/style, scaled region copy, and Level 2 Drawing Ports with state save/restore |
-| **v3.0** | 1995 | Core implemented with approximations | Font justification, extended text windows, gradient fill, scalable text state, menu/dialog/scrollbar widgets, palette query, and indexed-color alpha approximation |
+| **v1.54** | 1993 | Portable core implemented | Level 0 drawing plus Level 1 interactive commands, icon cache lookup, clipboard capture/paste, file query, variables, and host callback fallbacks |
+| **v2.0** | 1994 | Portable core implemented with embedded fallbacks | Extended drawing commands, header/mode metadata, filled-object border control, icon slots/style, scaled region copy, and Level 2 Drawing Ports with state save/restore |
+| **v3.0** | 1995 | Portable core implemented with approximations | Font justification, extended text windows, gradient fill, scalable text state, menu/dialog/scrollbar widgets, palette query, and indexed-color alpha approximation |
 | **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | AND/NOT write modes, vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
 | **v3.2** | 2026 | Implemented extensions (§A2G.8-13) | State push/pop stack, layout/introspection variables, time component variables, EGA color-name aliases, `<<DEBUG>>` directive, radial gradient |
 
@@ -53,7 +55,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 ## Features
 
 ### Drawing Primitives
-- Line (Bresenham, dash patterns, variable thickness)
+- Line (Bresenham, 16-bit dash patterns, variable thickness)
 - Rectangle, Rounded Rectangle (outline + filled)
 - Circle, Ellipse (midpoint algorithm, outline + filled)
 - Arc, Pie, Elliptical Arc/Pie (FPU-accurate angle test)
@@ -75,7 +77,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 - String width measurement for layout
 
 ### RIPscrip Protocol Parser
-- 101 commands across Level 0, Level 1, Extended, and Level 2 (all 99 documented v1.54-v3.1 commands plus `|^` `|~` added in v3.2)
+- 100+ recognized command surfaces across Level 0, Level 1, Extended, and Level 2, with host-only operations bridged to callbacks/fallbacks
 - Full v1.54 drawing command set
 - Level 2 Drawing Port system (36 ports with state save/restore)
 - Variable expansion (30+ built-in vars including $RAND$, $DATE$, $RIPVER$, $WOYM$, layout/time/color-name vars)
@@ -95,7 +97,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 - Patterned flood fill (two-pass algorithm)
 
 ### v3.2 Extensions (§A2G.8-13, RIPlib quality-of-life refinements)
-- **State push/pop stack** — `|^` / `|~` save/restore the drawing prelude (colors, fill/line/write state, font, cursor, viewport). Bounded LIFO, 8 frames.
+- **State push/pop stack** — `|^` / `|~` save/restore the drawing prelude (colors, fill/line/write state including custom 16-bit line patterns, font and extended font state, cursor, viewport, filled-border mode). Bounded LIFO, 8 frames.
 - **Layout / introspection variables** — `$CX$` `$CY$` `$VPW$` `$VPH$` `$VPCX$` `$VPCY$` `$CCOL$` `$CFCOL$` `$CBCOL$` for "center this text" without hardcoded 320,200.
 - **Time component variables** — `$HOUR$` `$MIN$` `$SEC$` `$DOW$` `$DOM$` `$MONTH$` for greeting/banner variations.
 - **EGA color-name aliases** — `$BLACK$` `$BLUE$` `$GREEN$` `$CYAN$` `$RED$` `$MAGENTA$` `$BROWN$` `$LIGHTGRAY$` `$DARKGRAY$` `$LIGHTBLUE$` `$LIGHTGREEN$` `$LIGHTCYAN$` `$LIGHTRED$` `$LIGHTMAGENTA$` `$YELLOW$` `$WHITE$`.
@@ -109,6 +111,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 ```c
 #include "drawing.h"
 #include "bgi_font.h"
+#include "font_bgi_trip.h"
 
 uint8_t framebuffer[640 * 400];
 
@@ -135,13 +138,13 @@ int main(void) {
 ```bash
 mkdir build && cd build
 cmake ..
-make
+cmake --build .
 ```
 
 With examples:
 ```bash
 cmake -DRIPLIB_BUILD_EXAMPLES=ON ..
-make
+cmake --build .
 ./riplib_demo > output.pgm
 ```
 
@@ -199,7 +202,7 @@ riplib/
 ├── src/              Implementation
 │   ├── drawing.c         37+ drawing primitives
 │   ├── bgi_font.c        CHR font parser + renderer
-│   ├── ripscrip.c        Protocol parser (3100+ lines)
+│   ├── ripscrip.c        Protocol parser (4900+ lines)
 │   ├── ripscrip2.c       Level 2 extensions
 │   ├── rip_icons.c       Icon pipeline
 │   └── rip_icn.c         ICN format decoder
@@ -230,15 +233,16 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The suite ships ~130 individual checks across three binaries:
-- `test_drawing` — rendering primitives, fonts, edge cases.
-- `test_ripscrip` — FSM transitions, every dispatched command, mouse
+The suite currently ships 275 individual checks across three binaries:
+- `test_drawing` — 41 rendering primitives, fonts, and edge-case checks.
+- `test_ripscrip` — 228 FSM transitions, dispatched commands, mouse
   hit-testing, variable expansion, host callbacks, port system.
-- `test_compat` — fixture replay with FNV-1a frame-hash lockdown so
+- `test_compat` — 6 fixture replays with FNV-1a frame-hash lockdown so
   pixel-level regressions show up immediately.
 
 CI runs the matrix on Linux, macOS, and Windows in both Debug and
-Release, plus dedicated UBSan/ASan and `-fanalyzer` jobs.
+Release, plus dedicated UBSan/ASan, coverage-floor, embedded ARM archive,
+and `-fanalyzer` jobs.
 
 ## Origins
 
