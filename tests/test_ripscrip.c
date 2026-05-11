@@ -3406,7 +3406,16 @@ static void test_var_coordsize_reflects_state(void) {
  * ═══════════════════════════════════════════════════════════════════ */
 
 static void tw_activate_window(rip_state_t *s, comp_context_t *ctx) {
-    feed_script(s, ctx, "!|b0K0K5K2S0F0000000A000|\n");
+    (void)ctx;
+    /* Set the text-window state directly rather than feeding a wire
+     * command + trailing newline, so the FSM stays cleanly in IDLE. */
+    s->tw_x0 = 20;
+    s->tw_y0 = 20;
+    s->tw_x1 = 200;
+    s->tw_y1 = 100;
+    s->tw_cur_x = s->tw_x0;
+    s->tw_cur_y = (int16_t)((s->tw_y0 * 8) / 7);  /* scale_y */
+    s->tw_active = true;
     s->tw_wrap = true;
 }
 
