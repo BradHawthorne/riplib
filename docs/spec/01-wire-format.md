@@ -8,13 +8,13 @@
                     Copyright (c) 1993-1997
                 TeleGrafix Communications, Inc.
 
-                    v3.1 Extensions (c) 2026
+                    v3.1 / v3.2 Extensions (c) 2026
                     SimVU (Brad Hawthorne)
 
-                     Protocol ID:   RIPSCRIP031001
-                     Library:       RIPlib v1.0
+                     Protocol ID:   RIPSCRIP032001
+                     Library:       RIPlib v1.2.0
 
-                        March 2026
+                        May 2026
              ------------------------------------------
 
 
@@ -49,7 +49,8 @@ Protocol versions:
      v1.54     1993   RIPSCRIP015400      Original specification
      v2.0      1995   RIPSCRIP020000      Drawing Ports, extended cmds
      v3.0      1997   RIPSCRIP030001      DLL-based, never published
-     v3.1      2026   RIPSCRIP031001      A2GSPU/RIPlib extensions
+     v3.1      2026   RIPSCRIP031001      §A2G.1-7 (A2GSPU/RIPlib)
+     v3.2      2026   RIPSCRIP032001      §A2G.8-13 (QoL refinements)
 
 
 ---------------------------------------------------------------------
@@ -236,6 +237,7 @@ The client responds with its protocol version string:
 
      Example: RIPSCRIP015400\n   (v1.54, vendor 0, sub 0)
               RIPSCRIP031001\n   (v3.1, vendor 0, sub 1)
+              RIPSCRIP032001\n   (v3.2, vendor 0, sub 1)
 
 Format of the version string:
 

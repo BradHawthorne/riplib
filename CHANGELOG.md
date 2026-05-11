@@ -7,36 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] — 2026-05-11
 
-§A2G2 quality-of-life extensions.  All additions are backward
-compatible — they use new command letters, new `$VARIABLE$` names,
-or new values for previously-validated parameter fields.  A v3.0 /
-v3.1 client sees the additions as either no-ops or as literal text
-that falls through `$XYZ$` unrecognized-variable handling.
+**Bumps the supported protocol from RIPscrip v3.1 → v3.2** by
+defining six quality-of-life extensions as §A2G.8 through §A2G.13.
+All additions are backward compatible — they use new command
+letters, new `$VARIABLE$` names, or new values for previously-
+validated parameter fields.  A v3.0 / v3.1 client sees the
+additions as either no-ops or as literal text that falls through
+`$XYZ$` unrecognized-variable handling.
 
-### Added
+Protocol ID advertised by `$RIPVER$` and the ESC[! probe response
+is now **`RIPSCRIP032001`**.
+
+### Added (v3.2 protocol — §A2G.8 through §A2G.13)
 - **State push/pop stack** — `|^` and `|~` save/restore the drawing
   prelude (colors, fill/line/write state, font fields, draw cursor,
   viewport).  Bounded to 8 frames; overflow drops silently, pop on
-  empty is a no-op.  Cleared by `|*` and session reset.  See §A2G2.8.
+  empty is a no-op.  Cleared by `|*` and session reset.  See §A2G.8.
 - **Layout / introspection variables** — `$CX$` `$CY$` `$VPW$` `$VPH$`
   `$VPCX$` `$VPCY$` `$CCOL$` `$CFCOL$` `$CBCOL$` expose current
   drawing state.  Use case: "center this text" without hardcoding
-  320,200.  See §A2G2.9.
+  320,200.  See §A2G.9.
 - **Time component variables** — `$HOUR$` `$MIN$` `$SEC$` `$DOW$`
   `$DOM$` `$MONTH$` extend the existing `$DATE$` / `$TIME$` family.
-  All fall back to local RTC when host hasn't synced.  See §A2G2.10.
+  All fall back to local RTC when host hasn't synced.  See §A2G.10.
 - **EGA color-name aliases** — `$BLACK$` through `$WHITE$` each
   expand to the 2-digit MegaNum of the EGA palette index.  Useful
-  in `<<IF>>` comparisons and in text bodies.  See §A2G2.11.
+  in `<<IF>>` comparisons and in text bodies.  See §A2G.11.
 - **`<<DEBUG msg>>` preprocessor directive** — pushes
   `0x3E DEBUG: <msg>\r` to TX, suppressed by enclosing
   `<<IF false>>` branches.  Safe to leave in production scripts
-  (hosts that don't recognize the prefix drop the line).  See §A2G2.12.
+  (hosts that don't recognize the prefix drop the line).  See §A2G.12.
 - **Radial gradient** — `|28` gains mode 2 (radial), in addition to
   the existing horizontal (0) and vertical (1) modes.  Per-pixel
   interpolation by normalized squared distance, using the FPU we
   already require for §A2G.5 trig.  Existing clients sending
-  mode 0/1 are unaffected.  See §A2G2.13.
+  mode 0/1 are unaffected.  See §A2G.13.
+
+### Changed
+- `$RIPVER$` now reports `"RIPSCRIP032001"` (was `"RIPSCRIP031001"`).
 
 ### Tests added (+14)
 - `test_state_stack_*` — push/pop roundtrip, pop-on-empty, overflow

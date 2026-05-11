@@ -873,7 +873,7 @@ trigger. Used by BBSes to mark "this screen is complete."
 
 
 ---------------------------------------------------------------------
-2.39  RIP_PUSH_STATE — Push Drawing State (§A2G2)
+2.39  RIP_PUSH_STATE — Push Drawing State (§A2G)
 ---------------------------------------------------------------------
 
      Function:     Push drawing state to stack
@@ -883,12 +883,12 @@ trigger. Used by BBSes to mark "this screen is complete."
 
 Saves the current drawing prelude (colors, fill/line/write state,
 font fields, draw cursor, viewport rect) onto a bounded LIFO stack
-(8 frames).  Overflow is silently dropped.  See §A2G2.8 for the
+(8 frames).  Overflow is silently dropped.  See §A2G.8 for the
 full list of captured fields and the lifecycle (cleared by |*).
 
 
 ---------------------------------------------------------------------
-2.40  RIP_POP_STATE — Pop Drawing State (§A2G2)
+2.40  RIP_POP_STATE — Pop Drawing State (§A2G)
 ---------------------------------------------------------------------
 
      Function:     Restore drawing state from stack
@@ -898,7 +898,7 @@ full list of captured fields and the lifecycle (cleared by |*).
 
 Pops the most recent |^ frame back into the active state and
 immediately re-applies the draw layer (color, write mode, clip).
-Pop on an empty stack is a no-op.  See §A2G2.8.
+Pop on an empty stack is a no-op.  See §A2G.8.
 
 
 =====================================================================

@@ -866,10 +866,10 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         int16_t gh = scale_y(params[3]);
         uint8_t c1 = s->vga_palette[params[4] & 0xFF];
         uint8_t c2 = s->vga_palette[params[5] & 0xFF];
-        /* mode: 0=horizontal (vary X), 1=vertical (vary Y), 2=radial (§A2G2).
+        /* mode: 0=horizontal (vary X), 1=vertical (vary Y), 2=radial (§A2G.13).
          * v3.0 used a bool here (any non-zero = vertical) so values 0/1 keep
          * their original semantics; mode 2 is the new backward-compatible
-         * radial gradient. */
+         * radial gradient added in v3.2. */
         int mode = params[6];
         if (mode != 2) mode = (mode != 0) ? 1 : 0;
         uint8_t old_color = draw_get_color();

@@ -3351,9 +3351,9 @@ static void test_var_year_with_host_date(void) {
 
 static void test_var_ripver_returns_a2gspu(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$RIPVER$ expands to RIPSCRIP031001");
+    TEST("$RIPVER$ expands to RIPSCRIP032001 (v3.2)");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "<<IF $RIPVER$=RIPSCRIP031001>>!|X1100|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $RIPVER$=RIPSCRIP032001>>!|X1100|<<ENDIF>>");
     if (draw_get_pixel(37, 0) != 0) PASS();
     else FAIL("$RIPVER$ did not match expected version string");
 }

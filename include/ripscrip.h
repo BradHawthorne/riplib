@@ -422,7 +422,7 @@ typedef struct {
     rip_port_t ports[RIP_MAX_PORTS];
     uint8_t    active_port;           /* Index of current active port (0-35) */
 
-    /* §A2G2: state push/pop stack (|^ pushes, |~ pops).
+    /* §A2G (v3.2): state push/pop stack (|^ pushes, |~ pops).
      * Captures the drawing fields a BBS most often wraps a styled draw in:
      * colors, write/fill/line state, font fields, draw cursor, viewport.
      * Stack is bounded (8 frames); overflow silently drops the push, and

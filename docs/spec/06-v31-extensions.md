@@ -1,19 +1,29 @@
 
 =====================================================================
-==       SEGMENT 6: v3.1 EXTENSIONS (§A2G)                        ==
+==       SEGMENT 6: v3.1 / v3.2 EXTENSIONS (§A2G)                  ==
 =====================================================================
 
-The A2GSPU v3.1 extensions are additions to the RIPscrip protocol
+The A2GSPU §A2G extensions are additions to the RIPscrip protocol
 that go beyond what TeleGrafix shipped in RIPSCRIP.DLL v3.0.7
-(October 1997). These extensions are backward-compatible — they
-use existing command fields or previously unused parameter ranges,
-so a v3.1 client works correctly with v1.54/v2.0/v3.0 BBSes.
+(October 1997).  All extensions are backward-compatible — they use
+existing command fields, previously unused parameter ranges, new
+command letters not in the v3.0 table, or new $VARIABLE$ names.
+A v3.0 client receiving v3.1 or v3.2 traffic sees the additions as
+either no-ops or as literal text.
 
-The extensions are identified by the protocol ID:
+Protocol versioning:
 
-     RIPSCRIP031001
+     RIPSCRIP031001    v3.1 — §A2G.1 through §A2G.7
+                              (AND/NOT, vertical text, font attrs,
+                               native fills, FPU, palette offset, CCW)
 
-Where "03" = major v3, "10" = minor .1, "01" = sub-version 1.
+     RIPSCRIP032001    v3.2 — adds §A2G.8 through §A2G.13
+                              (state stack, layout vars, time vars,
+                               color names, <<DEBUG>>, radial fill)
+
+A client advertises its supported revision via $RIPVER$ and via the
+ESC[! probe response (see §1.7).  The wire ID encodes the major,
+minor, and sub-version each as a 2-digit field.
 
 All extensions are documented with a §A2G section number for
 cross-referencing.
@@ -287,21 +297,21 @@ Direction validation:
 
 
 =====================================================================
-==       §A2G2 — v1.2 QUALITY-OF-LIFE EXTENSIONS                   ==
+==       §A2G.8+ — RIPscrip v3.2 QUALITY-OF-LIFE EXTENSIONS        ==
 =====================================================================
 
-The §A2G2 extensions are small refinements added in RIPlib v1.2 that
-build on §A2G without changing any existing wire-format command.
-Every addition is one of: a new command letter not used in v3.0/3.1,
-a new $VARIABLE$ name, a new preprocessor directive, or a new value
-for a previously-validated parameter field.  v3.0/3.1 clients see
-the new content as either no-op (unknown command letters are passed
-through the FSM accept list) or as literal text ($XYZ$ falls through
-when unrecognized).
+The §A2G.8 through §A2G.13 extensions define RIPscrip v3.2: small
+refinements that build on v3.1 without changing any existing
+wire-format command.  Every addition is one of: a new command
+letter not used in v3.0 / v3.1, a new $VARIABLE$ name, a new
+preprocessor directive, or a new value for a previously-validated
+parameter field.  v3.0 / v3.1 clients see the new content as either
+no-op (unknown command letters are passed through the FSM accept
+list) or as literal text ($XYZ$ falls through when unrecognized).
 
 
 ---------------------------------------------------------------------
-§A2G2.8  STATE PUSH/POP STACK
+§A2G.8  STATE PUSH/POP STACK
 ---------------------------------------------------------------------
 
 Two new Level 0 commands wrap a bounded LIFO stack of "drawing
@@ -354,7 +364,7 @@ Example:
 
 
 ---------------------------------------------------------------------
-§A2G2.9  LAYOUT / INTROSPECTION VARIABLES
+§A2G.9  LAYOUT / INTROSPECTION VARIABLES
 ---------------------------------------------------------------------
 
 These read-only variables expose current drawing state to text and
@@ -381,7 +391,7 @@ definitions transparently:
 
 
 ---------------------------------------------------------------------
-§A2G2.10  TIME COMPONENT VARIABLES
+§A2G.10  TIME COMPONENT VARIABLES
 ---------------------------------------------------------------------
 
 Extends the existing $DATE$ / $TIME$ / $YEAR$ / $WOYM$ family with
@@ -410,7 +420,7 @@ Use case: greeting variation by time of day, or by day of week:
 
 
 ---------------------------------------------------------------------
-§A2G2.11  EGA COLOR-NAME ALIASES
+§A2G.11  EGA COLOR-NAME ALIASES
 ---------------------------------------------------------------------
 
 Each EGA palette index has a readable variable alias.  Names are
@@ -449,7 +459,7 @@ in text bodies and IF comparisons:
 
 
 ---------------------------------------------------------------------
-§A2G2.12  <<DEBUG msg>> PREPROCESSOR DIRECTIVE
+§A2G.12  <<DEBUG msg>> PREPROCESSOR DIRECTIVE
 ---------------------------------------------------------------------
 
 A new preprocessor directive joins <<IF>> / <<ELSE>> / <<ENDIF>>:
@@ -476,14 +486,14 @@ Output on TX:
 
 
 ---------------------------------------------------------------------
-§A2G2.13  RADIAL GRADIENT MODE
+§A2G.13  RADIAL GRADIENT MODE
 ---------------------------------------------------------------------
 
 The Level 2 gradient command |28 gains a third mode value:
 
      Mode 0 (v3.0):   Horizontal gradient — color varies with X.
      Mode 1 (v3.0):   Vertical gradient — color varies with Y.
-     Mode 2 (§A2G2):  Radial gradient — c1 at the box center,
+     Mode 2 (§A2G):  Radial gradient — c1 at the box center,
                       c2 at the farthest box corner.  Per-pixel
                       linear interpolation by normalized squared
                       distance, using the FPU we already require
@@ -504,7 +514,7 @@ Backward compatibility:
 
 =====================================================================
 ==                    END OF SEGMENT 6                              ==
-==           v3.1 Extensions (§A2G) + §A2G2                        ==
+==           v3.1 / v3.2 Extensions (§A2G)                         ==
 =====================================================================
 
 Next: Segment 7 — Variable Expansion

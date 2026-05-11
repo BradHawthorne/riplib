@@ -22,7 +22,7 @@ as literal text including the '$' delimiters).
      Output:   "Hello , today is 03/21/26"
 
      Input:    "RIP version: $RIPVER$"
-     Output:   "RIP version: RIPSCRIP031001"
+     Output:   "RIP version: RIPSCRIP032001"
 
      Input:    "Unknown: $FOOBAR$"
      Output:   "Unknown: $FOOBAR$"    (unrecognized, left as-is)
@@ -73,6 +73,7 @@ $RIPVER$
      v1.54:    "RIPSCRIP015400"
      v3.0:     "RIPSCRIP030001"
      v3.1:     "RIPSCRIP031001"
+     v3.2:     "RIPSCRIP032001"   (RIPlib current)
      Description: Protocol version string. Same format as the
                   ESC[! auto-detect response (see §1.7).
 
@@ -267,12 +268,12 @@ a linear search of the variable table.
      $TIME$          time       v1.54     HH:MM
      $YEAR$          date       v3.1      YYYY (4-digit)
      $WOYM$          date       v3.0      Week of year (ISO)
-     $HOUR$          time       §A2G2     HH from host_time or RTC
-     $MIN$           time       §A2G2     MM from host_time or RTC
-     $SEC$           time       §A2G2     SS from RTC
-     $DOW$           date       §A2G2     Day of week (Mon=0)
-     $DOM$           date       §A2G2     Day of month (DD)
-     $MONTH$         date       §A2G2     Month of year (MM)
+     $HOUR$          time       v3.2      HH from host_time or RTC
+     $MIN$           time       v3.2      MM from host_time or RTC
+     $SEC$           time       v3.2      SS from RTC
+     $DOW$           date       v3.2      Day of week (Mon=0)
+     $DOM$           date       v3.2      Day of month (DD)
+     $MONTH$         date       v3.2      Month of year (MM)
      $RIPVER$        protocol   v1.54     Version string
      $PROT$          protocol   v3.1      Resolution mode
      $COMPAT$        protocol   v3.1      Compatibility level
@@ -281,13 +282,13 @@ a linear search of the variable table.
      $ISPALETTE$     protocol   v2.0      Palette availability
      $USER$          identity   v1.54     User name (empty)
      $RAND$          numeric    v1.54     LCG random 0-32767
-     $CX$ / $CY$     layout     §A2G2     Current draw cursor
-     $VPW$ / $VPH$   layout     §A2G2     Viewport size
-     $VPCX$ / $VPCY$ layout     §A2G2     Viewport center
-     $CCOL$          layout     §A2G2     Current draw color
-     $CFCOL$         layout     §A2G2     Current fill color
-     $CBCOL$         layout     §A2G2     Current back color
-     $BLACK$..$WHITE$ color     §A2G2     EGA color-name aliases
+     $CX$ / $CY$     layout     v3.2      Current draw cursor
+     $VPW$ / $VPH$   layout     v3.2      Viewport size
+     $VPCX$ / $VPCY$ layout     v3.2      Viewport center
+     $CCOL$          layout     v3.2      Current draw color
+     $CFCOL$         layout     v3.2      Current fill color
+     $CBCOL$         layout     v3.2      Current back color
+     $BLACK$..$WHITE$ color     v3.2      EGA color-name aliases
      $BEEP$          sound      v1.54     System bell
      $BLIP$          sound      v1.54     Short blip
      $ALARM$         sound      v1.54     Alarm tone

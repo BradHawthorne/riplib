@@ -1425,9 +1425,10 @@ static int rip_expand_variables(rip_state_t *s,
 
         /* FIX TX2: $RIPVER$ — protocol version string.
          * DLL ripTextVarEngine returns "RIPSCRIP030001" for v3.0.
-         * A2GSPU reports "RIPSCRIP031001" — v3.1 with A2GSPU extensions. */
+         * A2GSPU reports "RIPSCRIP032001" — v3.2 with the §A2G.8-13
+         * QoL extensions on top of the §A2G.1-7 v3.1 baseline. */
         } else if (vlen == 6 && memcmp(vname, "RIPVER", 6) == 0) {
-            vval_len = snprintf(val, sizeof(val), "RIPSCRIP031001");
+            vval_len = snprintf(val, sizeof(val), "RIPSCRIP032001");
             if (vval_len < 0) vval_len = 0;
 
         /* FIX TX3: $REFRESH$ — re-enable and trigger a full screen refresh.
@@ -1543,7 +1544,7 @@ static int rip_expand_variables(rip_state_t *s,
             val[0] = '\0';
             vval_len = 0;
 
-        /* §A2G2: Layout / introspection variables ----------------- */
+        /* §A2G (v3.2): Layout / introspection variables ----------------- */
         } else if (vlen == 2 && memcmp(vname, "CX", 2) == 0) {
             vval_len = snprintf(val, sizeof(val), "%d", s->draw_x);
             if (vval_len < 0) vval_len = 0;
@@ -1579,7 +1580,7 @@ static int rip_expand_variables(rip_state_t *s,
                                 (int)(s->back_color & 0x0F));
             if (vval_len < 0) vval_len = 0;
 
-        /* §A2G2: Time component variables ------------------------- */
+        /* §A2G (v3.2): Time component variables ------------------------- */
         } else if (vlen == 4 && memcmp(vname, "HOUR", 4) == 0) {
             if (s->host_time[0] >= '0' && s->host_time[0] <= '9' &&
                 s->host_time[1] >= '0' && s->host_time[1] <= '9') {
@@ -1644,7 +1645,7 @@ static int rip_expand_variables(rip_state_t *s,
             }
             if (vval_len < 0) vval_len = 0;
 
-        /* §A2G2: EGA color-name aliases — expand to 2-digit MegaNum
+        /* §A2G (v3.2): EGA color-name aliases — expand to 2-digit MegaNum
          * suitable as a |c, |S, |k, |a argument.  Each name maps to
          * its EGA palette index (0-15).  Names are 16 chars max. */
         } else if (vlen >= 3 && vlen <= 13) {
@@ -2149,7 +2150,7 @@ static void preproc_finalize_directive(rip_state_t *s) {
     } else if (strcmp(dir, "ENDIF") == 0) {
         preproc_handle_endif(s);
     } else if (strncmp(dir, "DEBUG ", 6) == 0 || strcmp(dir, "DEBUG") == 0) {
-        /* §A2G2: <<DEBUG msg>> — push "0x3E DEBUG: <msg>\r" to TX so the
+        /* §A2G (v3.2): <<DEBUG msg>> — push "0x3E DEBUG: <msg>\r" to TX so the
          * host can log it.  Suppressed by parent IF/ELSE branches so that
          * <<IF false>>...<<DEBUG ...>>...<<ENDIF>> stays quiet. */
         if (!s->preproc_suppress) {
@@ -2362,7 +2363,7 @@ static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
 
     s->rip_has_drawn = false;
     s->cursor_repositioned = false;
-    /* §A2G2: clear the state stack so subsequent | ~ pops cannot
+    /* §A2G (v3.2): clear the state stack so subsequent | ~ pops cannot
      * surface state from a prior scene. */
     s->state_stack_depth = 0;
     draw_set_write_mode(DRAW_MODE_COPY);
@@ -3648,7 +3649,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         /* No-op: scene terminator; mouse regions already activated incrementally */
         break;
 
-    /* §A2G2: state push/pop — backward-compatible QoL extension. */
+    /* §A2G (v3.2): state push/pop — backward-compatible QoL extension. */
     case '^': /* RIP_PUSH_STATE — snapshot drawing/cursor/viewport state.
                * Stack is bounded to RIP_STATE_STACK_MAX frames; overflow
                * silently drops the push (matches the "ignore unknown
