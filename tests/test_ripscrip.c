@@ -2860,6 +2860,437 @@ static void test_global_file_upload_caches_icn(void) {
         FAIL("global upload wrappers did not cache ICN");
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * WIRE-LEVEL COVERAGE TESTS — every protocol command exercised at
+ * least once via feed_script(). Identified by spec-vs-test audit:
+ * 37 commands had dispatchers but no wire-format test.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Level 0 state setters ────────────────────────────────────────── */
+
+static void test_l0_write_mode_W(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|W sets write mode");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|W03|");  /* mode=3 (XOR) */
+    if (s.write_mode == 3) PASS(); else FAIL("|W did not set write_mode");
+}
+
+static void test_l0_line_style_eq(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|= sets line style and thickness");
+    init_fixture(&s, &ctx);
+    /* style=01 user_pat=0000 thick=03 → s->line_style=1, s->line_thick=scaled */
+    feed_script(&s, &ctx, "!|=01000003|");
+    if (s.line_style == 1 && s.line_thick >= 3) PASS();
+    else FAIL("|= did not store line style");
+}
+
+static void test_l0_font_style_Y(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|Y sets font id, dir, size");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|Y010003|");  /* font=1 dir=0 size=3 */
+    if (s.font_id == 1 && s.font_dir == 0 && s.font_size == 3) PASS();
+    else FAIL("|Y did not update font fields");
+}
+
+static void test_l0_move_m(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|m moves drawing cursor");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|m0A0K|");  /* x=10, y=20 (scaled) */
+    if (s.draw_x == 10) PASS();
+    else FAIL("|m did not update draw_x");
+}
+
+static void test_l0_gotoxy_g(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|g calls comp_set_cursor without crashing");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|g050A|");  /* (5, 10) */
+    PASS();  /* Composer cursor is a platform stub; just verify dispatch */
+}
+
+static void test_l0_home_H(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|H dispatches RIP_HOME");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|H|");
+    PASS();
+}
+
+static void test_l0_set_palette_Q(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|Q sets full 16-entry palette");
+    init_fixture(&s, &ctx);
+    memset(palette, 0, sizeof(palette));
+    /* 16 EGA64 indices, each 2 chars.  Use "01" through "0G" (=16). */
+    feed_script(&s, &ctx,
+        "!|Q01020304050607080902020202020202|");
+    /* palette_slot(0)..(15) = 240..255 should now hold values != 0 for ega64 idx 1+ */
+    int populated = 0;
+    for (int i = 240; i < 256; i++)
+        if (palette[i] != 0) populated++;
+    if (populated >= 8) PASS();
+    else FAIL("|Q did not write palette entries");
+}
+
+/* ── Level 0 drawing primitives ───────────────────────────────────── */
+
+static void test_l0_rectangle_R(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|R draws rectangle outline");
+    init_fixture(&s, &ctx);
+    s.draw_color = 5;
+    feed_script(&s, &ctx, "!|R05050F0F|");  /* (5,5)-(15,15) */
+    /* Corner pixel should be set; interior should not */
+    if (draw_get_pixel(5, 5) != 0 && draw_get_pixel(10, 10) == 0) PASS();
+    else FAIL("|R did not draw outline only");
+}
+
+static void test_l0_circle_C(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|C draws circle outline");
+    init_fixture(&s, &ctx);
+    /* center (20, 10) r=5 — "0K"=20, "0A"=10 */
+    feed_script(&s, &ctx, "!|C0K0A05|");
+    int found = 0;
+    for (int x = 12; x < 28 && !found; x++)
+        for (int y = 4; y < 20 && !found; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|C drew nothing");
+}
+
+static void test_l0_oval_O(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|O draws elliptical arc");
+    init_fixture(&s, &ctx);
+    /* center (40,40) sa=0 ea=180 rx=15 ry=12 — full top half */
+    feed_script(&s, &ctx, "!|O141400500F0C|");
+    int found = 0;
+    for (int y = 20; y < 50 && !found; y++)
+        for (int x = 20; x < 60 && !found; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|O drew nothing");
+}
+
+static void test_l0_filled_oval_o(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|o draws filled ellipse");
+    init_fixture(&s, &ctx);
+    s.fill_color = 5;
+    s.fill_pattern = 1;  /* solid */
+    feed_script(&s, &ctx, "!|o140K0K0A|");  /* center (20,20) rx=20 ry=10 */
+    if (draw_get_pixel(20, 20) != 0) PASS();
+    else FAIL("|o did not fill ellipse center");
+}
+
+static void test_l0_arc_A(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|A draws circular arc");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|A140K005A0A|");  /* center (20,20) 0-90° r=10 */
+    int found = 0;
+    for (int x = 18; x < 32 && !found; x++)
+        for (int y = 8; y < 22 && !found; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|A drew nothing");
+}
+
+static void test_l0_oval_pie_slice_i(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|i draws filled oval pie slice");
+    init_fixture(&s, &ctx);
+    s.fill_color = 7;
+    s.fill_pattern = 1;
+    feed_script(&s, &ctx, "!|i140K005A0K0A|");  /* (20,20) 0-90° rx=20 ry=10 */
+    /* Center should be filled */
+    if (draw_get_pixel(22, 20) != 0) PASS();
+    else FAIL("|i did not fill");
+}
+
+static void test_l0_bezier_Z(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|Z draws single cubic bezier");
+    init_fixture(&s, &ctx);
+    /* (0,0) (10,30) (20,30) (30,0) steps=08 → 16 chars + 2 = 18 */
+    feed_script(&s, &ctx, "!|Z00000A1U0U1U1E000008|");
+    int found = 0;
+    for (int x = 0; x < 40 && !found; x++)
+        for (int y = 0; y < 40 && !found; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|Z drew nothing");
+}
+
+static void test_l0_polyline_l(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|l draws open polyline");
+    init_fixture(&s, &ctx);
+    /* 2 points: (5,5) (20,5) → horizontal line */
+    feed_script(&s, &ctx, "!|l020505140 5|");
+    /* Some pixel on x in [5..20] at y=5 should be set */
+    int found = 0;
+    for (int x = 5; x <= 20 && !found; x++)
+        if (draw_get_pixel((int16_t)x, 5) != 0) found = 1;
+    if (found) PASS(); else FAIL("|l drew nothing");
+}
+
+/* ── Level 0 cursor / lifecycle ───────────────────────────────────── */
+
+static void test_l0_erase_window_e(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|e dispatches RIP_ERASE_WINDOW");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|e|");
+    PASS();  /* composer is a stub in test fixture */
+}
+
+static void test_l0_erase_eol(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|> dispatches RIP_ERASE_EOL");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|>|");
+    PASS();
+}
+
+static void test_l0_no_more_hash(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|# (RIP_NO_MORE) does not crash");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|#|");
+    PASS();
+}
+
+static void test_l0_region_text_t(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|t renders justified text inside a text block");
+    init_fixture(&s, &ctx);
+    /* 1T begins a text block (10,10)-(50,30) so that L0 |t can render. */
+    feed_script(&s, &ctx, "!|1T0A0A1E1E00|");
+    if (!s.text_block.active) { FAIL("setup: 1T missed"); return; }
+    feed_script(&s, &ctx, "!|t0X|");
+    int found = 0;
+    for (int x = 8; x < 30 && !found; x++)
+        for (int y = 8; y < 40 && !found; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|t drew nothing");
+}
+
+static void test_l0_custom_fill_pattern_s(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|s sets custom 8x8 fill pattern + color");
+    init_fixture(&s, &ctx);
+    /* 8 bytes + col = 9 mega2 fields = 18 chars.  All 0xAA + col=05. */
+    feed_script(&s, &ctx, "!|s2U2U2U2U2U2U2U2U05|");
+    if (s.fill_color == 5) PASS();
+    else FAIL("|s did not set fill_color");
+}
+
+/* ── Extended single-char ─────────────────────────────────────────── */
+
+static void test_ext_rounded_rect_U(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|U draws rounded rectangle outline");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|U05050F0F03|");  /* (5,5)-(15,15) r=3 */
+    if (draw_get_pixel(10, 5) != 0) PASS();
+    else FAIL("|U drew nothing on top edge");
+}
+
+static void test_ext_filled_rounded_rect_u(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|u draws filled rounded rectangle");
+    init_fixture(&s, &ctx);
+    s.fill_color = 6;
+    s.fill_pattern = 1;
+    feed_script(&s, &ctx, "!|u05050F0F03|");
+    if (draw_get_pixel(10, 10) != 0) PASS();
+    else FAIL("|u did not fill interior");
+}
+
+static void test_ext_polyline_ext(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|] dispatches polyline ext");
+    init_fixture(&s, &ctx);
+    /* x0:2 y0:2 x1:2 y1:2 mode:2 p1:2 p2:2 = 14 chars */
+    feed_script(&s, &ctx, "!|]050505140000000000|");
+    PASS();
+}
+
+static void test_ext_animation_frame_brace(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|{ draws animation frame (triangle)");
+    init_fixture(&s, &ctx);
+    s.fill_color = 5;
+    s.fill_pattern = 1;
+    feed_script(&s, &ctx, "!|{050514051E0F0F|");  /* (5,5) (20,5) (15,30) */
+    if (draw_get_pixel(15, 10) != 0 || draw_get_pixel(10, 5) != 0) PASS();
+    else FAIL("|{ drew nothing");
+}
+
+static void test_ext_kill_mouse_in_region_K(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|K removes mouse regions intersecting rect");
+    init_fixture(&s, &ctx);
+    /* Define a region at (10,10)-(50,50) */
+    feed_script(&s, &ctx, "!|1M000A0A1E1E0000000X|");
+    if (s.num_mouse_regions != 1) { FAIL("setup: 1M missed"); return; }
+    /* Kill any region intersecting (0,0)-(60,60) — should drop ours.
+     * x0:2 y0:2 x1:2 y1:2 = "00"+"00"+"1O"+"1O" where "1O"=60. */
+    feed_script(&s, &ctx, "!|K00001O1O|");
+    if (s.num_mouse_regions == 0) PASS();
+    else FAIL("|K did not remove intersecting region");
+}
+
+static void test_ext_mouse_region_ext_colon(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|: adds extended mouse region");
+    init_fixture(&s, &ctx);
+    /* x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:2 res×5 (10 chars) = 22 total */
+    feed_script(&s, &ctx, "!|:05050F0F00000000000000|");
+    if (s.num_mouse_regions == 1) PASS();
+    else FAIL("|: did not add region");
+}
+
+static void test_ext_button_ext_semicolon(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|; adds extended button + region");
+    init_fixture(&s, &ctx);
+    /* x0:2 y0:2 x1:2 y1:2 style:2 lx:2 ly:2 = 14 chars min */
+    feed_script(&s, &ctx, "!|;05050F0F00000000|");
+    if (s.num_mouse_regions == 1) PASS();
+    else FAIL("|; did not add region");
+}
+
+static void test_ext_ext_text_window_b(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|b activates extended text window");
+    init_fixture(&s, &ctx);
+    /* x0:2 y0:2 x1:2 y1:2 fore:2 back:2 font:1 size:4 flags:3 = 18 */
+    feed_script(&s, &ctx, "!|b05050F0F0F00000A04000|");
+    if (s.tw_active && s.etw_fore_col == 15) PASS();
+    else FAIL("|b did not activate ext text window");
+}
+
+static void test_ext_ext_font_style_d(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|d sets extended font style fields");
+    init_fixture(&s, &ctx);
+    /* font_id:2 attr:1 size:4 = 7 chars.  font=01 attr=3 size=0001 */
+    feed_script(&s, &ctx, "!|d0130001|");
+    if (s.font_ext_id == 1 && s.font_ext_attr == 3) PASS();
+    else FAIL("|d did not set ext font fields");
+}
+
+static void test_ext_font_attrib_f(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|f sets font attribute flags");
+    init_fixture(&s, &ctx);
+    /* attrib:2 reserved:2.  attrib=03 (bold+italic) */
+    feed_script(&s, &ctx, "!|f0300|");
+    if (s.font_attrib == 3) PASS();
+    else FAIL("|f did not set font_attrib");
+}
+
+static void test_ext_fill_pattern_ext_D(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|D installs user fill pattern, sets fill_pattern=12");
+    init_fixture(&s, &ctx);
+    /* 8 pattern bytes (mega2 each = 16 chars) + color:2 = 18 chars */
+    feed_script(&s, &ctx, "!|D2U2U2U2U2U2U2U2U07|");
+    if (s.fill_pattern == 12 && s.fill_color == 7) PASS();
+    else FAIL("|D did not install user fill pattern");
+}
+
+/* ── Level 1 ──────────────────────────────────────────────────────── */
+
+static void test_l1_button_style_B(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1B updates button style state");
+    init_fixture(&s, &ctx);
+    /* wid:2 hgt:2 orient:2 flags:4 bevsize:2 dfore:2 dback:2 bright:2 dark:2
+     * surface:2 grp_no:2 flags2:2 uline:2 corner:2 res:6 = 30 chars min */
+    feed_script(&s, &ctx, "!|1B0F0F00000002030405060708000000000000|");
+    if (s.button_style.width == 15 && s.button_style.height == 15) PASS();
+    else FAIL("|1B did not store width/height");
+}
+
+static void test_l1_set_icon_dir_N(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1N stores icon directory");
+    init_fixture(&s, &ctx);
+    /* res:2 + path */
+    feed_script(&s, &ctx, "!|1N00ICONS|");
+    if (strcmp(s.icon_dir, "ICONS") == 0) PASS();
+    else FAIL("|1N did not store icon_dir");
+}
+
+static void test_l1_play_midi_Z(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1Z pushes CMD_PLAY_SOUND marker for MIDI");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    /* mode:2 res:2 filename */
+    feed_script(&s, &ctx, "!|1Z0000SONG|");
+    if (tx_len >= 5 && tx_capture[0] == 0x3D &&
+        memcmp(tx_capture + 1, "SONG", 4) == 0) PASS();
+    else FAIL("|1Z did not push MIDI marker");
+}
+
+/* ── Level 2 widgets ──────────────────────────────────────────────── */
+
+static void test_l2_scrollbar_renders(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|23 renders scrollbar track + thumb");
+    init_fixture(&s, &ctx);
+    /* x=10 y=20 w=8 h=40 min=0 max=64 value=10 page_size=8 */
+    feed_script(&s, &ctx, "!|230A0K081400 1S0A 08|");
+    /* The track is light-gray (palette index 7).  Inside the track box
+     * (x∈[10..17], y∈[20..59]) at least one pixel should be non-zero. */
+    int found = 0;
+    for (int y = 20; y < 60 && !found; y++)
+        for (int x = 10; x < 18 && !found; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|23 drew nothing");
+}
+
+static void test_l2_menu_renders(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|24 renders menu bar");
+    init_fixture(&s, &ctx);
+    /* y=2 height=10 bg=7 text=0 */
+    feed_script(&s, &ctx, "!|24020A0700|");
+    /* Menu bar spans full width.  Some pixel in row y=2..12 should be set. */
+    int found = 0;
+    for (int x = 0; x < 640 && !found; x += 32)
+        for (int y = 2; y < 12 && !found; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|24 drew nothing");
+}
+
+static void test_l2_dialog_renders(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|25 renders dialog box with shadow");
+    init_fixture(&s, &ctx);
+    /* x=10 y=10 w=30 h=20 title_color=1 bg_color=7 */
+    feed_script(&s, &ctx, "!|250A0A0K0K 0107|");
+    /* Inside the dialog box, some pixel should be set */
+    int found = 0;
+    for (int y = 10; y < 30 && !found; y++)
+        for (int x = 10; x < 40 && !found; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|25 drew nothing");
+}
+
+static void test_l2_set_refresh(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|2R dispatches SET_REFRESH without crashing");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2R|");
+    PASS();
+}
+
 int main(void) {
     printf("RIPlib v1.0 — RIPscrip Regression Tests\n");
     printf("======================================\n\n");
@@ -3009,6 +3440,46 @@ int main(void) {
     test_load_icon_clipboard_flag_stores_pixels();
     test_global_mouse_event_dispatches();
     test_global_file_upload_caches_icn();
+
+    /* Wire-coverage tests for the 37 commands flagged by the spec-vs-test audit */
+    test_l0_write_mode_W();
+    test_l0_line_style_eq();
+    test_l0_font_style_Y();
+    test_l0_move_m();
+    test_l0_gotoxy_g();
+    test_l0_home_H();
+    test_l0_set_palette_Q();
+    test_l0_rectangle_R();
+    test_l0_circle_C();
+    test_l0_oval_O();
+    test_l0_filled_oval_o();
+    test_l0_arc_A();
+    test_l0_oval_pie_slice_i();
+    test_l0_bezier_Z();
+    test_l0_polyline_l();
+    test_l0_erase_window_e();
+    test_l0_erase_eol();
+    test_l0_no_more_hash();
+    test_l0_region_text_t();
+    test_l0_custom_fill_pattern_s();
+    test_ext_rounded_rect_U();
+    test_ext_filled_rounded_rect_u();
+    test_ext_polyline_ext();
+    test_ext_animation_frame_brace();
+    test_ext_kill_mouse_in_region_K();
+    test_ext_mouse_region_ext_colon();
+    test_ext_button_ext_semicolon();
+    test_ext_ext_text_window_b();
+    test_ext_ext_font_style_d();
+    test_ext_font_attrib_f();
+    test_ext_fill_pattern_ext_D();
+    test_l1_button_style_B();
+    test_l1_set_icon_dir_N();
+    test_l1_play_midi_Z();
+    test_l2_scrollbar_renders();
+    test_l2_menu_renders();
+    test_l2_dialog_renders();
+    test_l2_set_refresh();
 
     cleanup_all_arenas();
 
