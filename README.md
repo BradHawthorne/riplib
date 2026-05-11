@@ -38,7 +38,7 @@ RIPlib is a portable rendering/parser core, not a complete terminal application.
 | Protocol Parser | No | No | No | **Broad RIPscrip v1.54-v3.2** |
 | Platform | DOS only | SDL2/SDL3 | Windows | **Any C99 + framebuffer** |
 | Dependencies | DOS/BIOS | SDL2 | Win32 | **None** |
-| Embedded target | No | No | No | **Cortex-M33 cross-compile verified in CI** |
+| Embedded target | No | No | No | **Pico 2 / RP2350 cross-compile verified in CI** |
 
 ### Protocol Version Support
 
@@ -219,11 +219,51 @@ riplib/
 ## Portability
 
 RIPlib is proven on:
-- **RP2350 Cortex-M33** @ 384MHz (A2GSPU card firmware)
+- **Raspberry Pi RP2350 / Pico 2** @ 384MHz (A2GSPU card firmware, Processor V)
 - **x86/x64 Windows** (GSSquared Apple IIgs emulator)
 - **Any C99 platform** with a framebuffer
 
 The library uses single-precision FPU (`sinf`, `cosf`, `atan2f`, `sqrtf`) for accurate curve and angle calculations. On platforms without hardware FPU, the compiler provides software implementations — no code changes needed.
+
+### Reference target: A2GSPU two-RP2350 architecture
+
+RIPlib was extracted from the A2GSPU card, an Apple IIgs GPU
+coprocessor with two RP2350 (Pico 2) MCUs:
+
+```
+       ┌──────────────┐                           ┌──────────────┐
+       │  USB (host)  │◄──┐                  ┌───►│ DVI / HDMI   │
+       └──────────────┘   │                  │    └──────────────┘
+                          │                  │ PIO / HSTX
+       ┌──────────────┐   │   ┌────────┐     │
+       │ SDIO microSD │◄──┼───│  "B"   │ IPL │    ┌────────┐
+       └──────────────┘   │   │RP235XB │◄────┼───►│  "V"   │◄── USB
+                          │   │48 GPIO │ PIO │    │RP235XA │◄── UX
+       ┌──────────────┐   │   │        │     │    │30 GPIO │
+       │ Apple II Bus │◄──┘   └────────┘     │    └────────┘
+       └──────────────┘             ▲        │         ▲
+                                    │        ▼         │
+                                ┌───┴────────────────────┐
+                                │   Expansion Connector  │
+                                └────────────────────────┘
+```
+
+- **Processor "B" (RP235XB, 48 GPIO)** — host bus, SDIO/microSD storage, USB-A device side, Apple II bus glue.
+- **Processor "V" (RP235XA, 30 GPIO)** — video out (HSTX or PIO-DVI), USB keyboard, UX inputs.  **This is where RIPlib runs.**
+
+The two processors communicate via an IPL (Inter-Processor Link) over PIO so that B can stream a remote BBS connection to V, and V renders the RIPscrip protocol to the framebuffer.
+
+Board reference (block diagram source): <https://www.facebook.com/groups/5251478676/posts/10166402670968677/>.
+
+To build RIPlib for the Pico 2 / RP2350 target:
+
+```bash
+cmake -B build-pico2 -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake
+cmake --build build-pico2
+# produces build-pico2/libriplib.a
+```
+
+The toolchain file targets Cortex-M33 + fpv5-sp-d16 FPU + Thumb with `-DPICO_RP2350=1` so downstream firmware that uses the pico-sdk's chip-detection macros sees a consistent build flag.  Both RP2350 variants (V/RP235XA and B/RP235XB) share the CPU core, so the same toolchain file builds for either processor — pin-count differences are a board-level concern.
 
 ## Testing
 

@@ -102,7 +102,8 @@ jobs:
         done
         exit $fail
 
-  embedded-arm:
+  embedded-rp2350:
+    name: embedded-rp2350 (Pico 2)
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -112,23 +113,23 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y gcc-arm-none-eabi
 
-    - name: Configure for Cortex-M33 (RP2350 target)
+    - name: Configure for Raspberry Pi RP2350 (Pico 2) — Cortex-M33 + FPU
       run: |
-        cmake -B build-arm \
+        cmake -B build-pico2 \
           -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake
 
-    - name: Build the static library (no link)
-      run: cmake --build build-arm
+    - name: Build the static library (no link — bare-metal target)
+      run: cmake --build build-pico2
 
     - name: Verify the archive exists and contains the expected objects
       run: |
-        test -f build-arm/libriplib.a
-        ar t build-arm/libriplib.a | sort > /tmp/arm-objs.txt
-        echo "Objects in libriplib.a (ARM build):"
+        test -f build-pico2/libriplib.a
+        ar t build-pico2/libriplib.a | sort > /tmp/arm-objs.txt
+        echo "Objects in libriplib.a (RP2350 build):"
         cat /tmp/arm-objs.txt
-        # Sanity check: the eight core compilation units must all be there.
+        # Sanity check: the six core compilation units must all be there.
         for f in drawing bgi_font ripscrip ripscrip2 rip_icons rip_icn; do
-          grep -q "${f}.c.obj" /tmp/arm-objs.txt || (echo "::error::missing ${f}.c.obj in ARM archive" && exit 1)
+          grep -q "${f}.c.obj" /tmp/arm-objs.txt || (echo "::error::missing ${f}.c.obj in RP2350 archive" && exit 1)
         done
 
   static-analysis:
