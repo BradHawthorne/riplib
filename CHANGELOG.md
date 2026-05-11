@@ -5,6 +5,29 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-05-11
+
+Patch release for the RIPscrip v3.2 surface.
+
+### Fixed
+- `ESC[!` now advertises the same v3.2 wire ID as `$RIPVER$`:
+  **`RIPSCRIP032001`**.
+- `|^` / `|~` now preserve and re-apply the full drawing prelude:
+  colors, write mode, fill style/background, 16-bit line pattern,
+  line thickness, font and extended font fields, draw cursor, viewport,
+  and filled-border state.
+- Level 2 Drawing Port save/restore now preserves custom line patterns.
+- The drawing backend now accepts the full 16-bit RIPscrip user line
+  pattern instead of truncating to an 8-bit approximation.
+- The `$DOW$` Friday example in the v3.2 spec now matches the Monday=0
+  convention.
+
+### Documentation
+- README coverage wording now describes RIPlib as a portable
+  rendering/parser core, with host-owned operations called out explicitly.
+- README test counts updated to 275 total checks:
+  `test_drawing` 41, `test_ripscrip` 228, `test_compat` 6.
+
 ## [1.2.0] — 2026-05-11
 
 **Bumps the supported protocol from RIPscrip v3.1 → v3.2** by
