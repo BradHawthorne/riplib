@@ -33,9 +33,10 @@ RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 B
 | Alpha/Transparency | No | Yes (SDL) | No | **Per-port (v3.1)** |
 | Multiple Windows | No | Yes (SDL) | No | **36 Drawing Ports** |
 | Mouse Regions | No | Yes (SDL) | Yes | **Yes + hit testing** |
-| Protocol Parser | No | No | No | **Broad RIPscrip v1.54-v3.1** |
+| Protocol Parser | No | No | No | **Broad RIPscrip v1.54-v3.2** |
 | Platform | DOS only | SDL2/SDL3 | Windows | **Any C99 + framebuffer** |
 | Dependencies | DOS/BIOS | SDL2 | Win32 | **None** |
+| Embedded target | No | No | No | **Cortex-M33 cross-compile verified in CI** |
 
 ### Protocol Version Support
 

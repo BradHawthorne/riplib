@@ -102,6 +102,35 @@ jobs:
         done
         exit $fail
 
+  embedded-arm:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install arm-none-eabi-gcc
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-arm-none-eabi
+
+    - name: Configure for Cortex-M33 (RP2350 target)
+      run: |
+        cmake -B build-arm \
+          -DCMAKE_TOOLCHAIN_FILE=cmake/arm-none-eabi.cmake
+
+    - name: Build the static library (no link)
+      run: cmake --build build-arm
+
+    - name: Verify the archive exists and contains the expected objects
+      run: |
+        test -f build-arm/libriplib.a
+        ar t build-arm/libriplib.a | sort > /tmp/arm-objs.txt
+        echo "Objects in libriplib.a (ARM build):"
+        cat /tmp/arm-objs.txt
+        # Sanity check: the eight core compilation units must all be there.
+        for f in drawing bgi_font ripscrip ripscrip2 rip_icons rip_icn; do
+          grep -q "${f}.c.obj" /tmp/arm-objs.txt || (echo "::error::missing ${f}.c.obj in ARM archive" && exit 1)
+        done
+
   static-analysis:
     runs-on: ubuntu-latest
     steps:
