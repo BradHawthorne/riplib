@@ -3525,6 +3525,126 @@ static void test_icon_style_center_mode(void) {
     else FAIL("center mode missed expected location");
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * BMP CACHING — public API success paths
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static void test_rip_icon_cache_bmp_success(void) {
+    /* Minimal valid 2×2 8bpp BMP, bottom-up.  pixel_offset=54, no palette.
+     * Bottom row (54..57): 5, 6 + 2 bytes padding
+     * Top row    (58..61): 3, 4 + 2 bytes padding
+     * After top-down conversion, lookup pixels should be {3, 4, 5, 6}. */
+    static const uint8_t bmp_2x2[62] = {
+        [0] = 'B', [1] = 'M',
+        [2] = 62,
+        [10] = 54,
+        [14] = 40,
+        [18] = 2,
+        [22] = 2,
+        [26] = 1,
+        [28] = 8,
+        [54] = 5, [55] = 6,
+        [58] = 3, [59] = 4,
+    };
+    rip_state_t s; comp_context_t ctx;
+    rip_icon_t icon;
+
+    TEST("rip_icon_cache_bmp accepts a valid 8bpp BMP");
+    init_fixture(&s, &ctx);
+    if (!rip_icon_cache_bmp(&s.icon_state, "OK8BPP", 6,
+                            bmp_2x2, (int)sizeof(bmp_2x2)) ||
+        !rip_icon_lookup(&s.icon_state, "OK8BPP", 6, &icon)) {
+        FAIL("valid BMP was not cached / not found");
+        return;
+    }
+    if (icon.width == 2 && icon.height == 2 &&
+        icon.pixels[0] == 3 && icon.pixels[1] == 4 &&
+        icon.pixels[2] == 5 && icon.pixels[3] == 6)
+        PASS();
+    else
+        FAIL("BMP pixels not converted top-down correctly");
+}
+
+static void test_rip_icon_cache_bmp_replace(void) {
+    static const uint8_t bmp_v1[62] = {
+        [0] = 'B', [1] = 'M', [2] = 62, [10] = 54, [14] = 40,
+        [18] = 2, [22] = 2, [26] = 1, [28] = 8,
+        [54] = 1, [55] = 1, [58] = 1, [59] = 1,
+    };
+    static const uint8_t bmp_v2[62] = {
+        [0] = 'B', [1] = 'M', [2] = 62, [10] = 54, [14] = 40,
+        [18] = 2, [22] = 2, [26] = 1, [28] = 8,
+        [54] = 2, [55] = 2, [58] = 2, [59] = 2,
+    };
+    rip_state_t s; comp_context_t ctx;
+    rip_icon_t icon;
+
+    TEST("rip_icon_cache_bmp_replace overwrites existing entry");
+    init_fixture(&s, &ctx);
+    if (!rip_icon_cache_bmp(&s.icon_state, "BMP", 3,
+                            bmp_v1, (int)sizeof(bmp_v1))) {
+        FAIL("setup: first cache");
+        return;
+    }
+    if (!rip_icon_cache_bmp_replace(&s.icon_state, "BMP", 3,
+                                    bmp_v2, (int)sizeof(bmp_v2)) ||
+        rip_icon_cache_count(&s.icon_state) != 1 ||
+        !rip_icon_lookup(&s.icon_state, "BMP", 3, &icon) ||
+        icon.pixels[0] != 2)
+        FAIL("replace did not overwrite");
+    else
+        PASS();
+}
+
+static void test_rip_icon_cache_has_runtime(void) {
+    static uint8_t px[1] = { 0xAA };
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("rip_icon_cache_has_runtime reflects cache state");
+    init_fixture(&s, &ctx);
+    if (rip_icon_cache_has_runtime(&s.icon_state, "FOO", 3)) {
+        FAIL("FOO reported present before cache");
+        return;
+    }
+    if (!rip_icon_cache_pixels(&s.icon_state, "FOO", 3, px, 1, 1)) {
+        FAIL("setup: cache_pixels");
+        return;
+    }
+    if (rip_icon_cache_has_runtime(&s.icon_state, "FOO", 3) &&
+        !rip_icon_cache_has_runtime(&s.icon_state, "BAR", 3))
+        PASS();
+    else
+        FAIL("has_runtime did not match expected state");
+}
+
+static void test_rip_icon_cache_bmp_4bpp(void) {
+    /* 2×2 4bpp BMP — row_bytes = ((2+1)/2 + 3) & ~3 = 4
+     * Bottom row: 0x56 padding padding padding → pixels 5, 6
+     * Top    row: 0x34 padding padding padding → pixels 3, 4 */
+    static const uint8_t bmp_4bpp[62] = {
+        [0] = 'B', [1] = 'M', [2] = 62, [10] = 54, [14] = 40,
+        [18] = 2, [22] = 2, [26] = 1, [28] = 4,
+        [54] = 0x56,  /* pixel0=5 (hi nib), pixel1=6 (lo nib) */
+        [58] = 0x34,  /* pixel0=3, pixel1=4 */
+    };
+    rip_state_t s; comp_context_t ctx;
+    rip_icon_t icon;
+
+    TEST("rip_icon_cache_bmp accepts 4bpp BMP and unpacks nibbles");
+    init_fixture(&s, &ctx);
+    if (!rip_icon_cache_bmp(&s.icon_state, "BMP4", 4,
+                            bmp_4bpp, (int)sizeof(bmp_4bpp)) ||
+        !rip_icon_lookup(&s.icon_state, "BMP4", 4, &icon)) {
+        FAIL("4bpp BMP not cached");
+        return;
+    }
+    if (icon.pixels[0] == 3 && icon.pixels[1] == 4 &&
+        icon.pixels[2] == 5 && icon.pixels[3] == 6)
+        PASS();
+    else
+        FAIL("4bpp nibble unpacking is wrong");
+}
+
 static void test_icon_style_proportional_mode(void) {
     rip_state_t s; comp_context_t ctx;
     uint8_t *pixels;
@@ -3753,6 +3873,10 @@ int main(void) {
     test_icon_style_stretch_mode();
     test_icon_style_center_mode();
     test_icon_style_proportional_mode();
+    test_rip_icon_cache_bmp_success();
+    test_rip_icon_cache_bmp_replace();
+    test_rip_icon_cache_has_runtime();
+    test_rip_icon_cache_bmp_4bpp();
 
     cleanup_all_arenas();
 
