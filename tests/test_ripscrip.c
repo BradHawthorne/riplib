@@ -55,7 +55,7 @@ static void tx_reset(void) {
  * because the state is typically a stack local that becomes invalid
  * the moment its test function returns; the arena's base pointer is a
  * malloc()ed heap address and stays stable. */
-#define MAX_TRACKED_ARENAS 200
+#define MAX_TRACKED_ARENAS 512
 static uint8_t *tracked_arenas[MAX_TRACKED_ARENAS];
 static int tracked_arena_count = 0;
 
@@ -3482,6 +3482,69 @@ static void test_tw_newline_advances_row(void) {
     else FAIL("\\n did not advance row by 16");
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * ICON_STYLE MODE COVERAGE (rip_draw_icon_pixels modes 0, 2, 3)
+ * Mode 1 (tile) is already covered by test_icon_style_tile_mode_repeats.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static void test_icon_style_stretch_mode(void) {
+    rip_state_t s; comp_context_t ctx;
+    uint8_t *pixels;
+    TEST("ICON_STYLE mode 0 (stretch) scales icon to box");
+    init_fixture(&s, &ctx);
+    pixels = (uint8_t *)psram_arena_alloc(&s.psram_arena, 4);
+    if (!pixels) { FAIL("setup: arena alloc"); return; }
+    pixels[0] = pixels[1] = pixels[2] = pixels[3] = 5;
+    if (!rip_icon_cache_pixels(&s.icon_state, "MINI", 4, pixels, 2, 2)) {
+        FAIL("setup: cache"); return;
+    }
+    /* |& sets style box (5,5)-(25,25), mode=00 (stretch), align=00, scale=00 */
+    feed_script(&s, &ctx, "!|&050519190000000000|");
+    feed_script(&s, &ctx, "!|1I000000000MINI|");
+    if (draw_get_pixel(15, 15) != 0) PASS();
+    else FAIL("stretch mode left center empty");
+}
+
+static void test_icon_style_center_mode(void) {
+    rip_state_t s; comp_context_t ctx;
+    uint8_t *pixels;
+    TEST("ICON_STYLE mode 2 (center) centers icon in box");
+    init_fixture(&s, &ctx);
+    pixels = (uint8_t *)psram_arena_alloc(&s.psram_arena, 4);
+    if (!pixels) { FAIL("setup: arena alloc"); return; }
+    pixels[0] = pixels[1] = pixels[2] = pixels[3] = 7;
+    if (!rip_icon_cache_pixels(&s.icon_state, "CTR", 3, pixels, 2, 2)) {
+        FAIL("setup: cache"); return;
+    }
+    /* style box (10,10)-(50,50), mode=02 (center).  scale_y(10)=11,
+     * scale_y1(50)=58 → effective box (10,11)-(50,58).  Centering 2×2
+     * in a 41×48 box → top-left at (29, 34). */
+    feed_script(&s, &ctx, "!|&0A0A1E1E0200000000|");
+    feed_script(&s, &ctx, "!|1I000000000CTR|");
+    if (draw_get_pixel(29, 34) != 0 || draw_get_pixel(30, 34) != 0) PASS();
+    else FAIL("center mode missed expected location");
+}
+
+static void test_icon_style_proportional_mode(void) {
+    rip_state_t s; comp_context_t ctx;
+    uint8_t *pixels;
+    TEST("ICON_STYLE mode 3 (proportional) preserves aspect");
+    init_fixture(&s, &ctx);
+    pixels = (uint8_t *)psram_arena_alloc(&s.psram_arena, 2);
+    if (!pixels) { FAIL("setup: arena alloc"); return; }
+    pixels[0] = pixels[1] = 9;
+    if (!rip_icon_cache_pixels(&s.icon_state, "WIDE", 4, pixels, 2, 1)) {
+        FAIL("setup: cache"); return;
+    }
+    feed_script(&s, &ctx, "!|&0A0A1E1E0300000000|");
+    feed_script(&s, &ctx, "!|1I000000000WIDE|");
+    int found = 0;
+    for (int y = 10; y < 30 && !found; y++)
+        for (int x = 10; x < 50 && !found; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("proportional mode drew nothing");
+}
+
 int main(void) {
     printf("RIPlib v1.0 — RIPscrip Regression Tests\n");
     printf("======================================\n\n");
@@ -3687,6 +3750,9 @@ int main(void) {
     test_tw_tab_advances_to_next_stop();
     test_tw_control_char_ignored();
     test_tw_newline_advances_row();
+    test_icon_style_stretch_mode();
+    test_icon_style_center_mode();
+    test_icon_style_proportional_mode();
 
     cleanup_all_arenas();
 
