@@ -3396,6 +3396,83 @@ static void test_var_coordsize_reflects_state(void) {
     else FAIL("$COORDSIZE$ did not match coordinate_size");
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * TEXT WINDOW (rip_tw_putchar) BRANCH COVERAGE
+ *
+ * After a !|cmd| sequence the FSM is in RIP_ST_COMMAND waiting for
+ * either another command letter or CR/LF.  The trailing \n in the
+ * activation string returns the FSM to IDLE so subsequent raw bytes
+ * route through the tw_active branch in rip_process.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static void tw_activate_window(rip_state_t *s, comp_context_t *ctx) {
+    feed_script(s, ctx, "!|b0K0K5K2S0F0000000A000|\n");
+    s->tw_wrap = true;
+}
+
+static void test_tw_carriage_return_resets_cursor(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("tw \\r resets cursor to tw_x0");
+    init_fixture(&s, &ctx);
+    tw_activate_window(&s, &ctx);
+    if (!s.tw_active) { FAIL("setup: ext text window did not activate"); return; }
+    rip_process(&s, &ctx, 'A');
+    int16_t after_a = s.tw_cur_x;
+    rip_process(&s, &ctx, '\r');
+    if (s.tw_cur_x == s.tw_x0 && after_a > s.tw_x0) PASS();
+    else FAIL("\\r did not reset cursor");
+}
+
+static void test_tw_backspace_moves_cursor_back(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("tw \\b moves cursor back one char width");
+    init_fixture(&s, &ctx);
+    tw_activate_window(&s, &ctx);
+    if (!s.tw_active) { FAIL("setup"); return; }
+    rip_process(&s, &ctx, 'A');
+    rip_process(&s, &ctx, 'B');
+    int16_t before = s.tw_cur_x;
+    rip_process(&s, &ctx, '\b');
+    if (s.tw_cur_x == before - 8) PASS();
+    else FAIL("\\b did not retreat cursor by 8");
+}
+
+static void test_tw_tab_advances_to_next_stop(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("tw \\t advances cursor by 8-char tab stops");
+    init_fixture(&s, &ctx);
+    tw_activate_window(&s, &ctx);
+    if (!s.tw_active) { FAIL("setup"); return; }
+    int16_t start = s.tw_cur_x;
+    rip_process(&s, &ctx, '\t');
+    if (s.tw_cur_x == start + 64) PASS();
+    else FAIL("\\t did not advance to next tab stop");
+}
+
+static void test_tw_control_char_ignored(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("tw control char < 0x20 (not \\r\\n\\b\\t) is ignored");
+    init_fixture(&s, &ctx);
+    tw_activate_window(&s, &ctx);
+    if (!s.tw_active) { FAIL("setup"); return; }
+    int16_t before = s.tw_cur_x;
+    rip_process(&s, &ctx, 0x05);
+    if (s.tw_cur_x == before) PASS();
+    else FAIL("control char moved the cursor");
+}
+
+static void test_tw_newline_advances_row(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("tw \\n advances cursor by char height");
+    init_fixture(&s, &ctx);
+    tw_activate_window(&s, &ctx);
+    if (!s.tw_active) { FAIL("setup"); return; }
+    int16_t before = s.tw_cur_y;
+    rip_process(&s, &ctx, '\n');
+    if (s.tw_cur_y == before + 16) PASS();
+    else FAIL("\\n did not advance row by 16");
+}
+
 int main(void) {
     printf("RIPlib v1.0 — RIPscrip Regression Tests\n");
     printf("======================================\n\n");
@@ -3596,6 +3673,11 @@ int main(void) {
     test_var_ispalette_returns_one();
     test_var_prot_reflects_resolution_mode();
     test_var_coordsize_reflects_state();
+    test_tw_carriage_return_resets_cursor();
+    test_tw_backspace_moves_cursor_back();
+    test_tw_tab_advances_to_next_stop();
+    test_tw_control_char_ignored();
+    test_tw_newline_advances_row();
 
     cleanup_all_arenas();
 
