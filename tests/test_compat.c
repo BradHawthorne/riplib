@@ -306,6 +306,7 @@ int main(void) {
         "fill_and_shapes",
         "palette_pixels",
         "erase_and_reset",
+        "v32_qol_demo",
     };
 
     printf("RIPlib v1.0 — Compatibility Fixture Tests\n");

@@ -4,7 +4,7 @@
 ![Language: C99](https://img.shields.io/badge/Language-C99-blue.svg)
 ![Build: CMake](https://img.shields.io/badge/Build-CMake-red.svg)
 ![Platform: Any](https://img.shields.io/badge/Platform-Independent-orange.svg)
-![Protocol: RIPscrip v3.1](https://img.shields.io/badge/RIPscrip-v3.1-purple.svg)
+![Protocol: RIPscrip v3.2](https://img.shields.io/badge/RIPscrip-v3.2-purple.svg)
 [![Build & Test](https://github.com/BradHawthorne/riplib/actions/workflows/build.yml/badge.svg)](https://github.com/BradHawthorne/riplib/actions/workflows/build.yml)
 
 **A platform-independent RIPscrip-compatible drawing library in pure C99.**
@@ -13,7 +13,7 @@
 
 *31-page diagnostic harness running on RP2350 HSTX → DVI at 720×480 60fps. Click to watch.*
 
-RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a broad RIPscrip protocol parser for v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, and v3.1 (A2GSPU extensions). Storage-oriented client features are mapped to an in-memory icon/clipboard cache and host request queue on embedded targets, and hardware/host-only protocol features use documented embedded fallbacks. It renders to any `uint8_t*` framebuffer with zero platform dependencies.
+RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a broad RIPscrip protocol parser for v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, v3.1 (A2GSPU §A2G.1-7 extensions), and v3.2 (§A2G.8-13 quality-of-life refinements). Storage-oriented client features are mapped to an in-memory icon/clipboard cache and host request queue on embedded targets, and hardware/host-only protocol features use documented embedded fallbacks. It renders to any `uint8_t*` framebuffer with zero platform dependencies.
 
 ### Comparison
 
@@ -44,7 +44,8 @@ RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 B
 | **v1.54** | 1993 | Core implemented | Level 0 drawing plus Level 1 interactive commands, icon cache lookup, clipboard capture/paste, file query, variables, and host callback fallbacks |
 | **v2.0** | 1994 | Core implemented with embedded fallbacks | Extended drawing commands, header/mode metadata, filled-object border control, icon slots/style, scaled region copy, and Level 2 Drawing Ports with state save/restore |
 | **v3.0** | 1995 | Core implemented with approximations | Font justification, extended text windows, gradient fill, scalable text state, menu/dialog/scrollbar widgets, palette query, and indexed-color alpha approximation |
-| **v3.1** | 2026 | Implemented extensions | A2GSPU extensions: AND/NOT write modes, vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
+| **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | AND/NOT write modes, vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
+| **v3.2** | 2026 | Implemented extensions (§A2G.8-13) | State push/pop stack, layout/introspection variables, time component variables, EGA color-name aliases, `<<DEBUG>>` directive, radial gradient |
 
 Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, OS clipboard integration, URL launch/delete callbacks, true direct-RGB framebuffers, and monitor overscan remain outside the portable core. The parser accepts those protocol surfaces where possible and exposes embedded-friendly fallbacks instead of claiming host behavior the library cannot provide by itself.
 
@@ -73,15 +74,15 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 - String width measurement for layout
 
 ### RIPscrip Protocol Parser
-- 90+ commands across Level 0, Level 1, Extended, and Level 2
+- 101 commands across Level 0, Level 1, Extended, and Level 2 (all 99 documented v1.54-v3.1 commands plus `|^` `|~` added in v3.2)
 - Full v1.54 drawing command set
 - Level 2 Drawing Port system (36 ports with state save/restore)
-- Variable expansion ($RAND$, $DATE$, $RIPVER$, etc.)
+- Variable expansion (30+ built-in vars including $RAND$, $DATE$, $RIPVER$, $WOYM$, layout/time/color-name vars)
 - Mouse region hit testing with button support
-- ESC[! auto-detection and version response
+- ESC[! auto-detection and version response (advertises v3.2: `RIPSCRIP032001`)
 - Icon lookup with BMP/ICN format support
 
-### v3.1 Extensions (unique to RIPlib)
+### v3.1 Extensions (§A2G.1-7, unique to RIPlib)
 - AND and NOT write modes (beyond standard COPY/XOR/OR)
 - Vertical text CW + CCW (direction 0/1/2)
 - Corrected vertical text direction (top-to-bottom, readable)
@@ -91,6 +92,16 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 - FPU trigonometry (sinf/cosf/atan2f for arcs and pies)
 - Scanline pie fill (eliminates flood-fill leak bugs)
 - Patterned flood fill (two-pass algorithm)
+
+### v3.2 Extensions (§A2G.8-13, RIPlib quality-of-life refinements)
+- **State push/pop stack** — `|^` / `|~` save/restore the drawing prelude (colors, fill/line/write state, font, cursor, viewport). Bounded LIFO, 8 frames.
+- **Layout / introspection variables** — `$CX$` `$CY$` `$VPW$` `$VPH$` `$VPCX$` `$VPCY$` `$CCOL$` `$CFCOL$` `$CBCOL$` for "center this text" without hardcoded 320,200.
+- **Time component variables** — `$HOUR$` `$MIN$` `$SEC$` `$DOW$` `$DOM$` `$MONTH$` for greeting/banner variations.
+- **EGA color-name aliases** — `$BLACK$` `$BLUE$` `$GREEN$` `$CYAN$` `$RED$` `$MAGENTA$` `$BROWN$` `$LIGHTGRAY$` `$DARKGRAY$` `$LIGHTBLUE$` `$LIGHTGREEN$` `$LIGHTCYAN$` `$LIGHTRED$` `$LIGHTMAGENTA$` `$YELLOW$` `$WHITE$`.
+- **`<<DEBUG msg>>` preprocessor directive** — pushes `>DEBUG: <msg>\r` to TX for development instrumentation; safe to leave in production.
+- **Radial gradient** — `|28` gains mode 2 for FPU per-pixel radial fill alongside the existing horizontal (0) and vertical (1) modes.
+
+`$RIPVER$` and the `ESC[!` probe both report **`RIPSCRIP032001`**.
 
 ## Quick Start
 
