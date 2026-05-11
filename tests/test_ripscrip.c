@@ -3617,6 +3617,52 @@ static void test_rip_icon_cache_has_runtime(void) {
         FAIL("has_runtime did not match expected state");
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * rip_filename_is_safe — security gate rejection paths
+ * Tests via the |1F file-query command which gates on the same predicate.
+ * Unsafe names return "0\r" (not found) without queuing a request.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static int file_query_unsafe(const char *script) {
+    rip_state_t s; comp_context_t ctx;
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, script);
+    /* "0\r" = unsafe-rejected.  request_count must remain 0. */
+    return tx_len == 2 && tx_capture[0] == '0' && tx_capture[1] == '\r' &&
+           s.icon_state.request_count == 0;
+}
+
+static void test_filename_rejects_forward_slash(void) {
+    TEST("rip_filename_is_safe rejects '/'");
+    if (file_query_unsafe("!|1F000000foo/bar|")) PASS();
+    else FAIL("forward slash not rejected");
+}
+
+static void test_filename_rejects_colon(void) {
+    TEST("rip_filename_is_safe rejects ':'");
+    if (file_query_unsafe("!|1F000000C:NAME|")) PASS();
+    else FAIL("colon not rejected");
+}
+
+static void test_filename_rejects_control_char(void) {
+    TEST("rip_filename_is_safe rejects control char < 0x20");
+    /* embed ENQ (0x05) — use a constructed script since we can't put
+     * 0x05 in a C string literal cleanly: build via byte array. */
+    static const uint8_t script[] = {
+        '!','|','1','F','0','0','0','0','0','0','A',0x05,'B','|', 0
+    };
+    rip_state_t s; comp_context_t ctx;
+    init_fixture(&s, &ctx);
+    tx_reset();
+    for (size_t i = 0; script[i]; i++) rip_process(&s, &ctx, script[i]);
+    if (tx_len == 2 && tx_capture[0] == '0' && tx_capture[1] == '\r' &&
+        s.icon_state.request_count == 0)
+        PASS();
+    else
+        FAIL("control char not rejected");
+}
+
 static void test_rip_icon_cache_bmp_4bpp(void) {
     /* 2×2 4bpp BMP — row_bytes = ((2+1)/2 + 3) & ~3 = 4
      * Bottom row: 0x56 padding padding padding → pixels 5, 6
@@ -3877,6 +3923,9 @@ int main(void) {
     test_rip_icon_cache_bmp_replace();
     test_rip_icon_cache_has_runtime();
     test_rip_icon_cache_bmp_4bpp();
+    test_filename_rejects_forward_slash();
+    test_filename_rejects_colon();
+    test_filename_rejects_control_char();
 
     cleanup_all_arenas();
 

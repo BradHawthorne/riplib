@@ -49,6 +49,59 @@ jobs:
         ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       run: ctest --test-dir build-san --output-on-failure
 
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure with gcov flags
+      run: |
+        cmake -B build-cov \
+          -DCMAKE_C_FLAGS="-fprofile-arcs -ftest-coverage -O0 -g" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fprofile-arcs -ftest-coverage" \
+          -DRIPLIB_BUILD_TESTS=ON \
+          -DBUILD_TESTING=ON
+
+    - name: Build
+      run: cmake --build build-cov
+
+    - name: Run tests
+      run: ctest --test-dir build-cov --output-on-failure
+
+    - name: Enforce per-file coverage floors
+      run: |
+        cd build-cov
+        # Thresholds set just below current coverage so future commits
+        # cannot meaningfully regress.  Bump after intentional gains.
+        declare -A floors=(
+          [bgi_font]=82
+          [drawing]=85
+          [rip_icn]=95
+          [rip_icons]=80
+          [ripscrip]=80
+          [ripscrip2]=85
+        )
+        fail=0
+        for f in "${!floors[@]}"; do
+          out=$(gcov -b -o CMakeFiles/riplib.dir/src CMakeFiles/riplib.dir/src/${f}.c.gcda 2>&1)
+          pct=$(echo "$out" | awk -v want="src/${f}.c" '$0 ~ "File.*"want"'\''" {found=1; next} found && /^Lines executed/ {gsub(/[^0-9.]/,"",$2); print $2; exit}')
+          floor=${floors[$f]}
+          if [ -z "$pct" ]; then
+            echo "::error::coverage for $f could not be parsed"
+            fail=1
+            continue
+          fi
+          # Integer comparison (truncates the decimal)
+          pct_int=${pct%.*}
+          if [ "$pct_int" -lt "$floor" ]; then
+            echo "::error::$f coverage $pct% < floor $floor%"
+            fail=1
+          else
+            echo "OK  $f $pct% >= $floor%"
+          fi
+        done
+        exit $fail
+
   static-analysis:
     runs-on: ubuntu-latest
     steps:
