@@ -47,7 +47,20 @@ jobs:
       env:
         UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-      run: ctest --test-dir build-san --output-on-failure
+      run: |
+        set +e
+        ctest --test-dir build-san --output-on-failure 2>&1 | tee sanitizer.log
+        rc=${PIPESTATUS[0]}
+        echo "ctest exit=$rc"
+        exit $rc
+
+    - name: Upload sanitizer log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sanitizer-log
+        path: sanitizer.log
+        retention-days: 7
 
   static-analysis:
     runs-on: ubuntu-latest
