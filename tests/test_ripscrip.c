@@ -3291,6 +3291,111 @@ static void test_l2_set_refresh(void) {
     PASS();
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * BUILT-IN TEXT VARIABLE COVERAGE  (rip_expand_variables)
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static void test_var_blip_pushes_marker(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$BLIP$ pushes 0x3D BLIP marker to TX");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "!|T$BLIP$|");
+    if (tx_len >= 5 && tx_capture[0] == 0x3D &&
+        memcmp(tx_capture + 1, "BLIP", 4) == 0) PASS();
+    else FAIL("$BLIP$ did not push marker");
+}
+
+static void test_var_alarm_pushes_marker(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$ALARM$ pushes 0x3D ALARM marker to TX");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "!|T$ALARM$|");
+    if (tx_len >= 6 && tx_capture[0] == 0x3D &&
+        memcmp(tx_capture + 1, "ALARM", 5) == 0) PASS();
+    else FAIL("$ALARM$ did not push marker");
+}
+
+static void test_var_phaser_pushes_marker(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$PHASER$ pushes 0x3D PHASER marker to TX");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "!|T$PHASER$|");
+    if (tx_len >= 7 && tx_capture[0] == 0x3D &&
+        memcmp(tx_capture + 1, "PHASER", 6) == 0) PASS();
+    else FAIL("$PHASER$ did not push marker");
+}
+
+static void test_var_music_pushes_marker(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$MUSIC$ pushes 0x3D MUSIC marker to TX");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "!|T$MUSIC$|");
+    if (tx_len >= 6 && tx_capture[0] == 0x3D &&
+        memcmp(tx_capture + 1, "MUSIC", 5) == 0) PASS();
+    else FAIL("$MUSIC$ did not push marker");
+}
+
+static void test_var_year_with_host_date(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$YEAR$ expands to host_date YY+2000");
+    init_fixture(&s, &ctx);
+    strcpy(s.host_date, "07/04/26");
+    feed_script(&s, &ctx, "<<IF $YEAR$=2026>>!|X1000|<<ENDIF>>");
+    if (draw_get_pixel(36, 0) != 0) PASS();
+    else FAIL("$YEAR$ did not expand to 2026");
+}
+
+static void test_var_ripver_returns_a2gspu(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$RIPVER$ expands to RIPSCRIP031001");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "<<IF $RIPVER$=RIPSCRIP031001>>!|X1100|<<ENDIF>>");
+    if (draw_get_pixel(37, 0) != 0) PASS();
+    else FAIL("$RIPVER$ did not match expected version string");
+}
+
+static void test_var_compat_returns_one(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$COMPAT$ expands to \"1\"");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "<<IF $COMPAT$=1>>!|X1200|<<ENDIF>>");
+    if (draw_get_pixel(38, 0) != 0) PASS();
+    else FAIL("$COMPAT$ did not return \"1\"");
+}
+
+static void test_var_ispalette_returns_one(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$ISPALETTE$ expands to \"1\"");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "<<IF $ISPALETTE$=1>>!|X1300|<<ENDIF>>");
+    if (draw_get_pixel(39, 0) != 0) PASS();
+    else FAIL("$ISPALETTE$ did not return \"1\"");
+}
+
+static void test_var_prot_reflects_resolution_mode(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$PROT$ expands to s->resolution_mode");
+    init_fixture(&s, &ctx);
+    s.resolution_mode = 2;
+    feed_script(&s, &ctx, "<<IF $PROT$=2>>!|X1400|<<ENDIF>>");
+    if (draw_get_pixel(40, 0) != 0) PASS();
+    else FAIL("$PROT$ did not match resolution_mode");
+}
+
+static void test_var_coordsize_reflects_state(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$COORDSIZE$ expands to s->coordinate_size");
+    init_fixture(&s, &ctx);
+    s.coordinate_size = 4;
+    feed_script(&s, &ctx, "<<IF $COORDSIZE$=4>>!|X1500|<<ENDIF>>");
+    if (draw_get_pixel(41, 0) != 0) PASS();
+    else FAIL("$COORDSIZE$ did not match coordinate_size");
+}
+
 int main(void) {
     printf("RIPlib v1.0 — RIPscrip Regression Tests\n");
     printf("======================================\n\n");
@@ -3480,6 +3585,17 @@ int main(void) {
     test_l2_menu_renders();
     test_l2_dialog_renders();
     test_l2_set_refresh();
+
+    test_var_blip_pushes_marker();
+    test_var_alarm_pushes_marker();
+    test_var_phaser_pushes_marker();
+    test_var_music_pushes_marker();
+    test_var_year_with_host_date();
+    test_var_ripver_returns_a2gspu();
+    test_var_compat_returns_one();
+    test_var_ispalette_returns_one();
+    test_var_prot_reflects_resolution_mode();
+    test_var_coordsize_reflects_state();
 
     cleanup_all_arenas();
 
