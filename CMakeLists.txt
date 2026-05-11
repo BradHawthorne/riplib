@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project(riplib VERSION 1.0.0 LANGUAGES C)
+project(riplib VERSION 1.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 99)
 include(CTest)
