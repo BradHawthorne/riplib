@@ -219,16 +219,19 @@ riplib/
 ## Portability
 
 RIPlib is proven on:
-- **Raspberry Pi RP2350 / Pico 2** @ 384MHz (A2GSPU card firmware, Processor V)
+- **Raspberry Pi RP2350 / Pico 2** @ 384MHz (A2FUSION card running A2GSPU firmware, Processor V)
 - **x86/x64 Windows** (GSSquared Apple IIgs emulator)
 - **Any C99 platform** with a framebuffer
 
 The library uses single-precision FPU (`sinf`, `cosf`, `atan2f`, `sqrtf`) for accurate curve and angle calculations. On platforms without hardware FPU, the compiler provides software implementations — no code changes needed.
 
-### Reference target: A2GSPU two-RP2350 architecture
+### Reference target: A2FUSION card / A2GSPU firmware
 
-RIPlib was extracted from the A2GSPU card, an Apple IIgs GPU
-coprocessor with two RP2350 (Pico 2) MCUs:
+RIPlib was extracted from the A2GSPU firmware running on the
+A2FUSION card — an Apple IIgs GPU coprocessor with two RP2350
+(Pico 2) MCUs.  A2FUSION is the board; A2GSPU is the firmware
+project that runs on it.  RIPlib is a parallel, platform-
+independent extraction of the rendering engine from A2GSPU.
 
 ```
        ┌──────────────┐                           ┌──────────────┐
@@ -286,7 +289,7 @@ and `-fanalyzer` jobs.
 
 ## Origins
 
-RIPlib is extracted from the [A2GSPU](https://github.com/BradHawthorne) card firmware — a GPU coprocessor for the Apple IIgs that provides DVI output, RIPscrip terminal rendering, and 10 BGI stroke fonts on an RP2350 microcontroller. The drawing engine was designed for embedded use but is fully platform-independent.
+RIPlib is extracted from the [A2GSPU](https://github.com/BradHawthorne) firmware — the rendering software for the **A2FUSION** card, an Apple IIgs GPU coprocessor that provides DVI output, RIPscrip terminal rendering, and 10 BGI stroke fonts on a Raspberry Pi RP2350.  RIPlib is a parallel project: the drawing engine was designed for the A2FUSION's embedded use, but is fully platform-independent.
 
 ## License
 

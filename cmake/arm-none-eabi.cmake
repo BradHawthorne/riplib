@@ -9,12 +9,18 @@
 # links against libriplib.a.
 #
 # Target: Raspberry Pi RP2350 (Cortex-M33, ARMv8-M Mainline, FPU).
-# Reference platform: the A2GSPU card — a dual-RP2350 Apple IIgs
-# coprocessor that uses one RP2350 ("Processor V" / RP235XA) for video
-# rendering and one RP2350 ("Processor B" / RP235XB) for the host bus,
-# storage, and USB.  RIPlib runs on Processor V, where it writes to
-# the framebuffer that is then clocked out via HSTX (or PIO bit-banged
-# DVI on early prototypes).  Board reference:
+# Reference platform: the A2FUSION card running A2GSPU firmware — a
+# dual-RP2350 Apple IIgs coprocessor that uses one RP2350 ("Processor
+# V" / RP235XA) for video rendering and one RP2350 ("Processor B" /
+# RP235XB) for the host bus, storage, and USB.  RIPlib runs on
+# Processor V, where it writes to the framebuffer that is then
+# clocked out via HSTX (or PIO bit-banged DVI on early prototypes).
+#
+# A2FUSION is the card (hardware); A2GSPU is the firmware project
+# that runs on it.  RIPlib is a parallel project extracted from
+# A2GSPU's rendering engine.
+#
+# Board reference:
 #   https://www.facebook.com/groups/5251478676/posts/10166402670968677/
 #
 # Both RP2350 variants share the same CPU core, so a single toolchain
