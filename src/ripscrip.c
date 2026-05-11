@@ -909,6 +909,7 @@ void rip_init_first(rip_state_t *s) {
     g_rip_state = s;
     s->draw_color = 15; /* white */
     s->back_color = 0;  /* Fix Q2: background color — default black (DLL GFXSTYLE+0x02) */
+    s->line_pattern = 0xFFFF;
     s->line_thick = 1;
     s->fill_pattern = 1; /* solid */
     s->fill_color = 15; /* Fix B4: default fill_color is white (15), not black (rip_defaults.c:113) */
@@ -984,6 +985,7 @@ void rip_init_first(rip_state_t *s) {
         p0->fill_pattern = 1;     /* solid */
         p0->back_color   = 0;
         p0->write_mode   = 0;     /* COPY */
+        p0->line_pattern = 0xFFFF;
         p0->line_thick   = 1;
         p0->font_size    = 1;
         p0->font_hjust   = 0;
@@ -1135,6 +1137,7 @@ void rip_session_reset(rip_state_t *s) {
     s->back_color = 0;
     s->write_mode = 0;
     s->line_style = 0;
+    s->line_pattern = 0xFFFF;
     s->line_thick = 1;
     s->fill_pattern = 1;
     s->fill_color = 15;
@@ -1176,6 +1179,7 @@ void rip_session_reset(rip_state_t *s) {
         p0->fill_pattern = 1;
         p0->back_color   = 0;
         p0->write_mode   = 0;
+        p0->line_pattern = 0xFFFF;
         p0->line_thick   = 1;
         p0->font_size    = 1;
         p0->font_hjust   = 0;
@@ -1241,6 +1245,26 @@ int8_t rip_bgi_fill_to_card(uint8_t bgi_style) {
 /* Internal alias retained for the rest of this TU. */
 static int8_t bgi_fill_to_card(uint8_t bgi_style) {
     return rip_bgi_fill_to_card(bgi_style);
+}
+
+static uint16_t rip_reverse16(uint16_t v) {
+    uint16_t r = 0;
+    for (int i = 0; i < 16; i++) {
+        r = (uint16_t)((r << 1) | (v & 1u));
+        v = (uint16_t)(v >> 1);
+    }
+    return r;
+}
+
+static uint16_t rip_line_style_to_pattern(uint8_t style, uint16_t user_pat) {
+    switch (style) {
+    case 0:  return 0xFFFF;                /* solid */
+    case 1:  return 0x3333;                /* dotted */
+    case 2:  return 0xE7E7;                /* center */
+    case 3:  return 0x1F1F;                /* dashed */
+    case 4:  return rip_reverse16(user_pat); /* user_pat is MSB-first on wire */
+    default: return 0xFFFF;
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -2290,7 +2314,7 @@ static void apply_session_draw_state(rip_state_t *s) {
 
     draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
     draw_set_pos(s->draw_x, s->draw_y);
-    draw_set_line_style(s->line_style, s->line_thick);
+    draw_set_line_style(s->line_pattern, s->line_thick);
     /* The 2nd arg becomes g_fill_color in drawing.c, used by fill_span
      * for the OFF bits of patterned fills.  Per BGI/RIP semantics that
      * is back_color (set by 'k'), with fill_color (set by 'S') used
@@ -2330,7 +2354,7 @@ static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
     s->draw_color = 15;
     s->draw_x = 0; s->draw_y = 0;
     s->write_mode = DRAW_MODE_COPY;
-    s->line_style = 0; s->line_thick = 1;
+    s->line_style = 0; s->line_pattern = 0xFFFF; s->line_thick = 1;
     s->fill_pattern = 1; s->fill_color = 15;
     s->back_color = 0;
     s->font_id = 0; s->font_ext_id = 0;
@@ -2367,7 +2391,7 @@ static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
      * surface state from a prior scene. */
     s->state_stack_depth = 0;
     draw_set_write_mode(DRAW_MODE_COPY);
-    draw_set_line_style(0xFF, 1);
+    draw_set_line_style(0xFFFF, 1);
     draw_set_fill_style(0, s->palette[s->back_color]);
     draw_set_color(s->palette[s->draw_color & 0x0F]);
     draw_fill_screen(s->palette[s->back_color]);
@@ -3236,17 +3260,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 if (thick > 255) thick = 255;
                 s->line_thick = (uint8_t)thick;
             }
-            uint8_t pat = 0xFF;
-            switch (s->line_style) {
-            case 0: pat = 0xFF; break; /* solid */
-            case 1: pat = 0x33; break; /* dotted */
-            case 2: pat = 0xE7; break; /* center */
-            case 3: pat = 0x1F; break; /* dashed */
-            case 4: /* user-defined: 16-bit pattern from mega4 → 8-bit */
-                if (len >= 6) pat = (uint8_t)(mega4(p + 2) >> 8);
-                break;
-            }
-            draw_set_line_style(pat, s->line_thick);
+            s->line_pattern = rip_line_style_to_pattern(
+                s->line_style, (len >= 6) ? (uint16_t)mega4(p + 2) : 0xFFFFu);
+            draw_set_line_style(s->line_pattern, s->line_thick);
         }
         break;
     case 'W': /* v1.54 spec: 'W' = RIP_WRITE_MODE — mode:2 */
@@ -3661,12 +3677,19 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->state_stack[i].fill_color   = s->fill_color;
             s->state_stack[i].fill_pattern = s->fill_pattern;
             s->state_stack[i].line_style   = s->line_style;
+            s->state_stack[i].line_pattern = s->line_pattern;
             s->state_stack[i].line_thick   = s->line_thick;
             s->state_stack[i].write_mode   = s->write_mode;
             s->state_stack[i].font_id      = s->font_id;
             s->state_stack[i].font_size    = s->font_size;
             s->state_stack[i].font_dir     = s->font_dir;
             s->state_stack[i].font_attrib  = s->font_attrib;
+            s->state_stack[i].font_hjust   = s->font_hjust;
+            s->state_stack[i].font_vjust   = s->font_vjust;
+            s->state_stack[i].font_ext_id  = s->font_ext_id;
+            s->state_stack[i].font_ext_attr = s->font_ext_attr;
+            s->state_stack[i].font_ext_size = s->font_ext_size;
+            s->state_stack[i].filled_borders_enabled = s->filled_borders_enabled;
             s->state_stack[i].draw_x       = s->draw_x;
             s->state_stack[i].draw_y       = s->draw_y;
             s->state_stack[i].vp_x0        = s->vp_x0;
@@ -3687,12 +3710,19 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->fill_color   = s->state_stack[i].fill_color;
             s->fill_pattern = s->state_stack[i].fill_pattern;
             s->line_style   = s->state_stack[i].line_style;
+            s->line_pattern = s->state_stack[i].line_pattern;
             s->line_thick   = s->state_stack[i].line_thick;
             s->write_mode   = s->state_stack[i].write_mode;
             s->font_id      = s->state_stack[i].font_id;
             s->font_size    = s->state_stack[i].font_size;
             s->font_dir     = s->state_stack[i].font_dir;
             s->font_attrib  = s->state_stack[i].font_attrib;
+            s->font_hjust   = s->state_stack[i].font_hjust;
+            s->font_vjust   = s->state_stack[i].font_vjust;
+            s->font_ext_id  = s->state_stack[i].font_ext_id;
+            s->font_ext_attr = s->state_stack[i].font_ext_attr;
+            s->font_ext_size = s->state_stack[i].font_ext_size;
+            s->filled_borders_enabled = s->state_stack[i].filled_borders_enabled;
             s->draw_x       = s->state_stack[i].draw_x;
             s->draw_y       = s->state_stack[i].draw_y;
             s->vp_x0        = s->state_stack[i].vp_x0;
@@ -3700,9 +3730,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->vp_x1        = s->state_stack[i].vp_x1;
             s->vp_y1        = s->state_stack[i].vp_y1;
             /* Apply restored draw state immediately so subsequent draws
-             * pick up the popped color / write mode / line style. */
-            apply_draw_state(s);
-            draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
+             * pick up the popped color, write mode, line, fill, cursor,
+             * and viewport state. */
+            apply_session_draw_state(s);
         }
         break;
 
@@ -4447,7 +4477,7 @@ reprocess:
 
         /* ESC[! auto-detect: BBSes send ESC[! to probe for RIPscrip
          * capability.  Track the 3-byte sequence; respond with the
-         * v1.54 identification string when confirmed. */
+         * current v3.2 identification string when confirmed. */
         if (ch == 0x1B) {
             s->esc_detect = 1;
             break;
@@ -4456,9 +4486,9 @@ reprocess:
             break;
         } else if (s->esc_detect == 2 && ch == '!') {
             /* ESC[! confirmed — reply with RIPSCRIP<ver><vendor>
-             * 015400 = version 1.54, vendor 0, sub 0 */
+             * 032001 = version 3.2, vendor 0, sub 1 */
             s->esc_detect = 0;
-            card_tx_push("RIPSCRIP015400\n", 15);
+            card_tx_push("RIPSCRIP032001\n", 15);
             break;
         } else if (s->esc_detect > 0) {
             /* Not ESC[! — flush deferred bytes to VT100 then continue */

@@ -332,8 +332,11 @@ captures the fields a typical scene most often re-sends as a prelude
 before a styled draw:
 
      draw_color, back_color, fill_color, fill_pattern,
-     line_style, line_thick, write_mode,
+     line_style, line_pattern (16-bit), line_thick, write_mode,
      font_id, font_size, font_dir, font_attrib,
+     font_hjust, font_vjust,
+     font_ext_id, font_ext_attr, font_ext_size,
+     filled_borders_enabled,
      draw_x, draw_y,
      vp_x0, vp_y0, vp_x1, vp_y1
 
@@ -343,9 +346,10 @@ Behavior:
                   Matches the "ignore unknown params" precedent for
                   graceful degradation.
      Pop  (|~):   If stack is empty, the pop is a no-op.  On a
-                  successful pop, apply_draw_state() and the
-                  viewport clip are re-applied immediately, so the
-                  next draw command picks up the restored state.
+                  successful pop, the full session drawing state is
+                  re-applied immediately, so the next draw command
+                  picks up restored color, write mode, line, fill,
+                  cursor, and viewport state.
 
 Stack lifetime:
      The stack is reset to depth=0 by:
@@ -416,7 +420,7 @@ consistent even across leap years.
 Use case: greeting variation by time of day, or by day of week:
 
      <<IF $HOUR$<12>>Good morning<<ENDIF>>
-     <<IF $DOW$=5>>Happy Friday!<<ENDIF>>
+     <<IF $DOW$=4>>Happy Friday!<<ENDIF>>
 
 
 ---------------------------------------------------------------------

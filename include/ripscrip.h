@@ -205,6 +205,7 @@ typedef struct {
     uint8_t  back_color;
     uint8_t  write_mode;
     uint8_t  line_style;
+    uint16_t line_pattern;
     uint8_t  line_thick;
     uint8_t  font_id;
     uint8_t  font_size;
@@ -239,7 +240,8 @@ typedef struct {
     uint8_t  draw_color;     /* Current drawing color (0-15) */
     uint8_t  back_color;     /* Fix Q2: background color index (DLL GFXSTYLE+0x02) */
     uint8_t  write_mode;     /* 0=COPY, 1=OR, 2=AND, 3=XOR, 4=NOT */
-    uint8_t  line_style;     /* 0=solid, 1=dotted, 2=center, 3=dashed */
+    uint8_t  line_style;     /* 0=solid, 1=dotted, 2=center, 3=dashed, 4=user */
+    uint16_t line_pattern;   /* Active 16-bit dash pattern passed to drawing.c */
     uint8_t  line_thick;     /* 1 or 3 */
     uint8_t  fill_pattern;   /* 0-11 predefined, 12=custom */
     uint8_t  fill_color;     /* Fill color index */
@@ -430,7 +432,12 @@ typedef struct {
     struct {
         uint8_t draw_color, back_color, fill_color, fill_pattern;
         uint8_t line_style, line_thick, write_mode;
+        uint16_t line_pattern;
         uint8_t font_id, font_size, font_dir, font_attrib;
+        uint8_t font_hjust, font_vjust;
+        uint8_t font_ext_id, font_ext_attr;
+        uint32_t font_ext_size;
+        bool filled_borders_enabled;
         int16_t draw_x, draw_y;
         int16_t vp_x0, vp_y0, vp_x1, vp_y1;
     } state_stack[8];

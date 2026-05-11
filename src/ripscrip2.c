@@ -335,6 +335,7 @@ static void port_save_state(rip_state_t *rs, uint8_t idx)
     p->back_color   = rs->back_color;
     p->write_mode   = rs->write_mode;
     p->line_style   = rs->line_style;
+    p->line_pattern = rs->line_pattern;
     p->line_thick   = rs->line_thick;
     p->font_id      = rs->font_id;
     p->font_size    = rs->font_size;
@@ -366,6 +367,7 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
     rs->back_color   = p->back_color;
     rs->write_mode   = p->write_mode;
     rs->line_style   = p->line_style;
+    rs->line_pattern = p->line_pattern;
     rs->line_thick   = p->line_thick;
     rs->font_id      = p->font_id;
     rs->font_size    = p->font_size;
@@ -390,7 +392,7 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
     draw_set_color(rs->palette[p->draw_color & 0x0F]);
     draw_set_write_mode(p->write_mode);
     draw_set_pos(p->draw_x, p->draw_y);
-    draw_set_line_style(p->line_style, p->line_thick);
+    draw_set_line_style(p->line_pattern, p->line_thick);
     card_pat = bgi_fill_to_card(p->fill_pattern);
     draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
                         rs->palette[p->back_color & 0x0F]);
@@ -411,6 +413,7 @@ static void port_set_defaults(rip_port_t *p)
     p->back_color   = 0;   /* black  -- DLL GFXSTYLE+0x02 = 0x00 */
     p->write_mode   = 0;   /* COPY */
     p->line_style   = 0;   /* solid */
+    p->line_pattern = 0xFFFF;
     p->line_thick   = 1;   /* 1 pixel */
     p->font_id      = 0;
     p->font_size    = 1;

@@ -504,7 +504,7 @@ static void test_dashed_line_has_gaps(void) {
     TEST("dashed line pattern leaves gaps between dashes");
     clear();
     draw_set_color(0xFF);
-    draw_set_line_style(0x33, 1);  /* dotted: 0011 0011 */
+    draw_set_line_style(0x3333, 1);  /* dotted: 0011 0011 repeated */
     draw_line(0, 50, 60, 50);
     int lit = 0, gap = 0;
     for (int x = 0; x < 60; x++) {
@@ -512,7 +512,7 @@ static void test_dashed_line_has_gaps(void) {
         else                                          gap++;
     }
     /* Restore solid for later tests. */
-    draw_set_line_style(0xFF, 1);
+    draw_set_line_style(0xFFFF, 1);
     if (lit > 5 && gap > 5)
         PASS();
     else
@@ -523,7 +523,7 @@ static void test_solid_line_no_gaps(void) {
     TEST("solid line pattern has no gaps");
     clear();
     draw_set_color(0xFF);
-    draw_set_line_style(0xFF, 1);
+    draw_set_line_style(0xFFFF, 1);
     draw_line(0, 60, 60, 60);
     int gaps = 0;
     for (int x = 0; x <= 60; x++)
@@ -575,10 +575,10 @@ static void test_thick_line_diagonal_perpendicular(void) {
     TEST("thick 45-degree line has full perpendicular width");
     clear();
     draw_set_color(0xFF);
-    draw_set_line_style(0xFF, 5);
+    draw_set_line_style(0xFFFF, 5);
     /* 45-degree line of length 80 starting at (50, 20) → (130, 100). */
     draw_thick_line(50, 20, 130, 100);
-    draw_set_line_style(0xFF, 1);
+    draw_set_line_style(0xFFFF, 1);
     /* Sample the perpendicular cross-section at the midpoint (90, 60).
      * Walk along the perpendicular direction (-1, +1) and count lit pixels. */
     int hits = 0;
@@ -599,7 +599,7 @@ static void test_thick_line_widens_horizontal(void) {
     TEST("thick horizontal line spans multiple rows");
     clear();
     draw_set_color(0xFF);
-    draw_set_line_style(0xFF, 3);
+    draw_set_line_style(0xFFFF, 3);
     draw_thick_line(10, 50, 40, 50);
     int rows_with_pixels = 0;
     for (int y = 47; y <= 53; y++) {
@@ -608,7 +608,7 @@ static void test_thick_line_widens_horizontal(void) {
             if (draw_get_pixel((int16_t)x, (int16_t)y) == 0xFF) { hit = 1; break; }
         rows_with_pixels += hit;
     }
-    draw_set_line_style(0xFF, 1);
+    draw_set_line_style(0xFFFF, 1);
     if (rows_with_pixels >= 3)
         PASS();
     else

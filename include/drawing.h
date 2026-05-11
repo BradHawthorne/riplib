@@ -65,7 +65,7 @@ int16_t draw_get_clip_x0(void);
 int16_t draw_get_clip_y0(void);
 int16_t draw_get_clip_x1(void);
 int16_t draw_get_clip_y1(void);
-void    draw_set_line_style(uint8_t pattern, uint8_t thickness);
+void    draw_set_line_style(uint16_t pattern, uint8_t thickness);
 void    draw_set_fill_style(uint8_t pattern_id, uint8_t fill_color);
 void    draw_set_user_fill_pattern(const uint8_t *pattern);
 void    draw_set_arc_radius(int16_t radius);

@@ -39,7 +39,7 @@ static uint8_t  g_color;
 static int16_t  g_pos_x, g_pos_y;
 static int16_t  g_clip_x0, g_clip_y0, g_clip_x1, g_clip_y1;
 static uint8_t  g_write_mode = DRAW_MODE_COPY;
-static uint8_t  g_line_pattern = 0xFF;  /* solid */
+static uint16_t g_line_pattern = 0xFFFF; /* solid */
 static uint8_t  g_line_thickness = 1;
 static uint8_t  g_fill_pattern = 0;     /* 0 = solid */
 static uint8_t  g_fill_color = 0;
@@ -218,7 +218,7 @@ void draw_init(uint8_t *framebuf, uint16_t pitch, uint16_t width, uint16_t heigh
     g_clip_x1 = draw_ready() ? (int16_t)(g_width - 1u) : -1;
     g_clip_y1 = draw_ready() ? (int16_t)(g_height - 1u) : -1;
     g_write_mode = DRAW_MODE_COPY;
-    g_line_pattern = 0xFF;
+    g_line_pattern = 0xFFFF;
     g_line_thickness = 1;
     g_fill_pattern = 0;
     g_fill_color = 0;
@@ -293,7 +293,7 @@ void draw_set_write_mode(uint8_t mode) {
     g_write_mode = (mode <= DRAW_MODE_NOT) ? mode : DRAW_MODE_COPY;
 }
 
-void draw_set_line_style(uint8_t pattern, uint8_t thickness) {
+void draw_set_line_style(uint16_t pattern, uint8_t thickness) {
     g_line_pattern = pattern;
     g_line_thickness = thickness > 0 ? thickness : 1;
 }
@@ -514,7 +514,7 @@ void draw_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
 
     for (;;) {
         /* Dash pattern: bit in pattern selects draw vs skip */
-        if ((g_line_pattern >> (phase & 7)) & 1) {
+        if ((g_line_pattern >> (phase & 15)) & 1) {
             uint8_t *p = &g_fb[y0 * g_pitch + x0];
             *p = apply_write_mode(*p, g_color);
         }

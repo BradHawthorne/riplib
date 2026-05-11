@@ -517,7 +517,7 @@ static void test_esc_probe_responds(void) {
     TEST("ESC[! probe receives RIPSCRIP version string");
     init_fixture(&s, &ctx);
     feed_script(&s, &ctx, "\x1B[!");
-    if (tx_len == 15 && memcmp(tx_capture, "RIPSCRIP015400\n", 15) == 0)
+    if (tx_len == 15 && memcmp(tx_capture, "RIPSCRIP032001\n", 15) == 0)
         PASS();
     else
         FAIL("ESC[! probe response missing or wrong");
@@ -2446,6 +2446,29 @@ static void test_port_switch_restores_pattern_back_color(void) {
         FAIL("port restore used fill_color as patterned-fill background");
 }
 
+static void test_port_switch_restores_custom_line_pattern(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("port restore keeps custom line pattern");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|");
+    feed_script(&s, &ctx, "!|=041BEO01|"); /* user_pat 0xF000: first 4 pixels on */
+    feed_script(&s, &ctx, "!|2P1000A140U00|");
+    feed_script(&s, &ctx, "!|2s100|");
+    feed_script(&s, &ctx, "!|=01000001|"); /* unrelated temporary port style */
+    feed_script(&s, &ctx, "!|2s000|");
+    feed_script(&s, &ctx, "!|L0A0A140A|");
+
+    if (draw_get_pixel(10, 11) != 0 &&
+        draw_get_pixel(13, 11) != 0 &&
+        draw_get_pixel(14, 11) == 0 &&
+        draw_get_pixel(17, 11) == 0)
+        PASS();
+    else
+        FAIL("port restore did not reapply custom line pattern");
+}
+
 static void test_write_icon_caches_clipboard_for_load_icon(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -3683,6 +3706,123 @@ static void test_state_stack_overflow_silently_drops(void) {
     else FAIL("stack depth exceeded the cap");
 }
 
+static void test_state_stack_pop_reapplies_line_style(void) {
+    rip_state_t s; comp_context_t ctx;
+    int ok = 1;
+
+    TEST("|~ reapplies restored line style to draw backend");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|");
+    feed_script(&s, &ctx, "!|^|");
+    feed_script(&s, &ctx, "!|=01000001|"); /* temporary dotted line */
+    feed_script(&s, &ctx, "!|~|");
+    feed_script(&s, &ctx, "!|L0A0A140A|");
+
+    for (int x = 10; x <= 40; x++) {
+        if (draw_get_pixel((int16_t)x, 11) == 0) {
+            ok = 0;
+            break;
+        }
+    }
+    if (ok) PASS();
+    else FAIL("|~ left dotted line pattern active in draw backend");
+}
+
+static void test_state_stack_pop_reapplies_user_line_pattern(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("|~ reapplies restored custom line pattern");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|");
+    feed_script(&s, &ctx, "!|=041BEO01|"); /* user_pat 0xF000: first 4 pixels on */
+    feed_script(&s, &ctx, "!|^|");
+    feed_script(&s, &ctx, "!|=01000001|"); /* temporary dotted line */
+    feed_script(&s, &ctx, "!|~|");
+    feed_script(&s, &ctx, "!|L0A0A140A|");
+
+    if (draw_get_pixel(10, 11) != 0 &&
+        draw_get_pixel(13, 11) != 0 &&
+        draw_get_pixel(14, 11) == 0 &&
+        draw_get_pixel(17, 11) == 0)
+        PASS();
+    else
+        FAIL("|~ did not restore custom line pattern");
+}
+
+static void test_state_stack_pop_reapplies_fill_style(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("|~ reapplies restored fill style to draw backend");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|S0204|"); /* patterned fill, fill color 4 */
+    feed_script(&s, &ctx, "!|k3|");    /* back_color 3 for OFF bits */
+    feed_script(&s, &ctx, "!|^|");
+    feed_script(&s, &ctx, "!|S010F|"); /* temporary solid fill */
+    feed_script(&s, &ctx, "!|k0|");
+    feed_script(&s, &ctx, "!|~|");
+    feed_script(&s, &ctx, "!|B05050F0F|");
+
+    if (draw_get_pixel(10, 5) == s.palette[3] &&
+        draw_get_pixel(10, 6) == s.palette[4])
+        PASS();
+    else
+        FAIL("|~ left temporary fill pattern/back color active");
+}
+
+static void test_state_stack_restores_extended_font_and_borders(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("|^/|~ preserve extended font and filled-border fields");
+    init_fixture(&s, &ctx);
+    s.font_hjust = 2;
+    s.font_vjust = 3;
+    s.font_ext_id = 12;
+    s.font_ext_attr = 5;
+    s.font_ext_size = 1234u;
+    s.filled_borders_enabled = false;
+
+    feed_script(&s, &ctx, "!|^|");
+    s.font_hjust = 0;
+    s.font_vjust = 0;
+    s.font_ext_id = 0;
+    s.font_ext_attr = 0;
+    s.font_ext_size = 0u;
+    s.filled_borders_enabled = true;
+    feed_script(&s, &ctx, "!|~|");
+
+    if (s.font_hjust == 2 &&
+        s.font_vjust == 3 &&
+        s.font_ext_id == 12 &&
+        s.font_ext_attr == 5 &&
+        s.font_ext_size == 1234u &&
+        !s.filled_borders_enabled)
+        PASS();
+    else
+        FAIL("|~ did not restore extended font/border state");
+}
+
+static void test_state_stack_pop_reapplies_draw_cursor_position(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("|~ reapplies restored draw cursor to backend");
+    init_fixture(&s, &ctx);
+    s.draw_x = 12;
+    s.draw_y = 34;
+    feed_script(&s, &ctx, "!|^|");
+    s.draw_x = 98;
+    s.draw_y = 76;
+    draw_set_pos(s.draw_x, s.draw_y);
+    feed_script(&s, &ctx, "!|~|");
+
+    if (s.draw_x == 12 &&
+        s.draw_y == 34 &&
+        draw_get_pos_x() == 12 &&
+        draw_get_pos_y() == 34)
+        PASS();
+    else
+        FAIL("|~ did not reapply draw cursor position");
+}
+
 static void test_var_cx_cy_reflect_draw_cursor(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("$CX$ / $CY$ reflect draw cursor");
@@ -4006,6 +4146,7 @@ int main(void) {
     test_erase_view_uses_back_color();
     test_back_color_command_propagates_to_draw_layer();
     test_port_switch_restores_pattern_back_color();
+    test_port_switch_restores_custom_line_pattern();
     test_l1_copy_region_blits_pixels();
     test_l0_copy_region_scales_destination_rect();
     test_l1_clipboard_get_put_roundtrip();
@@ -4098,6 +4239,11 @@ int main(void) {
     test_state_stack_push_pop_roundtrip();
     test_state_stack_pop_on_empty_is_noop();
     test_state_stack_overflow_silently_drops();
+    test_state_stack_pop_reapplies_line_style();
+    test_state_stack_pop_reapplies_user_line_pattern();
+    test_state_stack_pop_reapplies_fill_style();
+    test_state_stack_restores_extended_font_and_borders();
+    test_state_stack_pop_reapplies_draw_cursor_position();
     test_var_cx_cy_reflect_draw_cursor();
     test_var_vpw_vph_reflect_viewport();
     test_var_vpcx_vpcy_compute_center();
