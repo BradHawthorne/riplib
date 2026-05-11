@@ -261,34 +261,47 @@ a linear search of the variable table.
 7.9  VARIABLE TABLE SUMMARY
 ---------------------------------------------------------------------
 
-     Variable     Type       Version   Description
-     ----------   --------   -------   -------------------------
-     $DATE$       date       v1.54     MM/DD/YY
-     $TIME$       time       v1.54     HH:MM
-     $YEAR$       date       v3.1      YYYY (4-digit)
-     $WOYM$       date       v3.0      Week of year (ISO)
-     $RIPVER$     protocol   v1.54     Version string
-     $PROT$       protocol   v3.1      Resolution mode
-     $COMPAT$     protocol   v3.1      Compatibility level
-     $COLORMODE$  protocol   v2.0      Palette/RGB mode
-     $COORDSIZE$  protocol   v2.0      Coordinate byte size
-     $ISPALETTE$  protocol   v2.0      Palette availability
-     $USER$       identity   v1.54     User name (empty)
-     $RAND$       numeric    v1.54     LCG random 0-32767
-     $BEEP$       sound      v1.54     System bell
-     $BLIP$       sound      v1.54     Short blip
-     $ALARM$      sound      v1.54     Alarm tone
-     $PHASER$     sound      v1.54     Phaser effect
-     $MUSIC$      sound      v1.54     Music trigger
-     $REFRESH$    session    v3.0      Resume refresh
-     $NOREFRESH$  session    v3.0      Suppress refresh
-     $RESET$      session    v3.0      State reset
-     $ABORT$      session    v3.1      FSM reset
-     $MKILL$      session    v3.1      Clear mouse regions
-     $COPY$       session    v3.1      Set COPY write mode
-     $COFF$       session    v3.1      Cursor off (no-op)
-     $TEXTDATA$   text       v3.0      Text buffer (empty)
-     $APP0-9$     user       v2.0      Application variables
+     Variable        Type       Version   Description
+     -------------   --------   -------   -------------------------
+     $DATE$          date       v1.54     MM/DD/YY
+     $TIME$          time       v1.54     HH:MM
+     $YEAR$          date       v3.1      YYYY (4-digit)
+     $WOYM$          date       v3.0      Week of year (ISO)
+     $HOUR$          time       §A2G2     HH from host_time or RTC
+     $MIN$           time       §A2G2     MM from host_time or RTC
+     $SEC$           time       §A2G2     SS from RTC
+     $DOW$           date       §A2G2     Day of week (Mon=0)
+     $DOM$           date       §A2G2     Day of month (DD)
+     $MONTH$         date       §A2G2     Month of year (MM)
+     $RIPVER$        protocol   v1.54     Version string
+     $PROT$          protocol   v3.1      Resolution mode
+     $COMPAT$        protocol   v3.1      Compatibility level
+     $COLORMODE$     protocol   v2.0      Palette/RGB mode
+     $COORDSIZE$     protocol   v2.0      Coordinate byte size
+     $ISPALETTE$     protocol   v2.0      Palette availability
+     $USER$          identity   v1.54     User name (empty)
+     $RAND$          numeric    v1.54     LCG random 0-32767
+     $CX$ / $CY$     layout     §A2G2     Current draw cursor
+     $VPW$ / $VPH$   layout     §A2G2     Viewport size
+     $VPCX$ / $VPCY$ layout     §A2G2     Viewport center
+     $CCOL$          layout     §A2G2     Current draw color
+     $CFCOL$         layout     §A2G2     Current fill color
+     $CBCOL$         layout     §A2G2     Current back color
+     $BLACK$..$WHITE$ color     §A2G2     EGA color-name aliases
+     $BEEP$          sound      v1.54     System bell
+     $BLIP$          sound      v1.54     Short blip
+     $ALARM$         sound      v1.54     Alarm tone
+     $PHASER$        sound      v1.54     Phaser effect
+     $MUSIC$         sound      v1.54     Music trigger
+     $REFRESH$       session    v3.0      Resume refresh
+     $NOREFRESH$     session    v3.0      Suppress refresh
+     $RESET$         session    v3.0      State reset
+     $ABORT$         session    v3.1      FSM reset
+     $MKILL$         session    v3.1      Clear mouse regions
+     $COPY$          session    v3.1      Set COPY write mode
+     $COFF$          session    v3.1      Cursor off (no-op)
+     $TEXTDATA$      text       v3.0      Text buffer (empty)
+     $APP0-9$        user       v2.0      Application variables
 
 
 =====================================================================

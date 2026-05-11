@@ -3645,6 +3645,173 @@ static void test_filename_rejects_colon(void) {
     else FAIL("colon not rejected");
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+ * §A2G2 — v1.2 QoL extensions
+ * ═══════════════════════════════════════════════════════════════════ */
+
+static void test_state_stack_push_pop_roundtrip(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|^ then |~ restores draw_color");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c04|");   /* red */
+    feed_script(&s, &ctx, "!|^|");     /* push */
+    feed_script(&s, &ctx, "!|c0F|");   /* white */
+    if (s.draw_color != 15) { FAIL("setup: |c0F didn't change color"); return; }
+    feed_script(&s, &ctx, "!|~|");     /* pop -> red */
+    if (s.draw_color == 4) PASS();
+    else FAIL("|~ did not restore draw_color");
+}
+
+static void test_state_stack_pop_on_empty_is_noop(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|~ on empty stack is a no-op (no crash)");
+    init_fixture(&s, &ctx);
+    uint8_t before = s.draw_color;
+    feed_script(&s, &ctx, "!|~|");
+    if (s.draw_color == before) PASS();
+    else FAIL("|~ on empty stack mutated state");
+}
+
+static void test_state_stack_overflow_silently_drops(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|^ overflow past RIP_STATE_STACK_MAX is silently dropped");
+    init_fixture(&s, &ctx);
+    /* Push more than the limit. */
+    for (int i = 0; i < RIP_STATE_STACK_MAX + 4; i++)
+        feed_script(&s, &ctx, "!|^|");
+    if (s.state_stack_depth == RIP_STATE_STACK_MAX) PASS();
+    else FAIL("stack depth exceeded the cap");
+}
+
+static void test_var_cx_cy_reflect_draw_cursor(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$CX$ / $CY$ reflect draw cursor");
+    init_fixture(&s, &ctx);
+    s.draw_x = 123;
+    s.draw_y = 45;
+    feed_script(&s, &ctx, "<<IF $CX$=123>>!|X1600|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $CY$=45>>!|X1700|<<ENDIF>>");
+    if (draw_get_pixel(42, 0) != 0 && draw_get_pixel(43, 0) != 0) PASS();
+    else FAIL("$CX$/$CY$ did not match draw cursor");
+}
+
+static void test_var_vpw_vph_reflect_viewport(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$VPW$ / $VPH$ reflect viewport dimensions");
+    init_fixture(&s, &ctx);
+    /* Default viewport (0,0)-(639,399) -> w=640 h=400 */
+    feed_script(&s, &ctx, "<<IF $VPW$=640>>!|X1800|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $VPH$=400>>!|X1900|<<ENDIF>>");
+    if (draw_get_pixel(44, 0) != 0 && draw_get_pixel(45, 0) != 0) PASS();
+    else FAIL("$VPW$/$VPH$ did not match defaults");
+}
+
+static void test_var_vpcx_vpcy_compute_center(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$VPCX$ / $VPCY$ compute viewport center");
+    init_fixture(&s, &ctx);
+    /* Default viewport center: (319, 199) */
+    feed_script(&s, &ctx, "<<IF $VPCX$=319>>!|X1A00|<<ENDIF>>");
+    if (draw_get_pixel(46, 0) != 0) PASS();
+    else FAIL("$VPCX$ did not compute center");
+}
+
+static void test_var_ccol_cfcol_reflect_colors(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$CCOL$ / $CFCOL$ reflect current colors");
+    init_fixture(&s, &ctx);
+    s.draw_color = 7;
+    s.fill_color = 12;
+    feed_script(&s, &ctx, "<<IF $CCOL$=7>>!|X1B00|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $CFCOL$=12>>!|X1C00|<<ENDIF>>");
+    if (draw_get_pixel(47, 0) != 0 && draw_get_pixel(48, 0) != 0) PASS();
+    else FAIL("$CCOL$/$CFCOL$ did not match");
+}
+
+/* Color-name vars expand in text/IF context (where rip_expand_variables
+ * runs), not inside numeric command-arg fields like |c which read raw
+ * MegaNum chars.  These tests verify expansion via IF comparison. */
+static void test_var_color_name_red(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$RED$ expands to \"04\" in IF context");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "<<IF $RED$=04>>!|X2200|<<ENDIF>>");
+    if (draw_get_pixel(74, 0) != 0) PASS();
+    else FAIL("$RED$ did not expand to 04");
+}
+
+static void test_var_color_name_lightmagenta(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$LIGHTMAGENTA$ expands to \"0D\" in IF context");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "<<IF $LIGHTMAGENTA$=0D>>!|X2300|<<ENDIF>>");
+    if (draw_get_pixel(75, 0) != 0) PASS();
+    else FAIL("$LIGHTMAGENTA$ did not expand to 0D");
+}
+
+static void test_var_hour_min_from_host_time(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$HOUR$ / $MIN$ parse host_time");
+    init_fixture(&s, &ctx);
+    strcpy(s.host_time, "14:35");
+    feed_script(&s, &ctx, "<<IF $HOUR$=14>>!|X1D00|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $MIN$=35>>!|X1E00|<<ENDIF>>");
+    if (draw_get_pixel(49, 0) != 0 && draw_get_pixel(50, 0) != 0) PASS();
+    else FAIL("$HOUR$/$MIN$ did not parse host_time");
+}
+
+static void test_var_dow_dom_month_from_host_date(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("$DOW$ / $DOM$ / $MONTH$ parse host_date");
+    init_fixture(&s, &ctx);
+    strcpy(s.host_date, "01/15/26");  /* Thu = 3 (Mon=0) */
+    feed_script(&s, &ctx, "<<IF $DOW$=3>>!|X1F00|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $DOM$=15>>!|X2000|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $MONTH$=01>>!|X2100|<<ENDIF>>");
+    if (draw_get_pixel(51, 0) != 0 &&
+        draw_get_pixel(72, 0) != 0 &&
+        draw_get_pixel(73, 0) != 0) PASS();
+    else FAIL("$DOW$/$DOM$/$MONTH$ did not match host_date");
+}
+
+static void test_preproc_debug_directive_emits_to_tx(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("<<DEBUG msg>> pushes marker to TX");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "<<DEBUG hello>>");
+    if (tx_len >= 8 && tx_capture[0] == 0x3E &&
+        memcmp(tx_capture + 1, "DEBUG: hello", 12) == 0) PASS();
+    else FAIL("<<DEBUG>> did not emit marker");
+}
+
+static void test_preproc_debug_suppressed_by_false_if(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("<<DEBUG>> inside <<IF false>> is suppressed");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "<<IF 0>><<DEBUG hidden>><<ENDIF>>");
+    if (tx_len == 0) PASS();
+    else FAIL("<<DEBUG>> leaked through a false branch");
+}
+
+static void test_l2_gradient_radial_mode(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|28 mode=2 renders radial gradient");
+    init_fixture(&s, &ctx);
+    /* |20 takes RGB components in 0-255 (8-bit) and packs to RGB332.
+     * For r=255 use mega2 "73" (7*36+3=255), so r>>5 = 7. */
+    feed_script(&s, &ctx, "!|2001730000|");   /* idx=1 r=255 g=0 b=0 (red) */
+    feed_script(&s, &ctx, "!|2002000073|");   /* idx=2 r=0 g=0 b=255 (blue) */
+    /* |28 gradient: x=10 y=10 w=20 h=20 c1=1 c2=2 mode=2 (radial). */
+    feed_script(&s, &ctx, "!|280A0A1414010202|");
+    int found = 0;
+    for (int y = 10; y < 30 && !found; y++)
+        for (int x = 10; x < 30 && !found; x++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
+    if (found) PASS(); else FAIL("|28 radial drew nothing");
+}
+
 static void test_filename_rejects_control_char(void) {
     TEST("rip_filename_is_safe rejects control char < 0x20");
     /* embed ENQ (0x05) — use a constructed script since we can't put
@@ -3926,6 +4093,22 @@ int main(void) {
     test_filename_rejects_forward_slash();
     test_filename_rejects_colon();
     test_filename_rejects_control_char();
+
+    /* §A2G2 — v1.2 QoL extensions */
+    test_state_stack_push_pop_roundtrip();
+    test_state_stack_pop_on_empty_is_noop();
+    test_state_stack_overflow_silently_drops();
+    test_var_cx_cy_reflect_draw_cursor();
+    test_var_vpw_vph_reflect_viewport();
+    test_var_vpcx_vpcy_compute_center();
+    test_var_ccol_cfcol_reflect_colors();
+    test_var_color_name_red();
+    test_var_color_name_lightmagenta();
+    test_var_hour_min_from_host_time();
+    test_var_dow_dom_month_from_host_date();
+    test_preproc_debug_directive_emits_to_tx();
+    test_preproc_debug_suppressed_by_false_if();
+    test_l2_gradient_radial_mode();
 
     cleanup_all_arenas();
 

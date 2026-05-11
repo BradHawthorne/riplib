@@ -421,7 +421,23 @@ typedef struct {
      * the rip_state_t drawing fields and its viewport clip is applied. */
     rip_port_t ports[RIP_MAX_PORTS];
     uint8_t    active_port;           /* Index of current active port (0-35) */
+
+    /* §A2G2: state push/pop stack (|^ pushes, |~ pops).
+     * Captures the drawing fields a BBS most often wraps a styled draw in:
+     * colors, write/fill/line state, font fields, draw cursor, viewport.
+     * Stack is bounded (8 frames); overflow silently drops the push, and
+     * pop on empty is a no-op. */
+    struct {
+        uint8_t draw_color, back_color, fill_color, fill_pattern;
+        uint8_t line_style, line_thick, write_mode;
+        uint8_t font_id, font_size, font_dir, font_attrib;
+        int16_t draw_x, draw_y;
+        int16_t vp_x0, vp_y0, vp_x1, vp_y1;
+    } state_stack[8];
+    uint8_t state_stack_depth;
 } rip_state_t;
+
+#define RIP_STATE_STACK_MAX 8
 
 /* Map a BGI fill style (0=EMPTY .. 12=USER) to the card-native fill
  * pattern index used by drawing.c::fill_span().  Returns -1 for EMPTY

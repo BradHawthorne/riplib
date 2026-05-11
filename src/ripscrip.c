@@ -1543,6 +1543,156 @@ static int rip_expand_variables(rip_state_t *s,
             val[0] = '\0';
             vval_len = 0;
 
+        /* §A2G2: Layout / introspection variables ----------------- */
+        } else if (vlen == 2 && memcmp(vname, "CX", 2) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d", s->draw_x);
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 2 && memcmp(vname, "CY", 2) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d", s->draw_y);
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 3 && memcmp(vname, "VPW", 3) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d",
+                                (int)(s->vp_x1 - s->vp_x0 + 1));
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 3 && memcmp(vname, "VPH", 3) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d",
+                                (int)(s->vp_y1 - s->vp_y0 + 1));
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 4 && memcmp(vname, "VPCX", 4) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d",
+                                (int)((s->vp_x0 + s->vp_x1) / 2));
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 4 && memcmp(vname, "VPCY", 4) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d",
+                                (int)((s->vp_y0 + s->vp_y1) / 2));
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 4 && memcmp(vname, "CCOL", 4) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d",
+                                (int)(s->draw_color & 0x0F));
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 5 && memcmp(vname, "CFCOL", 5) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d",
+                                (int)(s->fill_color & 0x0F));
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 5 && memcmp(vname, "CBCOL", 5) == 0) {
+            vval_len = snprintf(val, sizeof(val), "%d",
+                                (int)(s->back_color & 0x0F));
+            if (vval_len < 0) vval_len = 0;
+
+        /* §A2G2: Time component variables ------------------------- */
+        } else if (vlen == 4 && memcmp(vname, "HOUR", 4) == 0) {
+            if (s->host_time[0] >= '0' && s->host_time[0] <= '9' &&
+                s->host_time[1] >= '0' && s->host_time[1] <= '9') {
+                val[0] = s->host_time[0]; val[1] = s->host_time[1];
+                vval_len = 2;
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_hour);
+                if (vval_len < 0) vval_len = 0;
+            }
+        } else if (vlen == 3 && memcmp(vname, "MIN", 3) == 0) {
+            if (s->host_time[3] >= '0' && s->host_time[3] <= '9' &&
+                s->host_time[4] >= '0' && s->host_time[4] <= '9') {
+                val[0] = s->host_time[3]; val[1] = s->host_time[4];
+                vval_len = 2;
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_min);
+                if (vval_len < 0) vval_len = 0;
+            }
+        } else if (vlen == 3 && memcmp(vname, "SEC", 3) == 0) {
+            /* host_time is HH:MM only; SEC always reads from RTC. */
+            time_t now = time(NULL);
+            struct tm *tm = localtime(&now);
+            vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_sec);
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 3 && memcmp(vname, "DOW", 3) == 0) {
+            int year, month, day, dow;
+            if (s->host_date[0] != '\0' &&
+                rip_parse_host_date(s->host_date, &year, &month, &day)) {
+                dow = rip_weekday_monday0(year, month, day);
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                /* tm_wday: 0=Sunday..6=Saturday. Convert to Monday=0. */
+                dow = (tm->tm_wday + 6) % 7;
+            }
+            vval_len = snprintf(val, sizeof(val), "%d", dow);
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 3 && memcmp(vname, "DOM", 3) == 0) {
+            int year, month, day;
+            if (s->host_date[0] != '\0' &&
+                rip_parse_host_date(s->host_date, &year, &month, &day)) {
+                vval_len = snprintf(val, sizeof(val), "%02d", day);
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_mday);
+            }
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 5 && memcmp(vname, "MONTH", 5) == 0) {
+            int year, month, day;
+            if (s->host_date[0] != '\0' &&
+                rip_parse_host_date(s->host_date, &year, &month, &day)) {
+                vval_len = snprintf(val, sizeof(val), "%02d", month);
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_mon + 1);
+            }
+            if (vval_len < 0) vval_len = 0;
+
+        /* §A2G2: EGA color-name aliases — expand to 2-digit MegaNum
+         * suitable as a |c, |S, |k, |a argument.  Each name maps to
+         * its EGA palette index (0-15).  Names are 16 chars max. */
+        } else if (vlen >= 3 && vlen <= 13) {
+            static const struct { const char *name; uint8_t len; uint8_t idx; }
+                color_names[] = {
+                    { "BLACK",        5, 0x0 },
+                    { "BLUE",         4, 0x1 },
+                    { "GREEN",        5, 0x2 },
+                    { "CYAN",         4, 0x3 },
+                    { "RED",          3, 0x4 },
+                    { "MAGENTA",      7, 0x5 },
+                    { "BROWN",        5, 0x6 },
+                    { "LIGHTGRAY",    9, 0x7 },
+                    { "DARKGRAY",     8, 0x8 },
+                    { "LIGHTBLUE",    9, 0x9 },
+                    { "LIGHTGREEN",  10, 0xA },
+                    { "LIGHTCYAN",    9, 0xB },
+                    { "LIGHTRED",     8, 0xC },
+                    { "LIGHTMAGENTA",12, 0xD },
+                    { "YELLOW",       6, 0xE },
+                    { "WHITE",        5, 0xF },
+                };
+            bool matched = false;
+            for (size_t ci = 0; ci < sizeof(color_names)/sizeof(color_names[0]); ci++) {
+                if (color_names[ci].len == (uint8_t)vlen &&
+                    memcmp(vname, color_names[ci].name, (size_t)vlen) == 0) {
+                    /* MegaNum encoding: index 0-15 → "00".."0F" */
+                    val[0] = '0';
+                    val[1] = (color_names[ci].idx < 10)
+                             ? (char)('0' + color_names[ci].idx)
+                             : (char)('A' + color_names[ci].idx - 10);
+                    vval_len = 2;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                /* Not a color name — fall through to user-var lookup */
+                int uidx = rip_user_var_find(s, vname, vlen);
+                if (uidx >= 0) {
+                    vval_len = (int)rip_strnlen(s->user_var_values[uidx],
+                                                sizeof(s->user_var_values[uidx]));
+                    if (vval_len > (int)sizeof(val) - 1)
+                        vval_len = (int)sizeof(val) - 1;
+                    memcpy(val, s->user_var_values[uidx], (size_t)vval_len);
+                }
+            }
+
         } else {
             int uidx = rip_user_var_find(s, vname, vlen);
             if (uidx >= 0) {
@@ -1998,6 +2148,20 @@ static void preproc_finalize_directive(rip_state_t *s) {
         preproc_handle_else(s);
     } else if (strcmp(dir, "ENDIF") == 0) {
         preproc_handle_endif(s);
+    } else if (strncmp(dir, "DEBUG ", 6) == 0 || strcmp(dir, "DEBUG") == 0) {
+        /* §A2G2: <<DEBUG msg>> — push "0x3E DEBUG: <msg>\r" to TX so the
+         * host can log it.  Suppressed by parent IF/ELSE branches so that
+         * <<IF false>>...<<DEBUG ...>>...<<ENDIF>> stays quiet. */
+        if (!s->preproc_suppress) {
+            const char *msg = (dir[5] == ' ') ? dir + 6 : "";
+            int msg_len = (int)strlen(msg);
+            char buf[160];
+            int n = snprintf(buf, sizeof(buf), "%cDEBUG: %s\r",
+                             (char)0x3E, msg);
+            (void)msg_len;
+            if (n > 0 && n < (int)sizeof(buf))
+                card_tx_push(buf, n);
+        }
     }
 
     s->preproc_len = 0;
@@ -2198,6 +2362,9 @@ static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
 
     s->rip_has_drawn = false;
     s->cursor_repositioned = false;
+    /* §A2G2: clear the state stack so subsequent | ~ pops cannot
+     * surface state from a prior scene. */
+    s->state_stack_depth = 0;
     draw_set_write_mode(DRAW_MODE_COPY);
     draw_set_line_style(0xFF, 1);
     draw_set_fill_style(0, s->palette[s->back_color]);
@@ -3481,6 +3648,63 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         /* No-op: scene terminator; mouse regions already activated incrementally */
         break;
 
+    /* §A2G2: state push/pop — backward-compatible QoL extension. */
+    case '^': /* RIP_PUSH_STATE — snapshot drawing/cursor/viewport state.
+               * Stack is bounded to RIP_STATE_STACK_MAX frames; overflow
+               * silently drops the push (matches the "ignore unknown
+               * params" precedent for graceful degradation). */
+        if (s->state_stack_depth < RIP_STATE_STACK_MAX) {
+            uint8_t i = s->state_stack_depth;
+            s->state_stack[i].draw_color   = s->draw_color;
+            s->state_stack[i].back_color   = s->back_color;
+            s->state_stack[i].fill_color   = s->fill_color;
+            s->state_stack[i].fill_pattern = s->fill_pattern;
+            s->state_stack[i].line_style   = s->line_style;
+            s->state_stack[i].line_thick   = s->line_thick;
+            s->state_stack[i].write_mode   = s->write_mode;
+            s->state_stack[i].font_id      = s->font_id;
+            s->state_stack[i].font_size    = s->font_size;
+            s->state_stack[i].font_dir     = s->font_dir;
+            s->state_stack[i].font_attrib  = s->font_attrib;
+            s->state_stack[i].draw_x       = s->draw_x;
+            s->state_stack[i].draw_y       = s->draw_y;
+            s->state_stack[i].vp_x0        = s->vp_x0;
+            s->state_stack[i].vp_y0        = s->vp_y0;
+            s->state_stack[i].vp_x1        = s->vp_x1;
+            s->state_stack[i].vp_y1        = s->vp_y1;
+            s->state_stack_depth++;
+        }
+        break;
+
+    case '~': /* RIP_POP_STATE — restore the most recently pushed state.
+               * Pop on empty stack is a no-op (also matches the
+               * graceful-degradation precedent). */
+        if (s->state_stack_depth > 0) {
+            uint8_t i = (uint8_t)(--s->state_stack_depth);
+            s->draw_color   = s->state_stack[i].draw_color;
+            s->back_color   = s->state_stack[i].back_color;
+            s->fill_color   = s->state_stack[i].fill_color;
+            s->fill_pattern = s->state_stack[i].fill_pattern;
+            s->line_style   = s->state_stack[i].line_style;
+            s->line_thick   = s->state_stack[i].line_thick;
+            s->write_mode   = s->state_stack[i].write_mode;
+            s->font_id      = s->state_stack[i].font_id;
+            s->font_size    = s->state_stack[i].font_size;
+            s->font_dir     = s->state_stack[i].font_dir;
+            s->font_attrib  = s->state_stack[i].font_attrib;
+            s->draw_x       = s->state_stack[i].draw_x;
+            s->draw_y       = s->state_stack[i].draw_y;
+            s->vp_x0        = s->state_stack[i].vp_x0;
+            s->vp_y0        = s->state_stack[i].vp_y0;
+            s->vp_x1        = s->state_stack[i].vp_x1;
+            s->vp_y1        = s->state_stack[i].vp_y1;
+            /* Apply restored draw state immediately so subsequent draws
+             * pick up the popped color / write mode / line style. */
+            apply_draw_state(s);
+            draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
+        }
+        break;
+
     /* ── E1: Undocumented command stubs ─────────────────────────
      * These command letters appear in the DLL command-letter accept
      * table (ripscrip_text.asm).  Recognising them prevents
@@ -4350,7 +4574,8 @@ reprocess:
                        ch == '(' || ch == ')' || ch == '+' || ch == ',' ||
                        ch == '-' || ch == '.' || ch == ':' || ch == ';' ||
                        ch == '<' || ch == '[' || ch == ']' || ch == '_' ||
-                       ch == '&' || ch == '`' || ch == '{' || ch == '"') {
+                       ch == '&' || ch == '`' || ch == '{' || ch == '"' ||
+                       ch == '^' || ch == '~') {
                 /* Valid Level 0 command letter */
                 s->cmd_char = (char)ch;
                 /* A3: '!' as the command letter is the comment marker (!|!…|).

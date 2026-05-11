@@ -866,24 +866,57 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         int16_t gh = scale_y(params[3]);
         uint8_t c1 = s->vga_palette[params[4] & 0xFF];
         uint8_t c2 = s->vga_palette[params[5] & 0xFF];
-        bool vertical = (params[6] != 0);
+        /* mode: 0=horizontal (vary X), 1=vertical (vary Y), 2=radial (§A2G2).
+         * v3.0 used a bool here (any non-zero = vertical) so values 0/1 keep
+         * their original semantics; mode 2 is the new backward-compatible
+         * radial gradient. */
+        int mode = params[6];
+        if (mode != 2) mode = (mode != 0) ? 1 : 0;
         uint8_t old_color = draw_get_color();
 
-        int steps = vertical ? gh : gw;
-        if (steps <= 0) steps = 1;
-        int denom = (steps > 1) ? (steps - 1) : 1;
         int r1 = (c1 >> 5) & 7, g1 = (c1 >> 2) & 7, b1 = c1 & 3;
         int r2 = (c2 >> 5) & 7, g2 = (c2 >> 2) & 7, b2 = c2 & 3;
-        for (int i = 0; i < steps; i++) {
-            int r = r1 + (r2 - r1) * i / denom;
-            int g = g1 + (g2 - g1) * i / denom;
-            int b = b1 + (b2 - b1) * i / denom;
-            uint8_t color = (uint8_t)(((r & 7) << 5) | ((g & 7) << 2) | (b & 3));
-            draw_set_color(rip2_nearest_palette_index(s, color));
-            if (vertical)
-                draw_hline(gx, (int16_t)(gy + i), gw);
-            else
-                draw_vline((int16_t)(gx + i), gy, gh);
+
+        if (mode == 2) {
+            /* Radial: c1 at center, c2 at the farthest box corner.
+             * Per-pixel interpolation by normalized distance.  Uses
+             * the FPU we already require for §A2G.5. */
+            int16_t cx = (int16_t)(gx + gw / 2);
+            int16_t cy = (int16_t)(gy + gh / 2);
+            float max_d2 = (float)((gw * gw + gh * gh) / 4);
+            if (max_d2 <= 0.0f) max_d2 = 1.0f;
+            for (int16_t y = gy; y < gy + gh; y++) {
+                for (int16_t x = gx; x < gx + gw; x++) {
+                    float dx = (float)(x - cx);
+                    float dy = (float)(y - cy);
+                    float t = (dx * dx + dy * dy) / max_d2;
+                    if (t > 1.0f) t = 1.0f;
+                    int r = r1 + (int)((r2 - r1) * t);
+                    int g = g1 + (int)((g2 - g1) * t);
+                    int b = b1 + (int)((b2 - b1) * t);
+                    uint8_t color = (uint8_t)(((r & 7) << 5) |
+                                              ((g & 7) << 2) | (b & 3));
+                    draw_set_color(rip2_nearest_palette_index(s, color));
+                    draw_pixel(x, y);
+                }
+            }
+        } else {
+            bool vertical = (mode == 1);
+            int steps = vertical ? gh : gw;
+            if (steps <= 0) steps = 1;
+            int denom = (steps > 1) ? (steps - 1) : 1;
+            for (int i = 0; i < steps; i++) {
+                int r = r1 + (r2 - r1) * i / denom;
+                int g = g1 + (g2 - g1) * i / denom;
+                int b = b1 + (b2 - b1) * i / denom;
+                uint8_t color = (uint8_t)(((r & 7) << 5) |
+                                          ((g & 7) << 2) | (b & 3));
+                draw_set_color(rip2_nearest_palette_index(s, color));
+                if (vertical)
+                    draw_hline(gx, (int16_t)(gy + i), gw);
+                else
+                    draw_vline((int16_t)(gx + i), gy, gh);
+            }
         }
         draw_set_color(old_color);
         break;
