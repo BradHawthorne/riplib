@@ -1,3 +1,10 @@
 build/
 build-*/
 *.pgm
+
+# consumer-handoff/ holds A2GSPU-bound content extracted from RIPlib during
+# the consumer-decoupling work (DLL RE notes, integration notes, audit trail).
+# It is NOT part of the RIPlib library itself — it's a staging area for the
+# downstream A2GSPU project to absorb, and is already excluded from the
+# sync-to-a2gspu script. Kept on local disk, out of version control.
+consumer-handoff/
