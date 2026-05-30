@@ -63,12 +63,17 @@ Each rule must change a future decision.
   declaring done. Watch the run to completion; do not infer green from a partial
   local pass.
 - **Origin**: 2026-05-30. After pushing the audit work (e2f5652) with local
-  verification "238/238 on MSVC + clean ARM", CI went RED — 6/10 jobs failed at
-  the Build/link step. riplib (STATIC, calls sinf/cosf/atan2f/sqrtf) linked
-  libm `PRIVATE`, so the dependency didn't propagate to consumer executables;
-  `nm libriplib.a` showed `U sinf` etc. Fix: link `m` `PUBLIC` (8f3c9d2) → all
-  10 jobs green. The two passing local configs (MSVC, library-only ARM) were
-  exactly the two that can't see the bug.
+  verification "238/238 on MSVC + clean ARM", CI went RED — 6/10 jobs failed
+  (ubuntu×2, macOS×2, sanitizers, coverage; all host gcc/clang). The two
+  passing-and-relevant local configs (MSVC, library-only ARM newlib) are
+  exactly the two that CANNOT reproduce a glibc/clang host failure.
+  CAUTIONARY half of the lesson: I then guessed the cause (missing libm,
+  "supported" by `nm` showing `U sinf`), pushed a PRIVATE→PUBLIC link fix
+  (c6e59c2, kept — it is correct for a static lib regardless), AND wrote a doc
+  entry claiming "all 10 green" — which was FALSE and unverified (c6e59c2's CI
+  failed with the identical 6-job set, proving libm was not the cause). The
+  `nm` evidence was confirmation bias: real but not the actual failure. Never
+  record a CI result you have not read.
 - **Applies to**: any CMake `target_link_libraries` visibility choice on a
   static lib; any "it builds locally, ship it" moment; release checklists.
 - **How to apply**: a library's external deps (libm, pthread, …) must be
