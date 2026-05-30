@@ -12,7 +12,7 @@
                     SimVU (Brad Hawthorne)
 
                      Protocol ID:   RIPSCRIP032001
-                     Library:       RIPlib v1.2.0
+                     Library:       RIPlib v1.2.1
 
                         May 2026
              ------------------------------------------

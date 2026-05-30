@@ -209,24 +209,30 @@ for the full per-function classification.
 
 ```
 riplib/
-├── include/          Header files
+├── include/          Public header files
 │   ├── drawing.h         Drawing primitives API
 │   ├── bgi_font.h        BGI stroke font API
 │   ├── ripscrip.h        RIPscrip protocol parser
 │   ├── ripscrip2.h       Level 2 port system
 │   ├── rip_icons.h       Icon lookup + cache
 │   ├── rip_icn.h         ICN format parser
-│   └── riplib_platform.h Platform abstraction
+│   ├── riplib_platform.h Platform abstraction
+│   └── riplib_version.h  Version macros + accessor
 ├── src/              Implementation
-│   ├── drawing.c         37+ drawing primitives
+│   ├── drawing.c         Drawing primitives
 │   ├── bgi_font.c        CHR font parser + renderer
-│   ├── ripscrip.c        Protocol parser (4900+ lines)
-│   ├── ripscrip2.c       Level 2 extensions
+│   ├── ripscrip.c        Protocol parser FSM + handlers
+│   ├── ripscrip2.c       Level 2 port system + widgets
+│   ├── rip_preproc.c     <<IF>>/<<ELSE>>/<<ENDIF>> preprocessor
+│   ├── rip_variables.c   $VAR$ expansion + IF-expr evaluator
+│   ├── rip_clipboard.c   Clipboard capture/blit/scale
 │   ├── rip_icons.c       Icon pipeline
-│   └── rip_icn.c         ICN format decoder
+│   ├── rip_icn.c         ICN format decoder
+│   ├── riplib_version.c  Runtime version accessor
+│   └── (rip_meganum.h, rip_internal.h — header-only helpers)
 ├── fonts/            Font data (flash-embedded)
 │   ├── font_bgi_*.h      10 BGI stroke fonts (~76KB)
-│   └── font_cp437_*.h    CP437 bitmap fonts
+│   └── font_cp437_*.h    CP437 bitmap fonts (8×8 + 8×16)
 ├── icons/            Icon data (optional)
 │   ├── rip_icons_data.*   95 BMP icons (~1.6MB)
 │   └── rip_icns_data.*    3 ICN icons (~90KB)
@@ -294,9 +300,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The suite currently ships 275 individual checks across three binaries:
+The suite currently ships 285 individual checks across three binaries:
 - `test_drawing` — 41 rendering primitives, fonts, and edge-case checks.
-- `test_ripscrip` — 228 FSM transitions, dispatched commands, mouse
+- `test_ripscrip` — 238 FSM transitions, dispatched commands, mouse
   hit-testing, variable expansion, host callbacks, port system.
 - `test_compat` — 6 fixture replays with FNV-1a frame-hash lockdown so
   pixel-level regressions show up immediately.

@@ -5,6 +5,41 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+- Documentation accuracy pass against the current source tree:
+  - README file-structure now lists the modules extracted from
+    `ripscrip.c` (`rip_preproc.c`, `rip_variables.c`, `rip_clipboard.c`,
+    `riplib_version.c`) and the `riplib_version.h` header, and drops the
+    stale "(4900+ lines)" annotation.
+  - README test counts corrected to **285 total** checks
+    (`test_drawing` 41, `test_ripscrip` 238, `test_compat` 6). The
+    [1.2.1] note below quoted the earlier 275/228 figures, which the
+    test-suite growth has since superseded.
+  - README "platform-independent" wording corrected: the library uses
+    `string.h`/`stdlib.h`/`stdio.h` (`snprintf`) and `math.h`
+    (`sinf`/`cosf`/`atan2f`/`sqrtf`) and links `libm` — not "no libc
+    beyond memcpy/memset, no floating point."
+  - `docs/spec/01-wire-format.md` banner version corrected v1.2.0 → v1.2.1.
+- `docs/spec/11-dll-deviations.md` rewritten so it records only
+  deliberate, decided deviations (§DEV.1-5); spec text was corrected to
+  match the code (icon lookup order §9.2, scalable-text range §5.9,
+  the RIPlib-extension commands in §A.1) and unresolved items moved to
+  `design/knowledge.md`.
+
+### Fixed
+- `26` SCALABLE_TEXT scale was bit-masked `& 0x07` (silently corrupting
+  valid scales — e.g. 10 became 2); now clamped to the BGI renderer's
+  real 1-10 range, matching the `|Y` RIP_FONT_STYLE size field.
+- `src/bgi_font.c` now includes `<stddef.h>` for `size_t` — fixes the
+  host gcc/clang build (newlib/MSVC pulled it in transitively).
+- CMake links `libm` `PUBLIC` so static-library consumers (tests,
+  examples, downstream apps) resolve the math symbols.
+- The libFuzzer `-fsanitize=fuzzer` flag is scoped to the `fuzz_parser`
+  target instead of global flags, so the CMake compiler-probe no longer
+  fails to configure.
+
 ## [1.2.1] — 2026-05-11
 
 Patch release for the RIPscrip v3.2 surface.
