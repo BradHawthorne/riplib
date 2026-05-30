@@ -1,5 +1,5 @@
 /*
- * bgi_font.c — Borland BGI stroke font renderer for A2GSPU card
+ * bgi_font.c — Borland BGI stroke font renderer for RIPlib
  *
  * Parses and renders BGI .CHR vector fonts. Each character is a series
  * of move-to (opcode 2) and line-to (opcode 3) commands, terminated
@@ -55,10 +55,13 @@ bool bgi_font_parse(bgi_font_t *font, const uint8_t *data, int size) {
      *   +9:    org_to_baseline (signed byte)
      *   +10:   org_to_bottom (signed byte, descender depth)
      *
-     * Then:
-     *   +11 .. +11+nchars-1:         width table (1 byte per char)
-     *   +11+nchars .. +11+3*nchars-1: stroke offset table (2 bytes LE per char)
-     *   +stroke_offset ..:            stroke data (2 bytes per point)
+     * Then (TABLE ORDER IS CRITICAL — see docs/spec §8.4; reversing the
+     * two tables re-introduces DLL bug §DEAD.2, which silently broke every
+     * stroke font.  The parse code below matches the order documented here):
+     *   +11 .. +15:                     reserved (5 bytes)
+     *   +16 .. +16+2*nchars-1:          stroke offset table (2 bytes LE/char)
+     *   +16+2*nchars .. +16+3*nchars-1: width table (1 byte per char)
+     *   +stroke_offset ..:              stroke data (2 bytes per point)
      */
 
     /* Scan for '+' marker (0x2B) in the binary prefix.
@@ -127,6 +130,17 @@ static int16_t render_char(const bgi_font_t *font,
 
     /* Get stroke data offset for this character */
     uint16_t soff = read_u16le(font->offsets + idx * 2);
+
+    /* Bounds-check soff before forming the pointer.  font->strokes is
+     * already known to live inside font->data (validated in bgi_font_parse).
+     * If a malformed/adversarial font supplies an offset that points outside
+     * the buffer, font->strokes + soff would form an out-of-bounds pointer —
+     * undefined behaviour in C even before any dereference.  Cap it here
+     * and skip the glyph if the offset is unusable.  Per audit C-007. */
+    size_t stroke_byte_pos =
+        (size_t)(font->strokes - font->data) + (size_t)soff;
+    if (stroke_byte_pos + 1 >= (size_t)font->data_size) return 0;
+
     const uint8_t *sp = font->strokes + soff;
     const uint8_t *end = font->data + font->data_size;
 
@@ -216,7 +230,7 @@ int16_t bgi_font_draw_string(const bgi_font_t *font,
             y += w;  /* v3.1 FIX: top-to-bottom (readable English).
                       * Borland v1.54 spec says bottom-to-top, which
                       * renders text backwards on screen. Corrected
-                      * in A2GSPU v3.1 — no known BBS uses dir=1. */
+                      * in RIPlib v3.1 — no known BBS uses dir=1. */
         }
         advance += w;
     }

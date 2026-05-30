@@ -324,7 +324,7 @@ A.8  VERSION HISTORY
      v1.54     July 1993     TeleGrafix Communications
      v2.0      ~1995-1996    TeleGrafix Communications
      v3.0      Oct 1997      TeleGrafix Communications (DLL only)
-     v3.1      March 2026    SimVU (Brad Hawthorne) / A2GSPU
+     v3.1      March 2026    SimVU (Brad Hawthorne) / RIPlib
 
 v1.54: Original specification. 35 Level 0 + 17 Level 1 commands.
        MegaNum encoding, EGA 640×350, 16-color palette, BGI fonts.
@@ -338,7 +338,7 @@ v3.0:  DLL-based implementation (RIPSCRIP.DLL, 592KB PE32).
        menu/dialog/scrollbar widgets, host refresh, chord drawing.
        Never formally published as a specification.
 
-v3.1:  A2GSPU/RIPlib extensions. AND+NOT write modes, CCW text,
+v3.1:  RIPlib extensions. AND+NOT write modes, CCW text,
        corrected vertical direction, font attribute rendering,
        13 native fill patterns, FPU curves/trig, scanline pie fill,
        patterned flood fill, palette index correction (240-255),

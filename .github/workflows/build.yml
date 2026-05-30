@@ -49,6 +49,16 @@ jobs:
         ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       run: ctest --test-dir build-san --output-on-failure
 
+    - name: Fuzz harness (compile + short run, libFuzzer / clang)
+      run: |
+        cmake -B build-fuzz \
+          -DCMAKE_C_COMPILER=clang \
+          -DCMAKE_C_FLAGS="-fsanitize=fuzzer,address,undefined -g -O1" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=fuzzer,address,undefined" \
+          -DRIPLIB_BUILD_TESTS=ON -DRIPLIB_BUILD_FUZZ=ON
+        cmake --build build-fuzz --target fuzz_parser
+        ./build-fuzz/tests/fuzz_parser -max_total_time=30 -rss_limit_mb=2048
+
   coverage:
     runs-on: ubuntu-latest
     steps:
@@ -80,6 +90,13 @@ jobs:
           [rip_icons]=80
           [ripscrip]=80
           [ripscrip2]=85
+          # Extracted modules (C-002).  Provisional LOW floors (C-015): set
+          # below likely coverage so they catch real regressions without
+          # false-failing CI before the first green run calibrates them.
+          # Tighten to ~(measured - 3) once the actual percentages are known.
+          [rip_preproc]=60
+          [rip_variables]=35
+          [rip_clipboard]=50
         )
         fail=0
         for f in "${!floors[@]}"; do
@@ -108,10 +125,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install arm-none-eabi-gcc
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-arm-none-eabi
+    # Pin the ARM toolchain to a known release rather than whatever
+    # `apt` happens to ship today.  Eliminates "passed yesterday, failed
+    # today" drift when the Ubuntu runner image is refreshed.  Bump
+    # `release:` deliberately when adopting a newer toolchain.
+    - name: Install arm-none-eabi-gcc (pinned)
+      uses: carlosperate/arm-none-eabi-gcc-action@v1.10.1
+      with:
+        release: '13.2.Rel1'
 
     - name: Configure for Raspberry Pi RP2350 (Pico 2) — Cortex-M33 + FPU
       run: |
@@ -127,10 +148,40 @@ jobs:
         ar t build-pico2/libriplib.a | sort > /tmp/arm-objs.txt
         echo "Objects in libriplib.a (RP2350 build):"
         cat /tmp/arm-objs.txt
-        # Sanity check: the six core compilation units must all be there.
-        for f in drawing bgi_font ripscrip ripscrip2 rip_icons rip_icn; do
+        # Sanity check: all twelve compilation units must be there — the ten
+        # core units (six original + riplib_version.c from C-005 + rip_preproc.c
+        # + rip_variables.c + rip_clipboard.c from C-002) plus the two generated
+        # icon-data blobs (C-015, so a dropped data TU fails here rather than at
+        # a downstream consumer's link step).
+        for f in drawing bgi_font ripscrip ripscrip2 rip_icons rip_icn rip_preproc rip_variables rip_clipboard riplib_version rip_icons_data rip_icns_data; do
           grep -q "${f}.c.obj" /tmp/arm-objs.txt || (echo "::error::missing ${f}.c.obj in RP2350 archive" && exit 1)
         done
+
+    # Per-object size report, sorted largest first.  Informational only
+    # for now — track the numbers across runs so that any surprise
+    # bloat (e.g. a refactor accidentally inlines a hot function) is
+    # visible in CI before it lands.  A future tightening can add a
+    # floor check; see audit candidate C-009 in design/decisions.md.
+    - name: Per-object size report (RP2350)
+      run: |
+        echo "=== Per-object size report (arm-none-eabi-size, RP2350) ==="
+        printf "%8s %8s %8s %8s  %s\n" text data bss total object
+        echo "----------------------------------------------------------"
+        mkdir -p /tmp/arm-objs
+        ( cd /tmp/arm-objs && ar x ${GITHUB_WORKSPACE}/build-pico2/libriplib.a )
+        cd /tmp/arm-objs
+        for o in *.obj; do
+          line=$(arm-none-eabi-size -d "$o" | tail -1)
+          # arm-none-eabi-size dec output: text data bss dec hex filename
+          text=$(echo $line | awk '{print $1}')
+          data=$(echo $line | awk '{print $2}')
+          bss=$(echo  $line | awk '{print $3}')
+          total=$(echo $line | awk '{print $4}')
+          printf "%8d %8d %8d %8d  %s\n" $text $data $bss $total "$o"
+        done | sort -k4 -nr
+        echo
+        echo "=== Archive total (arm-none-eabi-size --totals) ==="
+        arm-none-eabi-size --totals ${GITHUB_WORKSPACE}/build-pico2/libriplib.a | tail -3
 
   static-analysis:
     runs-on: ubuntu-latest

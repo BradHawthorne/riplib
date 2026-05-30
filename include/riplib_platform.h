@@ -1,12 +1,14 @@
 /*
  * riplib_platform.h — Platform abstraction for RIPlib
  *
- * Provides the minimal types and stubs that replace A2GSPU card-specific
- * dependencies (PSRAM arena, compositor, etc.). Consumers implement
- * the 3 extern functions below for their platform.
+ * Defines the small set of platform-dependent surfaces RIPlib needs:
+ * a bump-arena allocator (backed by malloc() by default), a 3-function
+ * extern interface a host must implement (palette R/W and BBS TX), and
+ * stub types/functions that let the protocol parser call into a host
+ * compositor without requiring one.
  *
  * Copyright (c) 2026 SimVU (Brad Hawthorne)
- * Licensed under the MIT License. See LICENSE.
+ * Licensed under the MIT License.  See LICENSE.
  */
 
 #pragma once
@@ -20,9 +22,16 @@
 extern "C" {
 #endif
 
-/* ── PSRAM arena stub ───────────────────────────────────────────── */
-/* On embedded (RP2350), this is a bump allocator in 8MB PSRAM.
- * On desktop, just use malloc(). */
+/* ── PSRAM arena ────────────────────────────────────────────────── */
+/* A small bump allocator used for session-lived dynamic storage
+ * (icon pixel caches, clipboard captures, file-upload staging).
+ *
+ * The name "psram" reflects the original use case (an embedded
+ * target backing the arena with external PSRAM); the default
+ * implementation here is simply malloc().  Consumers with a real
+ * PSRAM region — or any other fixed memory pool — are expected to
+ * provide their own backing inside platform code that bypasses or
+ * replaces these static-inline stubs. */
 typedef struct {
     uint8_t *base;
     uint32_t size;
@@ -106,13 +115,12 @@ static inline void comp_clear_line(comp_context_t *c, uint8_t mode) {
     (void)c; (void)mode;
 }
 
-/* ── Terminal stub ──────────────────────────────────────────────── */
-/* Minimal terminal types for protocol parser compatibility */
-#ifndef TERM_MAX_COLS
-#define TERM_MAX_COLS 80
-#define TERM_MAX_ROWS 25
-typedef struct { uint8_t ch; uint8_t attr; } term_cell_t;
-#endif
+/* (Historical note: this header previously declared a `term_cell_t`
+ * type and TERM_MAX_COLS/ROWS macros for the benefit of an external
+ * terminal-grid renderer.  No code inside RIPlib referenced them; per
+ * audit candidate C-001 + empirical question U-008 they were dropped
+ * to clean up the public surface.  Consumers that need a terminal
+ * cell type should declare their own.) */
 
 #ifdef __cplusplus
 }

@@ -15,9 +15,8 @@ separate drawing areas (e.g., a menu bar, content area, and status
 bar), switch between them, and copy pixels between port viewports.
 
 On the original DLL, each port had its own GDI Device Context and
-off-screen bitmap. On embedded (A2GSPU/RIPlib), all ports share a
-single framebuffer with per-port state save/restore and clip region
-management.
+off-screen bitmap.  In RIPlib, all ports share a single framebuffer
+with per-port state save/restore and clip-region management.
 
 
 ---------------------------------------------------------------------
@@ -224,7 +223,7 @@ and z-order for layered rendering.
      comp_mode   2       0-3     Compositing mode (0=COPY)
      zorder      2       0-255   Z-order for compositor layering
 
-     v3.1 EXTENSION: These attributes are A2GSPU additions not
+     v3.1 EXTENSION: These attributes are RIPlib additions not
      present in any DLL version. They enable windowed desktop
      compositing where ports represent overlapping windows with
      transparency and z-ordering.

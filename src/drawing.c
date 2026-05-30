@@ -1,13 +1,16 @@
 /*
- * drawing.c — Unified rendering primitives for A2GSPU card
+ * drawing.c — Unified rendering primitives for RIPlib
  *
- * ALL UHR/Mosaic/protocol framebuffer pixel operations go through here.
+ * ALL protocol-driven framebuffer pixel operations go through here.
  * This is the single source of truth for pixel writes, clipping, and
- * drawing state. IIgs display mode renderers (TEXT40, SHR, etc.) and
- * the terminal grid renderer are the only exceptions — they have
- * specialized pixel formats that don't map to these primitives.
+ * drawing state.  Consumers with specialized pixel formats (NTSC
+ * artifact renderers, character-ROM tile blitters, scanline-control
+ * surfaces) are the exception — they may write the framebuffer
+ * directly because their pixel formats don't map onto these
+ * primitives.
  *
- * Algorithms (all integer, no FPU required — though RP2350 has dual FPUs):
+ * Algorithms (all integer, no FPU required, though FPU-equipped
+ * targets get a small speedup from the trig paths):
  *   Bresenham (1965) — line
  *   Pitteway (1967), Van Aken (1984) — midpoint circle
  *   Van Aken & Novak (1985) — midpoint ellipse
@@ -16,13 +19,13 @@
  *   Shani (1980) — scanline flood fill
  *
  * Copyright (c) 2026 SimVU (Brad Hawthorne)
- * Licensed under the MIT License. See LICENSE.
+ * Licensed under the MIT License.  See LICENSE.
  */
 
 #include "drawing.h"
 #include <string.h>
 #include <stdlib.h>  /* abs() */
-#include <math.h>    /* atan2f, sinf, cosf — RP2350 has dual single-precision FPUs */
+#include <math.h>    /* atan2f, sinf, cosf — FPU-equipped targets get a small speedup here */
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -414,7 +417,7 @@ void draw_vline(int16_t x, int16_t y, int16_t len) {
 
 void draw_fill_screen(uint8_t color) {
     if (!draw_ready()) return;
-    memset(g_fb, color, g_height * g_pitch);
+    memset(g_fb, color, (size_t)g_height * (size_t)g_pitch);
     mark_dirty(0, (int16_t)(g_height - 1));
 }
 
@@ -718,7 +721,7 @@ void draw_ellipse(int16_t cx, int16_t cy, int16_t rx, int16_t ry, bool fill) {
  * ══════════════════════════════════════════════════════════════════ */
 
 /* FPU-accelerated angle calculation using atan2f.
- * RP2350 dual FPUs: single-precision in 1-2 cycles, no penalty.
+ * On FPU-equipped targets these run in a few cycles each, no penalty.
  * Returns 0-359 degrees. Much more accurate than the integer
  * approximation it replaces (~1° error → <0.01° error). */
 static int16_t pixel_angle(int16_t dx, int16_t dy) {
@@ -1054,10 +1057,11 @@ uint8_t draw_get_pixel(int16_t x, int16_t y) {
  *
  * Used by: status overlay, protocol text commands (RIPscrip !|T,
  * ReGIS T'str', HPGL LB), Wozix window titles, Nuklear text.
- * Replaces 2 duplicate glyph renderers in main.c.
+ * Single rendering path shared by every text-drawing consumer of
+ * this module.
  *
  * font: glyph bitmap data. 8 pixels wide, font_height rows per glyph.
- *   For Apple II character_rom: 7-bit wide, 8 rows, indexed as
+ *   For a 7-bit-wide character ROM: 7 columns, 8 rows, indexed as
  *   character_rom[(ch << 3) | glyph_line], bits 0-6 = pixels.
  *   For cp437_8x16: 8-bit wide, 16 rows, indexed as
  *   cp437_8x16[ch * 16 + glyph_line], bits 7-0 = pixels.
@@ -1086,7 +1090,7 @@ void draw_text(int16_t x, int16_t y, const char *str, int len,
 
             uint8_t bits;
             if (font_height <= 8) {
-                /* Apple II character ROM: 7-bit, 8 rows, (ch<<3)|line */
+                /* 7-bit-wide character ROM: 7 columns, 8 rows, indexed (ch<<3)|line */
                 bits = font[((uint16_t)ch << 3) | gl];
             } else {
                 /* CP437-style: 8-bit, N rows, ch*height+line */

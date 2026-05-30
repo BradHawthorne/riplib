@@ -187,6 +187,24 @@ while (connected) {
 rip_session_reset(&rip);
 ```
 
+## Session Safety
+
+RIPlib is **single-session by design**. Every public entrypoint comes
+in two flavours: explicit-state `*_state(rip_state_t *s, ...)` variants
+that are safe across distinct sessions, and globals-based shortcuts
+(`rip_mouse_event_ext`, `rip_file_upload_*`, `rip_sync_*_byte`,
+`rip_query_response_byte`, `rip_apply_palette`) that operate on the
+single global session set by the most recent `rip_init_first()` call.
+
+Embedders running more than one concurrent session **must** use only
+the `*_state()` variants, or serialise all calls behind a single mutex.
+Calling `rip_init_first(&sessionB)` silently flips the global pointer
+away from `sessionA`, so any subsequent globals-based call would
+operate on the wrong session.
+
+See the `SESSION SAFETY` block at the bottom of `include/ripscrip.h`
+for the full per-function classification.
+
 ## File Structure
 
 ```

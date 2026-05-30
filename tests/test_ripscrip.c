@@ -1249,6 +1249,67 @@ static void test_fuzz_random_bytes_no_crash(void) {
     (void)s;
 }
 
+/* Property-based fuzz: feed 16K random bytes and after EACH byte assert
+ * that the public invariants hold.  Where the existing crash-safety
+ * fuzz tests catch hard faults (NULL deref, OOB write that hits a guard
+ * page), this one catches *logic* bugs that leave the state in an
+ * impossible shape — uint counters that wrapped, FSM states outside the
+ * 0..13 range, array indices past their bounds.  Per audit C-011. */
+static void test_fuzz_invariants_preserved(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    uint32_t lcg = 0xBADC0DE5u;
+
+    TEST("rip_process: invariants hold across 16K random adversarial bytes");
+    init_fixture(&s, &ctx);
+
+    for (int i = 0; i < 16384; i++) {
+        lcg = lcg * 1103515245u + 12345u;
+        uint8_t b = (uint8_t)(lcg >> 16);
+        rip_process(&s, &ctx, b);
+
+        /* FSM state must remain within the documented range
+         * (see RIP_ST_* in include/ripscrip.h: states 0..13). */
+        if (s.state > 13) {
+            char msg[64];
+            snprintf(msg, sizeof(msg),
+                     "FSM state %u out of range after byte %d (0x%02X)",
+                     s.state, i, b);
+            FAIL(msg);
+            return;
+        }
+
+        /* cmd_len must never exceed the cmd_buf capacity. */
+        if (s.cmd_len > sizeof(s.cmd_buf)) {
+            FAIL("cmd_len exceeded cmd_buf size");
+            return;
+        }
+
+        /* Bounded counters must respect their hard limits. */
+        if (s.num_mouse_regions > RIP_MAX_MOUSE_REGIONS) {
+            FAIL("num_mouse_regions overflowed");
+            return;
+        }
+        if (s.preproc_depth > RIP_PREPROC_MAX_DEPTH) {
+            FAIL("preproc_depth exceeded RIP_PREPROC_MAX_DEPTH");
+            return;
+        }
+        if (s.state_stack_depth > RIP_STATE_STACK_MAX) {
+            FAIL("state_stack_depth exceeded RIP_STATE_STACK_MAX");
+            return;
+        }
+        if (s.active_port >= RIP_MAX_PORTS) {
+            FAIL("active_port out of range");
+            return;
+        }
+        if (s.upload_pos < 0) {
+            FAIL("upload_pos went negative");
+            return;
+        }
+    }
+    PASS();
+}
+
 static void test_command_with_no_args(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2833,14 +2894,14 @@ static void test_load_icon_clipboard_flag_stores_pixels(void) {
 
 /* COVERAGE: rip_mouse_event_ext (global wrapper).
  * Verifies the extern-C entrypoint that dispatches via g_rip_state
- * works end-to-end after rip_init bound the singleton. */
+ * works end-to-end after rip_init_first bound the singleton. */
 static void test_global_mouse_event_dispatches(void) {
     rip_state_t s;
     comp_context_t ctx;
 
     TEST("rip_mouse_event_ext routes through g_rip_state");
     init_fixture(&s, &ctx);
-    rip_init(&s);
+    rip_init_first(&s);
     /* Define mouse region #0 at (10,10)-(50,50) hotkey=0 flags=0
      * host="X".  Expect "X\r" pushed to TX on a click inside. */
     feed_script(&s, &ctx, "!|1M000A0A1E1E0000000X|");
@@ -2868,7 +2929,7 @@ static void test_global_file_upload_caches_icn(void) {
 
     TEST("global rip_file_upload_* wrappers cache an ICN");
     init_fixture(&s, &ctx);
-    rip_init(&s);
+    rip_init_first(&s);
     rip_file_upload_begin(8);
     for (size_t i = 0; i < 8; i++)
         rip_file_upload_byte((uint8_t)icon_name[i]);
@@ -3110,6 +3171,20 @@ static void test_l0_custom_fill_pattern_s(void) {
     else FAIL("|s did not set fill_color");
 }
 
+/* C-012: RIP_FILL_STYLE (|S, uppercase) clamps the pattern to the spec
+ * range 0-12; an out-of-range value maps to 0 (no fill).  "0D"=13 -> 0,
+ * "05"=5 -> 5. */
+static void test_l0_fill_style_S_pattern_clamped(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|S clamps fill pattern to spec range 0-12");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|S0D00|");   /* pattern 13 (>12) -> 0 */
+    if (s.fill_pattern != 0) { FAIL("|S did not clamp out-of-range pattern"); return; }
+    feed_script(&s, &ctx, "!|S0500|");   /* pattern 5 (valid) -> 5 */
+    if (s.fill_pattern == 5) PASS();
+    else FAIL("|S did not store valid pattern");
+}
+
 /* ── Extended single-char ─────────────────────────────────────────── */
 
 static void test_ext_rounded_rect_U(void) {
@@ -3241,12 +3316,15 @@ static void test_l1_button_style_B(void) {
 
 static void test_l1_set_icon_dir_N(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|1N stores icon directory");
+    TEST("|1N stores icon directory + rejects traversal");
     init_fixture(&s, &ctx);
     /* res:2 + path */
     feed_script(&s, &ctx, "!|1N00ICONS|");
-    if (strcmp(s.icon_dir, "ICONS") == 0) PASS();
-    else FAIL("|1N did not store icon_dir");
+    if (strcmp(s.icon_dir, "ICONS") != 0) { FAIL("|1N did not store icon_dir"); return; }
+    /* C-013/ADR-0003: a path containing ".." is rejected, icon_dir cleared. */
+    feed_script(&s, &ctx, "!|1N00../etc|");
+    if (s.icon_dir[0] == '\0') PASS();
+    else FAIL("|1N did not reject path traversal");
 }
 
 static void test_l1_play_midi_Z(void) {
@@ -4018,6 +4096,192 @@ static void test_icon_style_proportional_mode(void) {
     if (found) PASS(); else FAIL("proportional mode drew nothing");
 }
 
+/* ── Audit C-006: Test-coverage gap pack ────────────────────────── */
+
+/* Level 3 prefix routes into RIP_ST_LEVEL3_LETTER (state 13) per
+ * include/ripscrip.h.  No L3 command letters are assigned, so all L3
+ * frames must be silently dropped without wedging the parser.  The
+ * subsequent L0 command must still execute normally. */
+static void test_level3_prefix_silently_dropped(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("Level 3 prefix routes + drops cleanly, parser recovers");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|3X0000|!|X0505|");
+    if (draw_get_pixel(5, 5) != 0)
+        PASS();
+    else
+        FAIL("Level 3 prefix wedged the parser; subsequent L0 X did not render");
+}
+
+/* Drain the 1 MB PSRAM arena, then attempt to cache an icon via the
+ * BMP path — it must fail gracefully (return false) rather than
+ * dereferencing a NULL psram_arena_alloc result.  Smallest valid BMP
+ * is fine; the cache_bmp path allocates pixel storage on success. */
+static void test_arena_exhaustion_returns_false_no_crash(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("arena exhaustion: icon cache fails gracefully");
+    init_fixture(&s, &ctx);
+    /* Drain the arena by repeatedly asking for big blocks until alloc
+     * returns NULL. */
+    while (psram_arena_alloc(&s.psram_arena, 65536) != NULL) { /* loop */ }
+    /* A minimal 2x1 8bpp BMP — 14-byte file header + 40-byte info header
+     * + 1024-byte palette + 4-byte row.  Total 1082 bytes.  Construct
+     * inline so the test is self-contained. */
+    static uint8_t bmp[1082];
+    memset(bmp, 0, sizeof(bmp));
+    bmp[0] = 'B'; bmp[1] = 'M';
+    bmp[2] = sizeof(bmp) & 0xFF;
+    bmp[3] = (sizeof(bmp) >> 8) & 0xFF;
+    bmp[10] = 14 + 40 + 1024;     /* pixel-data offset */
+    bmp[14] = 40;                  /* info header size */
+    bmp[18] = 2;                   /* width = 2 */
+    bmp[22] = 1;                   /* height = 1 */
+    bmp[26] = 1;                   /* planes */
+    bmp[28] = 8;                   /* bpp */
+    if (!rip_icon_cache_bmp(&s.icon_state, "EXHAUST", 7,
+                            bmp, sizeof(bmp)))
+        PASS();
+    else
+        FAIL("icon cache returned true under exhausted arena");
+}
+
+/* RIP_MAX_MOUSE_REGIONS is 128.  Add 128 distinct regions; the table
+ * must accept all 128 and reject the 129th without overflow.  Pins the
+ * fix the audit noted at ripscrip.h:276 ("Fix S5/FB-4"). */
+static void test_mouse_region_table_full_at_128(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("mouse region table caps at RIP_MAX_MOUSE_REGIONS (128)");
+    init_fixture(&s, &ctx);
+    /* 1M wire: x0:2 y0:2 x1:2 y1:2 hotkey:1 flags:2 text...| */
+    for (int i = 0; i < 130; i++) {
+        char cmd[64];
+        /* All regions at (0,0)-(1,1); only the host text differs. */
+        snprintf(cmd, sizeof(cmd), "!|1M00000101000000R%c|",
+                 (char)('A' + (i % 26)));
+        feed_script(&s, &ctx, cmd);
+    }
+    if (s.num_mouse_regions == RIP_MAX_MOUSE_REGIONS)
+        PASS();
+    else {
+        char msg[80];
+        snprintf(msg, sizeof(msg), "expected num_mouse_regions=128, got %u",
+                 s.num_mouse_regions);
+        FAIL(msg);
+    }
+}
+
+/* mega_digit treats lowercase a-z identically to A-Z (src/ripscrip.c).
+ * Pin this so a refactor doesn't silently reject lowercase MegaNum.
+ * "0a" decodes as 0*36 + 10 = 10, so X 0a 0a draws at (10, scale_y(10)). */
+static void test_meganum_lowercase_treated_as_uppercase(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("MegaNum decoder accepts lowercase a-z");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|X0a0a|");
+    /* scale_y(10) is implementation-defined; just confirm SOME pixel
+     * was drawn in the row 0..14 range at column 10. */
+    int drew = 0;
+    for (int y = 0; y < 20 && !drew; y++)
+        if (draw_get_pixel(10, (int16_t)y) != 0) drew = 1;
+    if (drew) PASS();
+    else FAIL("lowercase MegaNum 'a' was not treated as digit 10");
+}
+
+/* mega_digit returns 0 for any character outside 0-9A-Za-z.
+ * A malformed wire stream with '?' in a numeric field must decode as
+ * zero and not crash.  Pins the silent-fallback semantics. */
+static void test_meganum_punctuation_treats_as_zero(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("MegaNum decoder treats invalid chars as zero (no crash)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|X0?0?|!|X0303|");
+    /* First X with '?'s should silently draw at (0, scale_y(0)).
+     * Second X 03 03 verifies parser still works. */
+    if (draw_get_pixel(3, 3) != 0)
+        PASS();
+    else
+        FAIL("parser wedged after malformed MegaNum input");
+}
+
+/* $RAND$ uses an LCG seeded from frame_count at rip_init_first time
+ * (see the rand_state comment in ripscrip.h).  Two sessions started
+ * with the same explicit seed must produce identical $RAND$ output. */
+static void test_rand_reproducibility(void) {
+    rip_state_t s; comp_context_t ctx;
+    uint8_t first[64];
+    size_t first_len;
+
+    TEST("$RAND$ is reproducible from a fixed seed");
+
+    init_fixture(&s, &ctx);
+    s.rand_state = 0x12345678u;
+    tx_reset();
+    feed_script(&s, &ctx, "<<DEBUG $RAND$ $RAND$ $RAND$>>");
+    first_len = tx_len;
+    if (first_len == 0 || first_len > sizeof(first)) {
+        FAIL("DEBUG emitted no/too-much TX output");
+        return;
+    }
+    memcpy(first, tx_capture, first_len);
+
+    init_fixture(&s, &ctx);
+    s.rand_state = 0x12345678u;
+    tx_reset();
+    feed_script(&s, &ctx, "<<DEBUG $RAND$ $RAND$ $RAND$>>");
+    if (tx_len == first_len && memcmp(tx_capture, first, first_len) == 0)
+        PASS();
+    else
+        FAIL("$RAND$ output differs between runs with identical seed");
+}
+
+/* rip_file_upload_begin_state with name_len=0 must not crash and must
+ * leave the parser in a recoverable state (subsequent normal cmd works). */
+static void test_upload_name_len_zero_safe(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("file upload with name_len=0 is safe");
+    init_fixture(&s, &ctx);
+    rip_file_upload_begin_state(&s, 0);
+    rip_file_upload_byte_state(&s, 0xAA);  /* would have been part of name */
+    rip_file_upload_end_state(&s);
+    /* Verify parser still works for a normal command.  RIP_PIXEL ('X')
+     * scales Y by 8/7, which is the identity only for y<=6 (scale_y(7)=8);
+     * use (5,5) so the rendered pixel lands exactly where we check. */
+    feed_script(&s, &ctx, "!|X0505|");
+    if (draw_get_pixel(5, 5) != 0)
+        PASS();
+    else
+        FAIL("parser wedged after zero-length upload name");
+}
+
+/* CHANGELOG v1.1.0 documents a consumer trap: after !|cmd| the FSM is in
+ * RIP_ST_COMMAND (state 2), and raw text bytes fed without a trailing
+ * newline are interpreted as command letters, not text.  Pin the trap
+ * so a future refactor that "fixes" it must do so consciously. */
+static void test_fsm_raw_text_after_cmd_eaten_as_letters(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("raw text after !|cmd| (no CR/LF) is eaten as command letters");
+    init_fixture(&s, &ctx);
+    /* Feed a draw, then raw "AB" with no separator.  RIP_PIXEL ('X')
+     * scales Y by 8/7 (identity only for y<=6), so use (5,5) for a pixel
+     * that lands exactly where we check. */
+    feed_script(&s, &ctx, "!|X0505|AB");
+    /* The pixel at (5,5) must be drawn (the X command worked). */
+    if (draw_get_pixel(5, 5) == 0) {
+        FAIL("setup: initial X command did not render");
+        return;
+    }
+    /* The FSM must NOT be back in IDLE — the trap is that AB is being
+     * consumed as command-stream input, not text.  Treat passthrough
+     * (state 0) as the failure case; any non-zero state confirms the
+     * trap is still in place. */
+    if (s.state != RIP_ST_IDLE)
+        PASS();
+    else
+        FAIL("FSM returned to IDLE — raw text trap may have been "
+             "accidentally fixed; if intentional, update CHANGELOG + "
+             "delete this test");
+}
+
 int main(void) {
     printf("RIPlib v1.0 — RIPscrip Regression Tests\n");
     printf("======================================\n\n");
@@ -4105,6 +4369,7 @@ int main(void) {
     test_fuzz_multiple_seeds();
     test_null_safety_public_entrypoints();
     test_fuzz_random_bytes_no_crash();
+    test_fuzz_invariants_preserved();
     test_command_with_no_args();
     test_bang_pipe_with_no_command_letter();
     test_text_param_with_only_escape();
@@ -4169,6 +4434,16 @@ int main(void) {
     test_global_mouse_event_dispatches();
     test_global_file_upload_caches_icn();
 
+    /* Audit C-006 — test-coverage gap pack */
+    test_level3_prefix_silently_dropped();
+    test_arena_exhaustion_returns_false_no_crash();
+    test_mouse_region_table_full_at_128();
+    test_meganum_lowercase_treated_as_uppercase();
+    test_meganum_punctuation_treats_as_zero();
+    test_rand_reproducibility();
+    test_upload_name_len_zero_safe();
+    test_fsm_raw_text_after_cmd_eaten_as_letters();
+
     /* Wire-coverage tests for the 37 commands flagged by the spec-vs-test audit */
     test_l0_write_mode_W();
     test_l0_line_style_eq();
@@ -4190,6 +4465,7 @@ int main(void) {
     test_l0_no_more_hash();
     test_l0_region_text_t();
     test_l0_custom_fill_pattern_s();
+    test_l0_fill_style_S_pattern_clamped();
     test_ext_rounded_rect_U();
     test_ext_filled_rounded_rect_u();
     test_ext_polyline_ext();

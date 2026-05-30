@@ -5,28 +5,19 @@
 #
 # Builds the static library only — does not produce a runnable binary,
 # since bare-metal targets supply their own startup, linker script, and
-# syscall stubs.  Downstream firmware (pico-sdk or A2GSPU firmware)
+# syscall stubs.  Downstream firmware (pico-sdk-based or otherwise)
 # links against libriplib.a.
 #
 # Target: Raspberry Pi RP2350 (Cortex-M33, ARMv8-M Mainline, FPU).
-# Reference platform: the A2FUSION card running A2GSPU firmware — a
-# dual-RP2350 Apple IIgs coprocessor that uses one RP2350 ("Processor
-# V" / RP235XA) for video rendering and one RP2350 ("Processor B" /
-# RP235XB) for the host bus, storage, and USB.  RIPlib runs on
-# Processor V, where it writes to the framebuffer that is then
-# clocked out via HSTX (or PIO bit-banged DVI on early prototypes).
-#
-# A2FUSION is the card (hardware); A2GSPU is the firmware project
-# that runs on it.  RIPlib is a parallel project extracted from
-# A2GSPU's rendering engine.
-#
-# Board reference:
-#   https://www.facebook.com/groups/5251478676/posts/10166402670968677/
-#
 # Both RP2350 variants share the same CPU core, so a single toolchain
-# file covers both V (RP235XA, 30 GPIO, QFN-60) and B (RP235XB, 48
-# GPIO, QFN-80) builds.  Pin count differences are board-level
-# concerns, not library concerns.
+# file covers both RP235XA (30 GPIO, QFN-60) and RP235XB (48 GPIO,
+# QFN-80) builds.  Pin-count differences are board-level concerns,
+# not library concerns.
+#
+# Other ARM Cortex-M targets (M33-based or compatible) can usually
+# build RIPlib by editing the ARM_CPU_FLAGS list below to match their
+# core; only the CPU flags and the PICO_RP2350 hint define are
+# RP2350-specific.
 
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR arm)
@@ -41,7 +32,7 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 # RP2350 = Cortex-M33 + ARMv8-M Mainline + single-precision FPU
 # (fpv5-sp-d16).  These flags match the pico-sdk default for the
 # ARM core selection (the chip can also boot the Hazard3 RISC-V
-# cores, but RIPlib's reference firmware uses ARM).
+# cores; this toolchain file is for the ARM build only).
 set(ARM_CPU_FLAGS
     -mcpu=cortex-m33
     -mthumb

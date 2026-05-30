@@ -1,9 +1,10 @@
 /*
- * ripscrip2.c -- RIPscrip 2.0 / v3.0 protocol extensions for A2GSPU card
+ * ripscrip2.c -- RIPscrip 2.0+ protocol extensions for RIPlib
  *
- * TeleGrafix Communications, 1994-1997. Extends 1.54 with 256-color
+ * TeleGrafix Communications, 1994-1997.  Extends v1.54 with 256-color
  * VGA, scalable text, GUI widgets, gradient fills, and the Drawing
- * Ports system (v2.0/v3.0).
+ * Ports system (v2.0/v3.0).  Also implements the v3.x §A2G extensions
+ * (see docs/spec/06-v31-extensions.md and 06a-v32-extensions.md).
  *
  * Level 2 command dispatch (called from ripscrip.c on '2' prefix):
  *
@@ -22,11 +23,11 @@
  *     'R'  Host-triggered screen refresh
  *     'c'  Chord drawing (lowercase -- 'C' is now PORT_COPY)
  *
- * Port implementation notes for RP2350 single-framebuffer architecture:
+ * Port implementation notes (single-framebuffer architecture):
  *
- *   The DLL used 36 independent GDI DCs backed by off-screen bitmaps.
- *   On RP2350 there is a single 640x400 framebuffer with no off-screen
- *   surfaces.  The port system instead:
+ *   The spec defines 36 independent drawing surfaces; RIPlib runs
+ *   against a single shared framebuffer with no off-screen surfaces.
+ *   The port system instead:
  *     - Stores per-port drawing state (clip region, color, fill, etc.)
  *     - Saves/restores that state on port switch
  *     - Applies the new port's viewport as the hardware clip rectangle
@@ -441,7 +442,7 @@ static void port_set_defaults(rip_port_t *p)
  *   - Viewport coordinates are in EGA (640x350) space; scaled here
  *
  * port_flags bits (from !|2P command, 4-digit MegaNum):
- *   bit 0 (1) = clipboard/offscreen port (informational on RP2350)
+ *   bit 0 (1) = clipboard/offscreen port (informational on single-framebuffer targets)
  *   bit 1 (2) = make active immediately  (handled by caller)
  *   bit 2 (4) = deactivate viewport on create (set fullscreen flag)
  *   bit 3 (8) = protect immediately
@@ -577,7 +578,7 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
 /*
  * rip_port_copy -- copy pixels from one port's viewport to another.
  *
- * Maps to DLL RIP_PORT_COPY (!|2C).  On the RP2350 single-framebuffer
+ * Maps to DLL RIP_PORT_COPY (!|2C).  On RIPlib's single-framebuffer
  * architecture both source and destination reside in the same framebuffer,
  * so draw_copy_rect() provides the necessary memmove-safe blit.
  *
@@ -761,7 +762,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         break;
     }
 
-    /* ── !|2F -- RIP_PORT_FLAGS (A2GSPU v3.1 extension) ───────────
+    /* ── !|2F -- RIP_PORT_FLAGS (v3.1 extension) ──────────────────
      *
      * Wire format: !|2F<port_num:1><alpha:1><comp_mode:2><zorder:2>|
      * Sets extended compositor attributes stored in rip_port_t.
@@ -925,7 +926,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         break;
     }
 
-    /* ── !|2c -- Chord drawing (A2GSPU extension) ──────────────────
+    /* ── !|2c -- Chord drawing (v3.1 extension) ────────────────────
      * Lowercase 'c' to avoid collision with RIP2_CMD_PORT_COPY ('C').
      * params[0]=cx, [1]=cy, [2]=r, [3]=start_angle, [4]=end_angle
      */

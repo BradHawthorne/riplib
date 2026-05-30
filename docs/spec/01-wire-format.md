@@ -49,7 +49,7 @@ Protocol versions:
      v1.54     1993   RIPSCRIP015400      Original specification
      v2.0      1995   RIPSCRIP020000      Drawing Ports, extended cmds
      v3.0      1997   RIPSCRIP030001      DLL-based, never published
-     v3.1      2026   RIPSCRIP031001      §A2G.1-7 (A2GSPU/RIPlib)
+     v3.1      2026   RIPSCRIP031001      §A2G.1-7 (RIPlib)
      v3.2      2026   RIPSCRIP032001      §A2G.8-13 (QoL refinements)
 
 
@@ -101,6 +101,15 @@ Commands are organized into levels. The first character(s) after
      1         1       Interactive commands (v1.54)
      2         2       Drawing Port system (v2.0+)
      9         3       Reserved for future use
+
+**Note (implementation):** RIPlib parses and tracks a Level 3 routing state
+internally for forward compatibility with future protocol revisions. No
+command letters are currently assigned to Level 3, and unrecognized Level 3
+commands are silently dropped rather than triggering an error. The exact
+prefix byte that selects Level 3 is currently under reconciliation between
+this spec table and the implementation (tracked as candidate C-010 in
+`design/decisions.md`); consumers should not yet rely on Level 3 routing
+in production wire streams.
 
 Level 0 commands have NO prefix — the command letter immediately
 follows the '|' delimiter:
@@ -283,7 +292,7 @@ A '!' character appearing mid-line (after printable characters
 without an intervening line break) is passed through to the
 text renderer as a literal exclamation mark.
 
-v3.1 RELAXATION: The A2GSPU implementation also accepts '!'
+v3.1 RELAXATION: RIPlib also accepts '!'
 after ANSI CSI sequence terminators. This handles BBSes that send
 clear-screen followed by RIPscrip on the same line:
 

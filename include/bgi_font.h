@@ -1,14 +1,14 @@
 /*
- * bgi_font.h — Borland BGI stroke font renderer for A2GSPU card
+ * bgi_font.h — Borland BGI stroke font renderer for RIPlib
  *
  * Renders vector (stroke) fonts from the BGI .CHR format used by
- * RIPscrip, Turbo Pascal, and Borland C++. Each character is defined
+ * RIPscrip, Turbo Pascal, and Borland C++.  Each character is defined
  * as a series of move-to and line-to operations in a coordinate grid.
  *
  * The renderer scales strokes to the requested text size and draws
  * them using draw_line() from the unified drawing engine.
  *
- * Built-in fonts (from C:\RIPtel\FONTS\):
+ * Built-in fonts (from the RIPtel CHR font set):
  *   TRIP = Triplex (serif, default RIPscrip font)
  *   SANS = Sans-serif
  *   GOTH = Gothic
@@ -16,7 +16,7 @@
  *   SCRI = Script
  *
  * Copyright (c) 2026 SimVU (Brad Hawthorne)
- * Licensed under the MIT License. See LICENSE.
+ * Licensed under the MIT License.  See LICENSE.
  */
 
 #pragma once

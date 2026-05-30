@@ -43,7 +43,7 @@ Processing order:
 $DATE$
      Format:   MM/DD/YY
      Example:  "03/21/26"
-     Source:    Host-synchronized time or RP2350 RTC fallback.
+     Source:    Host-synchronized time or local RTC fallback.
      DLL RVA:  Part of ripTextVarEngine (0x026218)
 
 $TIME$
@@ -130,7 +130,7 @@ $RAND$
           state = state * 1103515245 + 12345
           output = (state >> 16) & 0x7FFF
 
-     The LCG state is seeded from the RP2350 RTC timestamp at
+     The LCG state is seeded from the local RTC timestamp at
      session init (rip_init_first). A zero seed is valid — first
      output will be 12345.
 
@@ -147,8 +147,8 @@ trigger sound events on the host platform.
 
 $BEEP$
      Action:   Send BEL (0x07) via TX queue.
-     On IIgs:  IIgs bridge plays the system BELL sound.
-     On desktop: Platform beep.
+     RIPlib:   Pushes BEL (0x07) into the TX FIFO.  The host
+               is expected to ring an audible bell on receipt.
      Expands to: "" (empty string)
 
 $BLIP$
@@ -168,9 +168,9 @@ $MUSIC$
      Expands to: "" (empty string)
 
      On the original DLL, these called a host callback function
-     for sound playback. On A2GSPU, the sound token bytes are
-     forwarded to the IIgs via the USB TX queue, where the IIgs
-     Ensoniq DOC sound chip handles playback.
+     for sound playback.  In RIPlib, the sound token bytes are
+     pushed through the TX FIFO; the host application is
+     responsible for any actual audio synthesis or playback.
 
 
 ---------------------------------------------------------------------
@@ -230,7 +230,7 @@ $TEXTDATA$
      Value:    "" (empty on embedded)
      Description: Returns the contents of the bounded text buffer.
                   On the DLL, this held text from the most recent
-                  text block. On A2GSPU, text is rendered
+                  text block.  In RIPlib, text is rendered
                   immediately and not buffered, so this always
                   returns empty.
 

@@ -1,22 +1,24 @@
 /*
- * ripscrip2.h — RIPscrip 2.0 protocol extensions for A2GSPU card
+ * ripscrip2.h — RIPscrip 2.0+ protocol extensions for RIPlib
  *
- * TeleGrafix Communications, 1994-1995. Extends RIPscrip 1.54 with:
+ * TeleGrafix Communications, 1994-1995.  Extends RIPscrip 1.54 with:
  *   - 256-color VGA palette (up from 16-color EGA)
  *   - Enhanced GUI widgets (windows, scrollbars, menus, dialogs)
  *   - Scalable text with rotation
  *   - Improved button/mouse region system
  *   - Clipboard operations
  *
- * RIPscrip 2.0 was never widely deployed. TeleGrafix went defunct
- * circa 1996. No complete implementation exists in the wild besides
+ * RIPscrip 2.0 was never widely deployed.  TeleGrafix went defunct
+ * circa 1996.  No complete implementation exists in the wild besides
  * the original never-released RIPterm 2.0 client.
  *
- * This parser extends ripscrip.c (1.54) with 2.0-specific commands.
- * The base !| frame detection and MegaNum decoding are shared.
+ * This parser extends ripscrip.c (1.54) with 2.0+ commands and the
+ * v3.x §A2G extensions (see docs/spec/06-v31-extensions.md and
+ * 06a-v32-extensions.md).  The base !| frame detection and MegaNum
+ * decoding are shared with ripscrip.c.
  *
  * Copyright (c) 2026 SimVU (Brad Hawthorne)
- * Licensed under the MIT License. See LICENSE.
+ * Licensed under the MIT License.  See LICENSE.
  */
 
 #pragma once
@@ -43,8 +45,8 @@
 #define RIP2_CMD_PORT_COPY      'C'  /* !|2C — copy pixels between ports */
 #define RIP2_CMD_PORT_SWITCH    's'  /* !|2s — switch active port */
 
-/* A2GSPU v3.1 Extensions — dead-code activation from DLL binary analysis */
-#define RIP2_CMD_CHORD          'c'  /* Chord drawing (DLL RVA 0x012663) */
+/* RIPlib v3.1 (§A2G.1-7) extensions */
+#define RIP2_CMD_CHORD          'c'  /* Chord drawing */
 #define RIP2_CMD_SET_REFRESH    'R'  /* Host-triggered screen refresh */
 #define RIP2_CMD_PORT_FLAGS     'F'  /* Extended port attributes (alpha/mode/zorder) */
 

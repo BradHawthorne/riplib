@@ -242,6 +242,89 @@ v3.1 activates them with working implementations.
      bottom, and baseline justification all functional.
 
 
+---------------------------------------------------------------------
+11.6  RIPlib SPEC/CODE RECONCILIATION (2026-05-30 re-audit, C-012)
+---------------------------------------------------------------------
+
+The Opus-4.8 re-audit found a cluster of places where RIPlib's
+implementation diverges from `docs/spec/01..10`.  Per HR-001, each is
+either fixed in code or recorded here.  The items below are the
+"documented deviation" set: the code matches (or plausibly matches)
+observed RIPSCRIP.DLL behaviour and the spec text is the incomplete
+side.  (The "fix in code" set — text escapes `\^`/`\n`, fill-pattern
+range clamp, the BGI table-order comment, the 1U single-segment
+fallback — was applied directly and is not repeated here.)
+
+§DEV.1 — RIP_MOUSE ('1M') reserved field:
+     Spec §3.2 lists fixed parameters totalling 11 characters
+     (x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1) with text immediately
+     after.  The implementation consumes 17 characters before the text
+     (an extra res:4 after the flags digit), matching the DLL's record
+     layout and the parallel ':' RIP_MOUSE_REGION_EXT field.  Streams
+     whose `1M` text is not preceded by 4 reserved chars lose their
+     first 4 text bytes.  GROUND TRUTH UNRESOLVED (U-024): if a real
+     capture shows the DLL used 11, this flips to a code fix.
+
+§DEV.2 — RIP_DEFINE ('1D') argument grammar:
+     Spec §3.18 shows `!|1D<name>=<value>` (example `!|1DMYVAR=...`).
+     The implementation consumes a `flags:3 res:2` prelude before the
+     `name=value` text and additionally accepts a
+     `$APPn$:?prompt?default` form.  The documented bare example would
+     have its first 5 characters eaten as flags/reserved.  The richer
+     grammar matches DLL/RIPterm behaviour, so §3.18 is treated as the
+     oversimplified side.  GROUND TRUTH UNRESOLVED (U-025).
+
+§DEV.3 — Undocumented-but-implemented commands:
+     The parser accepts several commands absent from the spec command
+     tables (§2/§3/§4/§A.1):
+        Level 1:  '1V' RIP_SET_VIEWPORT_EXT, '1X' RIP_CLIPBOARD_OP,
+                  '1R' RIP_READ_SCENE
+        Level 0:  0x60 backtick = RIP_COMPOSITE_ICON (full impl),
+                  '(' / ')' group markers (no-op stubs),
+                  '!' comment marker (`!|!…|`)
+     These are additive (a stream that doesn't use them is unaffected).
+     Whether they are RIPlib extensions or recovered DLL commands is
+     UNRESOLVED (U-026); documented here so the dispatch surface is
+     fully described.
+
+§DEV.4 — 8×8 bitmap font not provided:
+     Spec §8.1 documents two CP437 bitmap faces (8×8 and 8×16)
+     selectable for font ID 0.  RIPlib ships and renders only the 8×16
+     face; every bitmap text path hardcodes `cp437_8x16`/height 16.
+     The `font_size` field is parsed/stored but never selects an 8×8
+     glyph table.  Bitmap text still renders; only the smaller face is
+     unavailable.
+
+§DEV.5 — RIP_SCALABLE_TEXT ('26') scale cap:
+     Spec §5.9 / §4.17 advertise scalable text "beyond the standard
+     1-10" range.  The implementation masks the scale parameter with
+     `& 0x07` (0-7), silently truncating 8 and 9.  Documented as a
+     known limitation rather than fixed (no consumer is known to send
+     scales above 7).
+
+§DEV.6 — RIP_SET_WINDOW ('22') chrome:
+     Spec §5.10 defines `22` as `x:2 y:2 w:2 h:2` with no visual
+     specification.  The implementation unconditionally paints a fixed
+     light-gray frame and blue title bar (colours the spec does not
+     define).  Cosmetic; documented so the fixed chrome is not mistaken
+     for a bug.
+
+§DEV.7 — Icon lookup order:
+     Spec §9.2 lists the lookup order as flash-BMP → flash-ICN →
+     runtime cache.  The implementation checks the runtime cache FIRST
+     (cache → flash-BMP → flash-ICN) so a runtime-cached or
+     clipboard-stamped icon supersedes a same-named flash asset.  This
+     is a deliberate choice (lets a stream override a built-in icon),
+     not a parsing bug.
+
+§DEV.8 — Text escape set (note on the applied code fix):
+     Spec §1.6 / §7.1 define escapes `\\ \| \^ \n`.  RIPlib's
+     `unescape_text` now implements all four AND additionally accepts
+     `\!` as a literal '!' — a RIPlib extension, because '!' is the
+     command-frame lead-in and a literal '!' in text would otherwise be
+     ambiguous.  Consumers and stream authors may rely on `\!`; it is
+     a strict superset of the spec.
+
 =====================================================================
 ==                    END OF SEGMENT 11                             ==
 ==           DLL Deviations, Errata & Known Bugs                   ==

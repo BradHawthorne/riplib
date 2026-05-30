@@ -5,7 +5,7 @@
 #pragma once
 #include <stdint.h>
 
-/* const data is placed in flash by default on RP2350 (XIP).
+/* const data is placed in flash (XIP) by default on embedded targets.
  * 4096 bytes = 256 chars × 16 scanlines × 1 byte per scanline. */
 static const uint8_t cp437_8x16[4096] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  /*   0 */

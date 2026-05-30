@@ -1,12 +1,15 @@
 /*
- * rip_icons.h — RIPscrip icon loader for A2GSPU card
+ * rip_icons.h — RIPscrip icon loader for RIPlib
  *
  * Two-tier icon lookup:
- *   1. Flash-embedded icons (rip_icons_data.c, built from RIPtel BMPs)
- *   2. PSRAM runtime cache (populated via BMP parser from file transfer)
+ *   1. Statically-embedded icons (rip_icons_data.c, built from the
+ *      RIPtel BMP set; live in flash on embedded targets)
+ *   2. Runtime cache (populated via the BMP parser from file transfer
+ *      data; backed by the psram_arena which is malloc()-backed on
+ *      desktop targets and PSRAM-backed on embedded)
  *
  * Copyright (c) 2026 SimVU (Brad Hawthorne)
- * Licensed under the MIT License. See LICENSE.
+ * Licensed under the MIT License.  See LICENSE.
  */
 
 #pragma once
@@ -96,7 +99,7 @@ int rip_icon_cache_count(const rip_icon_state_t *state);
  * the LOAD_ICON command.
  *
  * This is a stub interface — the host polling and file transfer
- * protocol are implemented in the ProDOS terminal app (future). */
+ * protocol are implemented by the host application (out of scope). */
 
 /* Queue a file request. Returns true if queued, false if full. */
 bool rip_icon_request_file(rip_icon_state_t *state,
@@ -109,7 +112,7 @@ int rip_icon_pending_requests(const rip_icon_state_t *state);
 int rip_icon_dequeue_request(rip_icon_state_t *state,
                              char *name_out, int max_len);
 
-/* Codex FIX 4: Clear the entire pending request queue.
+/* Clear the entire pending request queue.
  * Called from rip_session_reset() on BBS disconnect so that icon
  * requests from a previous session are not replayed to the next BBS. */
 void rip_icon_clear_requests(rip_icon_state_t *state);

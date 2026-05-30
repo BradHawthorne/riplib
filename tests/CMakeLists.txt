@@ -22,3 +22,13 @@ target_link_libraries(test_compat PRIVATE riplib)
 target_include_directories(test_compat PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_test(NAME compat_tests COMMAND test_compat)
+
+# ── Optional libFuzzer harness ───────────────────────────────────
+# Build with: cmake -DRIPLIB_BUILD_FUZZ=ON -DCMAKE_C_COMPILER=clang \
+#                   -DCMAKE_C_FLAGS="-fsanitize=fuzzer,address,undefined -g -O1"
+# The target is not registered with ctest because libFuzzer drives its own
+# runner.  Run manually:  ./build/tests/fuzz_parser -max_total_time=60
+if(RIPLIB_BUILD_FUZZ)
+    add_executable(fuzz_parser fuzz_parser.c)
+    target_link_libraries(fuzz_parser PRIVATE riplib)
+endif()

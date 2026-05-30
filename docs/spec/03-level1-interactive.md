@@ -308,8 +308,10 @@ not a persistent filesystem write.
      Arguments:    filename (free-form text)
      Format:       !|1A<filename>|
 
-Requests playback of an audio file. On A2GSPU, the filename
-is forwarded to the IIgs via the TX queue for native sound.
+Requests playback of an audio file.  RIPlib has no built-in
+audio path; consumers receive the filename via the TX FIFO
+(prefixed with the CMD_PLAY_SOUND marker) and dispatch it to
+their own sound subsystem.
 
 
 ---------------------------------------------------------------------
@@ -321,7 +323,8 @@ is forwarded to the IIgs via the TX queue for native sound.
      Arguments:    filename (free-form text)
      Format:       !|1Z<filename>|
 
-Requests MIDI playback. Forwarded to IIgs Ensoniq DOC chip.
+Requests MIDI playback.  Forwarded to the host audio subsystem
+via the TX FIFO; RIPlib itself does not synthesize MIDI.
 
 
 ---------------------------------------------------------------------

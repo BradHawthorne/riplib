@@ -1,16 +1,25 @@
 /*
- * ripscrip.c — RIPscrip 1.54 graphics protocol parser for A2GSPU card
+ * ripscrip.c — RIPscrip v1.54+ graphics protocol parser for RIPlib
  *
- * TeleGrafix RIPscrip (1992-1994). Vector graphics protocol for BBSes.
- * !| prefix, | terminator, base-36 MegaNum parameters, EGA 640×350
- * coordinates scaled to 640×400. Highest "wow factor" protocol — full
- * color vector art, buttons, mouse regions, text windows.
+ * TeleGrafix RIPscrip (1992-1994).  Vector graphics protocol for BBSes.
+ * !| prefix, | terminator, base-36 MegaNum parameters; native coordinate
+ * space is EGA 640×350.  Highest "wow factor" terminal protocol of the
+ * BBS era — full-color vector art, buttons, mouse regions, text
+ * windows, scriptable preprocessor.
  *
- * Reference: TeleGrafix RIPscrip 1.54 specification (RIPSCRIP.DOC)
- * Reference: RIPtermJS (JavaScript implementation)
+ * Reference: TeleGrafix RIPscrip v1.54 specification (RIPSCRIP.DOC,
+ *            included in docs/historical/) and the RIPlib spec under
+ *            docs/spec/.
+ * Reference: RIPtermJS (JavaScript implementation, public archive).
+ *
+ * NOTE: This file historically carried inline "FIX *" / "Codex FIX N"
+ * labels from the pre-extraction audit work.  Those have been
+ * scrubbed; the label → meaning index for anyone needing to cross-
+ * reference a prior commit is preserved in
+ * consumer-handoff/a2gspu/integration-notes.md.
  *
  * Copyright (c) 2026 SimVU (Brad Hawthorne)
- * Licensed under the MIT License. See LICENSE.
+ * Licensed under the MIT License.  See LICENSE.
  */
 
 #include "ripscrip.h"
@@ -28,13 +37,26 @@
 #include "font_bgi_lcom.h"
 #include "font_bgi_euro.h"
 #include "font_bgi_bold.h"
-#include <stdlib.h> /* atoi() — used by eval_if_expr() for numeric comparisons */
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>  /* time_t, time(), localtime() — RTC fallback for $DATE$/$TIME$ */
 
 #include "rip_icons.h"
 #include "rip_icn.h"
+#include "rip_preproc.h"    /* extracted preprocessor subsystem (C-002 step 1) */
+#include "rip_variables.h"  /* extracted variable engine (C-002 step 2) */
+#include "rip_meganum.h"
+/* The base-36 decoders are exported by rip_meganum.h under their rip_*
+ * names.  This TU uses the historical short names; the aliases are kept
+ * here (C-016) rather than in the shared header so that header does not
+ * leak unprefixed macros (mega2/…) into every file that includes it. */
+#define mega_digit rip_mega_digit
+#define mega2      rip_mega2
+#define mega3      rip_mega3
+#define mega4      rip_mega4    /* extracted MegaNum decoder (C-002 step 3) */
+#include "rip_clipboard.h"  /* extracted clipboard + blit (C-002 step 6) */
+#include "rip_internal.h"   /* shared inline helpers (rip_strnlen, rip_filename_is_safe) */
 /* rip_raf: stubbed in riplib */
 #include "font_cp437_8x16.h"
 
@@ -96,48 +118,21 @@ static void apply_session_draw_state(rip_state_t *s);
 static void rip_upload_reset(rip_state_t *s);
 static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_len,
                                    const uint8_t *data, int size);
-static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c);
+/* rip_reset_windows_state is defined non-static below so the extracted
+ * rip_variables.c module can reach it from the $RESET$ text variable. */
+void rip_reset_windows_state(rip_state_t *s, comp_context_t *c);
 
-/* Card->host TX FIFO helper (implemented in main.c / emulator stubs). */
+/* Library->host TX FIFO helper (implemented by the consumer's
+ * platform-stubs translation unit — see examples/platform_stubs.c). */
 extern void card_tx_push(const char *buf, int len);
 
 /* FILE UPLOAD — receive BMP/ICN data from host for PSRAM caching */
 #define FILE_UPLOAD_MAX  (128 * 1024)  /* 128KB max per file */
 
-/* ══════════════════════════════════════════════════════════════════
- * MEGANUM DECODER — base-36 parameter encoding
- * ══════════════════════════════════════════════════════════════════ */
+/* MegaNum decoder (base-36 parameter encoding) lives in
+ * src/rip_meganum.h as static-inline helpers.  See that file's header
+ * comment for the rationale of the header-only extraction. */
 
-static int mega_digit(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'A' && ch <= 'Z') return ch - 'A' + 10;
-    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 10;
-    return 0;
-}
-
-static int16_t mega2(const char *p) {
-    return (int16_t)(mega_digit(p[0]) * 36 + mega_digit(p[1]));
-}
-
-static int32_t mega3(const char *p) {
-    return (int32_t)(mega_digit(p[0]) * 1296 +
-                     mega_digit(p[1]) * 36 +
-                     mega_digit(p[2]));
-}
-
-static int32_t mega4(const char *p) {
-    return (int32_t)(mega_digit(p[0]) * 46656 + mega_digit(p[1]) * 1296 +
-                     mega_digit(p[2]) * 36 + mega_digit(p[3]));
-}
-
-static size_t rip_strnlen(const char *s, size_t max_len) {
-    size_t n = 0;
-    if (!s)
-        return 0;
-    while (n < max_len && s[n] != '\0')
-        n++;
-    return n;
-}
 
 /* Scale RIPscrip Y (640×350) to card Y (640×400).
  * Two variants prevent gaps between adjacent rectangles:
@@ -171,231 +166,7 @@ static void clamp_ega_rect(int16_t *x0, int16_t *y0,
     *y1 = ty1;
 }
 
-static bool rip_filename_is_safe(const char *name, int len) {
-    if (!name || len <= 0)
-        return false;
 
-    for (int i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)name[i];
-        if (c < 0x20u || c == 0x7Fu)
-            return false;
-        if (c == '/' || c == '\\' || c == ':')
-            return false;
-        if (c == '.' && i + 1 < len && name[i + 1] == '.')
-            return false;
-    }
-
-    return true;
-}
-
-static bool rip_var_name_copy(const char *name, int len,
-                              char *out, int out_cap) {
-    int start = 0;
-    int end = len;
-    int n;
-
-    if (!name || !out || out_cap <= 0 || len <= 0)
-        return false;
-    while (start < end && (name[start] == ' ' || name[start] == '\t'))
-        start++;
-    while (end > start && (name[end - 1] == ' ' || name[end - 1] == '\t'))
-        end--;
-    if (end - start >= 2 && name[start] == '$' && name[end - 1] == '$') {
-        start++;
-        end--;
-    }
-    n = end - start;
-    if (n <= 0 || n >= out_cap)
-        return false;
-    for (int i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)name[start + i];
-        if (!((c >= 'A' && c <= 'Z') ||
-              (c >= 'a' && c <= 'z') ||
-              (c >= '0' && c <= '9') ||
-              c == '_'))
-            return false;
-        out[i] = (char)c;
-    }
-    out[n] = '\0';
-    return true;
-}
-
-static bool rip_var_name_eq(const char *stored, const char *name, int len) {
-    int slen;
-
-    if (!stored || !name || len <= 0)
-        return false;
-    slen = (int)strlen(stored);
-    if (slen != len)
-        return false;
-    return memcmp(stored, name, (size_t)len) == 0;
-}
-
-static int rip_user_var_find(const rip_state_t *s, const char *name, int len) {
-    if (!s || !name || len <= 0)
-        return -1;
-    for (int i = 0; i < s->user_var_count && i < RIP_USER_VAR_MAX; i++) {
-        if (rip_var_name_eq(s->user_var_names[i], name, len))
-            return i;
-    }
-    return -1;
-}
-
-static bool rip_user_var_set(rip_state_t *s,
-                             const char *name, int name_len,
-                             const char *value, int value_len) {
-    char key[RIP_USER_VAR_NAME_MAX + 1];
-    int idx;
-    int copy;
-
-    if (!s || !value || value_len < 0)
-        return false;
-    if (!rip_var_name_copy(name, name_len, key, sizeof(key)))
-        return false;
-    if (rip_var_name_eq(key, "APP0", 4) ||
-        rip_var_name_eq(key, "APP1", 4) ||
-        rip_var_name_eq(key, "APP2", 4) ||
-        rip_var_name_eq(key, "APP3", 4) ||
-        rip_var_name_eq(key, "APP4", 4) ||
-        rip_var_name_eq(key, "APP5", 4) ||
-        rip_var_name_eq(key, "APP6", 4) ||
-        rip_var_name_eq(key, "APP7", 4) ||
-        rip_var_name_eq(key, "APP8", 4) ||
-        rip_var_name_eq(key, "APP9", 4)) {
-        int app = key[3] - '0';
-        copy = value_len < (int)sizeof(s->app_vars[0]) - 1
-             ? value_len
-             : (int)sizeof(s->app_vars[0]) - 1;
-        memcpy(s->app_vars[app], value, (size_t)copy);
-        s->app_vars[app][copy] = '\0';
-        return true;
-    }
-
-    idx = rip_user_var_find(s, key, (int)strlen(key));
-    if (idx < 0) {
-        if (s->user_var_count >= RIP_USER_VAR_MAX)
-            return false;
-        idx = s->user_var_count++;
-        strcpy(s->user_var_names[idx], key);
-    }
-    copy = value_len < RIP_USER_VAR_VALUE_MAX ? value_len : RIP_USER_VAR_VALUE_MAX;
-    memcpy(s->user_var_values[idx], value, (size_t)copy);
-    s->user_var_values[idx][copy] = '\0';
-    return true;
-}
-
-static bool rip_query_prompt_begin(rip_state_t *s,
-                                   const char *vname, int vlen) {
-    char prompt_buf[40];
-    int plen = 0;
-    int copy;
-
-    if (!s || !vname || vlen <= 0 || s->query_pending)
-        return false;
-
-    prompt_buf[plen++] = (char)0x3E;  /* CMD_QUERY_PROMPT marker */
-    copy = vlen < (int)sizeof(prompt_buf) - 2
-         ? vlen
-         : (int)sizeof(prompt_buf) - 2;
-    for (int k = 0; k < copy; k++)
-        prompt_buf[plen++] = vname[k];
-    prompt_buf[plen++] = '\0';
-    card_tx_push(prompt_buf, plen);
-
-    copy = vlen < (int)sizeof(s->query_var_name) - 1
-         ? vlen
-         : (int)sizeof(s->query_var_name) - 1;
-    memcpy(s->query_var_name, vname, (size_t)copy);
-    s->query_var_name[copy] = '\0';
-    memset(s->query_response, 0, sizeof(s->query_response));
-    s->query_response_len = 0;
-    s->query_pending = true;
-    return true;
-}
-
-static bool rip_parse_host_date(const char *date, int *year, int *month, int *day) {
-    int mm;
-    int dd;
-    int yy;
-
-    if (!date || !year || !month || !day)
-        return false;
-    if (!(date[0] >= '0' && date[0] <= '9' &&
-          date[1] >= '0' && date[1] <= '9' &&
-          date[2] == '/' &&
-          date[3] >= '0' && date[3] <= '9' &&
-          date[4] >= '0' && date[4] <= '9' &&
-          date[5] == '/' &&
-          date[6] >= '0' && date[6] <= '9' &&
-          date[7] >= '0' && date[7] <= '9'))
-        return false;
-    mm = (date[0] - '0') * 10 + (date[1] - '0');
-    dd = (date[3] - '0') * 10 + (date[4] - '0');
-    yy = (date[6] - '0') * 10 + (date[7] - '0');
-    if (mm < 1 || mm > 12 || dd < 1 || dd > 31)
-        return false;
-    *year = 2000 + yy;
-    *month = mm;
-    *day = dd;
-    return true;
-}
-
-static bool rip_is_leap_year(int year) {
-    return ((year % 4) == 0 && (year % 100) != 0) || (year % 400) == 0;
-}
-
-static int rip_day_of_year(int year, int month, int day) {
-    static const int month_offsets[12] =
-        { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-    int yday = month_offsets[month - 1] + day;
-    if (month > 2 && rip_is_leap_year(year))
-        yday++;
-    return yday;
-}
-
-static int rip_days_from_civil(int year, int month, int day) {
-    int y = year;
-    unsigned m = (unsigned)month;
-    unsigned d = (unsigned)day;
-    unsigned mp;
-    int era;
-    unsigned yoe;
-    unsigned doy;
-    unsigned doe;
-
-    y -= (m <= 2u);
-    era = (y >= 0 ? y : y - 399) / 400;
-    yoe = (unsigned)(y - era * 400);
-    mp = (m > 2u) ? (m - 3u) : (m + 9u);
-    doy = (153u * mp + 2u) / 5u + d - 1u;
-    doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
-    return era * 146097 + (int)doe - 719468;
-}
-
-static int rip_weekday_monday0(int year, int month, int day) {
-    int days = rip_days_from_civil(year, month, day);
-    int dow = (days + 3) % 7; /* 1970-01-01 was Thursday. */
-    if (dow < 0)
-        dow += 7;
-    return dow;
-}
-
-static int rip_iso_weeks_in_year(int year) {
-    int jan1 = rip_weekday_monday0(year, 1, 1);
-    return (jan1 == 3 || (jan1 == 2 && rip_is_leap_year(year))) ? 53 : 52;
-}
-
-static int rip_iso_week(int year, int month, int day) {
-    int doy = rip_day_of_year(year, month, day);
-    int dow = rip_weekday_monday0(year, month, day) + 1; /* Monday=1 */
-    int week = (doy - dow + 10) / 7;
-
-    if (week < 1)
-        return rip_iso_weeks_in_year(year - 1);
-    if (week > rip_iso_weeks_in_year(year))
-        return 1;
-    return week;
-}
 
 static void rip_upload_reset(rip_state_t *s) {
     if (!s) return;
@@ -441,299 +212,6 @@ static uint8_t palette_slot(int idx) {
     return (uint8_t)(240 + idx);
 }
 
-static bool rip_clipboard_alloc(rip_state_t *s) {
-    if (!s)
-        return false;
-    if (!s->clipboard.data) {
-        s->clipboard.data = (uint8_t *)psram_arena_alloc(&s->psram_arena,
-                                                         RIP_CLIPBOARD_MAX);
-    }
-    return s->clipboard.data != NULL;
-}
-
-static bool rip_clipboard_store_pixels(rip_state_t *s,
-                                       const uint8_t *pixels,
-                                       uint16_t width,
-                                       uint16_t height) {
-    size_t bytes;
-
-    if (!s || !pixels || width == 0 || height == 0)
-        return false;
-
-    bytes = (size_t)width * (size_t)height;
-    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
-        return false;
-    if (!rip_clipboard_alloc(s))
-        return false;
-
-    memmove(s->clipboard.data, pixels, bytes);
-    s->clipboard.width = (int16_t)width;
-    s->clipboard.height = (int16_t)height;
-    s->clipboard.valid = true;
-    return true;
-}
-
-static bool rip_clipboard_capture(rip_state_t *s,
-                                  int16_t x, int16_t y,
-                                  int16_t width, int16_t height) {
-    size_t bytes;
-
-    if (!s || width <= 0 || height <= 0)
-        return false;
-
-    bytes = (size_t)(uint16_t)width * (size_t)(uint16_t)height;
-    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
-        return false;
-    if (!rip_clipboard_alloc(s))
-        return false;
-
-    draw_save_region(x, y, width, height, s->clipboard.data);
-    s->clipboard.width = width;
-    s->clipboard.height = height;
-    s->clipboard.valid = true;
-    return true;
-}
-
-static bool rip_cache_clipboard_as_icon(rip_state_t *s,
-                                        const char *name,
-                                        int name_len,
-                                        rip_icon_t *out_icon) {
-    size_t bytes;
-    uint8_t *pixels;
-
-    if (!s || !s->clipboard.valid || !s->clipboard.data ||
-        !rip_filename_is_safe(name, name_len))
-        return false;
-
-    bytes = (size_t)(uint16_t)s->clipboard.width *
-            (size_t)(uint16_t)s->clipboard.height;
-    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
-        return false;
-
-    pixels = (uint8_t *)psram_arena_alloc(&s->psram_arena, (uint32_t)bytes);
-    if (!pixels)
-        return false;
-
-    memcpy(pixels, s->clipboard.data, bytes);
-    if (!rip_icon_cache_pixels_replace(&s->icon_state, name, name_len, pixels,
-                                       (uint16_t)s->clipboard.width,
-                                       (uint16_t)s->clipboard.height))
-        return false;
-
-    if (out_icon) {
-        out_icon->pixels = pixels;
-        out_icon->width = (uint16_t)s->clipboard.width;
-        out_icon->height = (uint16_t)s->clipboard.height;
-    }
-    return true;
-}
-
-static bool rip_save_clipboard_slot(rip_state_t *s, uint16_t slot) {
-    size_t bytes;
-    uint8_t *pixels;
-    char slot_name[RIP_ICON_NAME_MAX + 1];
-
-    if (!s || slot >= RIP_ICON_SLOT_MAX ||
-        !s->clipboard.valid || !s->clipboard.data)
-        return false;
-
-    bytes = (size_t)(uint16_t)s->clipboard.width *
-            (size_t)(uint16_t)s->clipboard.height;
-    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
-        return false;
-
-    pixels = (uint8_t *)psram_arena_alloc(&s->psram_arena, (uint32_t)bytes);
-    if (!pixels)
-        return false;
-    memcpy(pixels, s->clipboard.data, bytes);
-
-    s->icon_slots[slot].pixels = pixels;
-    s->icon_slots[slot].width = (uint16_t)s->clipboard.width;
-    s->icon_slots[slot].height = (uint16_t)s->clipboard.height;
-    s->icon_slot_valid[slot] = true;
-
-    snprintf(slot_name, sizeof(slot_name), "SLOT%02u", (unsigned)slot);
-    (void)rip_icon_cache_pixels_replace(&s->icon_state, slot_name,
-                                        (int)strlen(slot_name),
-                                        pixels,
-                                        (uint16_t)s->clipboard.width,
-                                        (uint16_t)s->clipboard.height);
-    return true;
-}
-
-static void rip_blit_pixels(rip_state_t *s,
-                            int16_t dx, int16_t dy,
-                            const uint8_t *pixels,
-                            uint16_t src_w, uint16_t src_h,
-                            int16_t dst_w, int16_t dst_h,
-                            uint8_t write_mode) {
-    uint8_t old_color;
-
-    if (!pixels || src_w == 0 || src_h == 0 || dst_w <= 0 || dst_h <= 0)
-        return;
-    if (write_mode > DRAW_MODE_NOT)
-        write_mode = DRAW_MODE_COPY;
-
-    old_color = draw_get_color();
-    draw_set_write_mode(write_mode);
-
-    if (dst_w == (int16_t)src_w && dst_h == (int16_t)src_h) {
-        draw_restore_region(dx, dy, dst_w, dst_h, pixels);
-    } else {
-        for (int16_t yy = 0; yy < dst_h; yy++) {
-            uint16_t sy = (uint16_t)(((uint32_t)(uint16_t)yy * src_h) /
-                                     (uint16_t)dst_h);
-            for (int16_t xx = 0; xx < dst_w; xx++) {
-                uint16_t sx = (uint16_t)(((uint32_t)(uint16_t)xx * src_w) /
-                                         (uint16_t)dst_w);
-                draw_set_color(pixels[(size_t)sy * src_w + sx]);
-                draw_pixel((int16_t)(dx + xx), (int16_t)(dy + yy));
-            }
-        }
-    }
-
-    draw_set_write_mode(s ? s->write_mode : DRAW_MODE_COPY);
-    draw_set_color(old_color);
-}
-
-static void rip_blit_pixels_tiled(rip_state_t *s,
-                                  int16_t x0, int16_t y0,
-                                  int16_t x1, int16_t y1,
-                                  const uint8_t *pixels,
-                                  uint16_t src_w, uint16_t src_h,
-                                  uint8_t write_mode) {
-    draw_clip_state_t saved_clip;
-
-    if (!pixels || src_w == 0 || src_h == 0 || x1 < x0 || y1 < y0)
-        return;
-
-    draw_save_clip(&saved_clip);
-    draw_set_clip(x0, y0, x1, y1);
-    for (int16_t y = y0; y <= y1; y = (int16_t)(y + src_h)) {
-        for (int16_t x = x0; x <= x1; x = (int16_t)(x + src_w)) {
-            rip_blit_pixels(s, x, y, pixels, src_w, src_h,
-                            (int16_t)src_w, (int16_t)src_h, write_mode);
-            if (src_w == 0)
-                break;
-        }
-        if (src_h == 0)
-            break;
-    }
-    draw_restore_clip(&saved_clip);
-}
-
-static void rip_draw_icon_pixels(rip_state_t *s,
-                                 int16_t x, int16_t y,
-                                 const uint8_t *pixels,
-                                 uint16_t src_w, uint16_t src_h,
-                                 int16_t requested_w,
-                                 int16_t requested_h,
-                                 uint8_t write_mode) {
-    bool has_box;
-    int16_t bx0;
-    int16_t by0;
-    int16_t bx1;
-    int16_t by1;
-    int16_t dst_w;
-    int16_t dst_h;
-    uint8_t mode;
-
-    if (!s || !pixels || src_w == 0 || src_h == 0)
-        return;
-
-    has_box = (requested_w > 0 && requested_h > 0);
-    if (has_box) {
-        bx0 = x;
-        by0 = y;
-        bx1 = (int16_t)(x + requested_w - 1);
-        by1 = (int16_t)(y + requested_h - 1);
-    } else if (s->icon_style_active) {
-        bx0 = s->icon_style_x0;
-        by0 = s->icon_style_y0;
-        bx1 = s->icon_style_x1;
-        by1 = s->icon_style_y1;
-    } else {
-        rip_blit_pixels(s, x, y, pixels, src_w, src_h,
-                        (int16_t)src_w, (int16_t)src_h, write_mode);
-        return;
-    }
-
-    if (bx0 > bx1) { int16_t t = bx0; bx0 = bx1; bx1 = t; }
-    if (by0 > by1) { int16_t t = by0; by0 = by1; by1 = t; }
-    dst_w = (int16_t)(bx1 - bx0 + 1);
-    dst_h = (int16_t)(by1 - by0 + 1);
-    if (dst_w <= 0 || dst_h <= 0)
-        return;
-
-    mode = s->icon_style_active ? (uint8_t)(s->icon_style_style & 0x03u)
-                                : (uint8_t)(s->image_style & 0x03u);
-
-    if (mode == 1) {
-        rip_blit_pixels_tiled(s, bx0, by0, bx1, by1, pixels, src_w, src_h,
-                              write_mode);
-        return;
-    }
-
-    if (mode == 2) {
-        dst_w = (int16_t)src_w;
-        dst_h = (int16_t)src_h;
-        if ((s->icon_style_align & 0x03u) == 2u) {
-            bx0 = (int16_t)(bx1 - dst_w + 1);
-            by0 = (int16_t)(by1 - dst_h + 1);
-        } else {
-            bx0 = (int16_t)(bx0 + ((bx1 - bx0 + 1) - dst_w) / 2);
-            by0 = (int16_t)(by0 + ((by1 - by0 + 1) - dst_h) / 2);
-        }
-    } else if (mode == 3) {
-        int32_t w_fit = (int32_t)(bx1 - bx0 + 1);
-        int32_t h_fit = ((int32_t)w_fit * src_h) / src_w;
-        if (h_fit > (int32_t)(by1 - by0 + 1)) {
-            h_fit = (int32_t)(by1 - by0 + 1);
-            w_fit = ((int32_t)h_fit * src_w) / src_h;
-        }
-        if (w_fit <= 0) w_fit = 1;
-        if (h_fit <= 0) h_fit = 1;
-        dst_w = (int16_t)w_fit;
-        dst_h = (int16_t)h_fit;
-        bx0 = (int16_t)(bx0 + ((bx1 - bx0 + 1) - dst_w) / 2);
-        by0 = (int16_t)(by0 + ((by1 - by0 + 1) - dst_h) / 2);
-    }
-
-    rip_blit_pixels(s, bx0, by0, pixels, src_w, src_h, dst_w, dst_h,
-                    write_mode);
-}
-
-static void rip_copy_screen_region_scaled(rip_state_t *s,
-                                          int16_t sx, int16_t sy,
-                                          int16_t sw, int16_t sh,
-                                          int16_t dx, int16_t dy,
-                                          int16_t dw, int16_t dh,
-                                          uint8_t write_mode) {
-    size_t bytes;
-    uint8_t *scratch;
-
-    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
-        return;
-    if (write_mode > DRAW_MODE_NOT)
-        write_mode = DRAW_MODE_COPY;
-
-    if (sw == dw && sh == dh && write_mode == DRAW_MODE_COPY) {
-        draw_copy_rect(sx, sy, dx, dy, sw, sh);
-        return;
-    }
-
-    bytes = (size_t)(uint16_t)sw * (size_t)(uint16_t)sh;
-    if (bytes == 0)
-        return;
-
-    scratch = (uint8_t *)malloc(bytes);
-    if (!scratch)
-        return;
-    draw_save_region(sx, sy, sw, sh, scratch);
-    rip_blit_pixels(s, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
-                    dw, dh, write_mode);
-    free(scratch);
-}
 
 static int rip_font_id_from_name(const char *name, int len) {
     static const struct {
@@ -869,7 +347,7 @@ void rip_apply_palette(void) {
     }
 }
 
-/* Codex FIX 1: Boot-time init — call ONCE at power-on (or on first use).
+/* Boot-time init — call ONCE at power-on (or on first use).
  * Performs the full memset, arena reservation, drawing defaults, and BGI
  * font parse.  Calling this on a mid-session protocol switch would wipe
  * session state (clipboard, mouse regions, text variables, PSRAM arena).
@@ -908,11 +386,11 @@ void rip_init_first(rip_state_t *s) {
 
     g_rip_state = s;
     s->draw_color = 15; /* white */
-    s->back_color = 0;  /* Fix Q2: background color — default black (DLL GFXSTYLE+0x02) */
+    s->back_color = 0;  /* Background color — default black */
     s->line_pattern = 0xFFFF;
     s->line_thick = 1;
     s->fill_pattern = 1; /* solid */
-    s->fill_color = 15; /* Fix B4: default fill_color is white (15), not black (rip_defaults.c:113) */
+    s->fill_color = 15; /* Default fill_color is white (15), not black — matches DLL rip_defaults */
     s->font_size = 1;
     s->tw_x1 = 639;
     s->tw_y1 = 349;
@@ -940,16 +418,18 @@ void rip_init_first(rip_state_t *s) {
     s->color_bits = 0;
     s->filled_borders_enabled = true;
 
-    /* A2GSPU v3.1: application variables and overflow pagination */
+    /* v3.1: application variables and overflow pagination */
     memset(s->app_vars, 0, sizeof(s->app_vars));
 
-    /* FIX TX1: Seed the $RAND$ LCG from the RP2350 RTC timestamp.
-     * Using time() gives a different sequence per session (good enough for BBS
-     * use).  The memset above zeroed rand_state; a zero seed is valid for the
-     * Knuth LCG — first output will be 12345 — but we prefer time entropy. */
+    /* Seed the $RAND$ LCG from the local RTC timestamp.
+     * Using time() gives a different sequence per session (good enough
+     * for BBS use).  The memset above zeroed rand_state; a zero seed is
+     * valid for the Knuth LCG — first output will be 12345 — but we
+     * prefer time entropy.  Tests override the seed for deterministic
+     * replay; see test_rand_reproducibility. */
     s->rand_state = (uint32_t)time(NULL);
 
-    /* FIX TX2: refresh_suppress starts false (normal refresh enabled). */
+    /* refresh_suppress starts false (normal refresh enabled). */
     s->refresh_suppress = false;
 
     ripscrip2_init(&s->rip2_state);
@@ -979,7 +459,7 @@ void rip_init_first(rip_state_t *s) {
         p0->vp_x0        = 0;
         p0->vp_y0        = 0;
         p0->vp_x1        = 639;
-        p0->vp_y1        = 399;   /* card pixel coords (EGA 349 -> display 399) */
+        p0->vp_y1        = 399;   /* pixel coords (EGA 349 -> display 399 after scale_y) */
         p0->draw_color   = 15;    /* white -- matches s->draw_color default */
         p0->fill_color   = 15;
         p0->fill_pattern = 1;     /* solid */
@@ -999,23 +479,15 @@ void rip_init_first(rip_state_t *s) {
     s->active_port = 0;
 }
 
-/* Codex FIX 1: Backward-compat wrapper — existing call sites continue to work.
- * New code should call rip_init_first() at boot and rip_session_reset() on
- * disconnect rather than calling rip_init() on every protocol switch. */
-void rip_init(rip_state_t *s) {
-    rip_init_first(s);
-}
-
-/* Codex FIX 1: Protocol-switch activation.
- * Called by the compositor every time it switches to RIPscrip (including
- * the first time).  Restores the EGA hardware palette and marks the
- * framebuffer dirty so the BBS screen is repainted.  Does NOT memset or
- * touch session state — clipboard, mouse regions, text variables, and the
- * PSRAM arena are all preserved across a temporary switch to VT100 etc.
- *
- * Codex FIX 5: query_pending / query_var_name are also left untouched here,
- * so a pending $QUERY$ round-trip that was interrupted by a protocol switch
- * resumes correctly when RIPscrip is reactivated. */
+/* Protocol-switch activation.
+ * Called every time the host's compositor switches to RIPscrip
+ * (including the first time).  Restores the EGA hardware palette and
+ * marks the framebuffer dirty so the BBS screen is repainted.  Does NOT
+ * memset or touch session state — clipboard, mouse regions, text
+ * variables, and the PSRAM arena are all preserved across a temporary
+ * switch to VT100 etc.  query_pending / query_var_name are also left
+ * untouched so a pending $QUERY$ round-trip that was interrupted by a
+ * protocol switch resumes correctly when RIPscrip is reactivated. */
 void rip_activate(rip_state_t *s) {
     if (!s) return;
     g_rip_state = s;
@@ -1029,20 +501,16 @@ void rip_activate(rip_state_t *s) {
     apply_session_draw_state(s);
 }
 
-/* Codex FIX 3: Session disconnect reset.
- * Call this when the BBS connection is dropped (NOT on a protocol switch).
- * Reclaims the PSRAM arena, clears mouse regions, text variables, query
- * state, icon request queue, and upload staging — all the per-session data
- * that must not carry over to the next BBS connection.
- *
- * The PSRAM arena block itself is NOT freed (it stays reserved for the
- * next session); psram_arena_reset() just rewinds the bump pointer.
- *
- * Codex FIX 4: Calls rip_icon_clear_requests() to flush the pending icon
- * file request queue so the next BBS doesn't see stale requests.
- *
- * Codex FIX 5: Clears query_pending / query_var_name so an unanswered
- * $QUERY$ from the disconnected session cannot affect the next session. */
+/* Session disconnect reset.
+ * Call this when the BBS connection is dropped (NOT on a protocol
+ * switch).  Reclaims the PSRAM arena, clears mouse regions, text
+ * variables, query state, icon request queue, and upload staging —
+ * all the per-session data that must not carry over to the next BBS
+ * connection.  The PSRAM arena block itself is NOT freed (it stays
+ * reserved for the next session); psram_arena_reset() just rewinds
+ * the bump pointer.  Also flushes the pending icon file request
+ * queue and clears any unanswered $QUERY$ metadata so neither leaks
+ * into the next session. */
 void rip_session_reset(rip_state_t *s) {
     if (!s) return;
     g_rip_state = s;
@@ -1055,7 +523,7 @@ void rip_session_reset(rip_state_t *s) {
      * the runtime cache so stale pixel pointers into the old arena are gone. */
     rip_icon_set_arena(&s->icon_state, &s->psram_arena);
 
-    /* Codex FIX 4: Flush the pending icon file request queue. */
+    /* Flush the pending icon file request queue. */
     rip_icon_clear_requests(&s->icon_state);
 
     /* Clear upload staging pointer — it pointed into the now-reset arena. */
@@ -1069,8 +537,8 @@ void rip_session_reset(rip_state_t *s) {
     /* Clear text block state. */
     s->text_block.active = false;
 
-    /* Codex FIX 5: Clear query/prompt metadata — an unanswered $QUERY$
-     * from the disconnected session must not carry over to the next BBS. */
+    /* Clear query/prompt metadata — an unanswered $QUERY$ from the
+     * disconnected session must not carry over to the next BBS. */
     s->query_pending = false;
     memset(s->query_var_name,  0, sizeof(s->query_var_name));
     memset(s->query_response,  0, sizeof(s->query_response));
@@ -1110,14 +578,7 @@ void rip_session_reset(rip_state_t *s) {
     s->filled_borders_enabled = true;
 
     /* Reset stream preprocessor state. */
-    s->preproc_state = 0;
-    s->preproc_len = 0;
-    s->preproc_suppress = false;
-    s->preproc_depth = 0;
-    s->preproc_overflow = 0;
-    memset(s->preproc_parent_suppress, 0, sizeof(s->preproc_parent_suppress));
-    memset(s->preproc_branch_active, 0, sizeof(s->preproc_branch_active));
-    memset(s->preproc_branch_taken, 0, sizeof(s->preproc_branch_taken));
+    rip_preproc_init(s);
 
     /* Reset ripscrip2 overflow state. */
     ripscrip2_init(&s->rip2_state);
@@ -1268,10 +729,13 @@ static uint16_t rip_line_style_to_pattern(uint8_t style, uint16_t user_pat) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * TEXT ESCAPE PROCESSING — \! \| \\ inline escapes
+ * TEXT ESCAPE PROCESSING — \\ \| \^ \n inline escapes (+ \! extension)
  *
- * RIPscrip text parameters use backslash escapes:
- *   \! = literal '!'   \| = literal '|'   \\ = literal '\'
+ * RIPscrip text parameters use backslash escapes (spec §1.6 / §7.1):
+ *   \\ = literal '\'   \| = literal '|'   \^ = literal '^'
+ *   \n = newline (0x0A)
+ * RIPlib also accepts \! = literal '!' as an extension (RIPlib uses '!'
+ * as the command-frame lead-in; see docs/spec/11-dll-deviations.md).
  * Returns unescaped length (always <= input length, in-place safe).
  * ══════════════════════════════════════════════════════════════════ */
 
@@ -1280,9 +744,14 @@ static int unescape_text(const char *src, int len, char *dst) {
     for (int i = 0; i < len; i++) {
         if (src[i] == '\\' && i + 1 < len) {
             char next = src[i + 1];
-            if (next == '!' || next == '|' || next == '\\') {
-                dst[j++] = next;
+            if (next == '!' || next == '|' || next == '\\' || next == '^') {
+                dst[j++] = next;       /* literal: \| \\ \^ and the \! ext */
                 i++; /* skip escaped char */
+                continue;
+            }
+            if (next == 'n') {         /* \n → newline (spec §1.6 / §7.1) */
+                dst[j++] = '\n';
+                i++;
                 continue;
             }
         }
@@ -1310,441 +779,6 @@ static int unescape_text(const char *src, int len, char *dst) {
  * out: output buffer (NUL-terminated on return).
  * max_out: total capacity of out including NUL terminator.
  * Returns number of characters written (excluding NUL). */
-static int rip_expand_variables(rip_state_t *s,
-                                const char *in, int in_len,
-                                char *out, int max_out) {
-    int o = 0;
-    int i = 0;
-
-    while (i < in_len && o < max_out - 1) {
-        if (in[i] != '$') {
-            out[o++] = in[i++];
-            continue;
-        }
-
-        /* Scan forward for matching closing '$' */
-        int j = i + 1;
-        while (j < in_len && in[j] != '$') j++;
-
-        if (j >= in_len) {
-            /* No closing '$' found — treat as literal and move on */
-            out[o++] = in[i++];
-            continue;
-        }
-
-        /* Variable name occupies in[i+1 .. j-1] */
-        const char *vname = in + i + 1;
-        int vlen = j - i - 1;
-        char val[64];
-        int vval_len = -1; /* -1 = unrecognized, emit literal */
-
-        if (vlen == 4 && memcmp(vname, "DATE", 4) == 0) {
-            /* $DATE$ — FIX V1: use host-supplied date (CB_GET_TIME equivalent).
-             * The IIgs reads the ProDOS MLI GET_TIME clock and ships it via
-             * CMD_SYNC_DATE at connect time.  Fall back to the RP2350 RTC
-             * (time()/localtime()) only when the host has not synced yet.
-             * Boundary note: calling time() here would use the card's own RTC
-             * which may drift from the BBS host clock — the callback model
-             * fixes this by making the IIgs the sole clock authority. */
-            if (s->host_date[0] != '\0') {
-                vval_len = (int)rip_strnlen(s->host_date, sizeof(s->host_date) - 1);
-                if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
-                memcpy(val, s->host_date, (size_t)vval_len);
-            } else {
-                /* Host not yet synced — fall back to RP2350 RTC */
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%02d/%02d/%02d",
-                                    tm->tm_mon + 1, tm->tm_mday, tm->tm_year % 100);
-                if (vval_len < 0) vval_len = 0;
-            }
-        } else if (vlen == 4 && memcmp(vname, "TIME", 4) == 0) {
-            /* $TIME$ — FIX V1: use host-supplied time (CB_GET_TIME equivalent).
-             * Falls back to RP2350 RTC when host has not synced yet. */
-            if (s->host_time[0] != '\0') {
-                vval_len = (int)rip_strnlen(s->host_time, sizeof(s->host_time) - 1);
-                if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
-                memcpy(val, s->host_time, (size_t)vval_len);
-            } else {
-                /* Host not yet synced — fall back to RP2350 RTC */
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%02d:%02d",
-                                    tm->tm_hour, tm->tm_min);
-                if (vval_len < 0) vval_len = 0;
-            }
-        } else if (vlen == 4 && memcmp(vname, "USER", 4) == 0) {
-            /* $USER$ — no login name on embedded card; substitute empty string */
-            val[0] = '\0';
-            vval_len = 0;
-        } else if (vlen == 4 && memcmp(vname, "PROT", 4) == 0) {
-            /* $PROT$ — negotiated resolution mode (DLL GFXSTYLE resolution_mode).
-             * 0=EGA(640x350), 1=VGA(640x480), 2=SVGA, 3=XGA, 4=HIGH. */
-            vval_len = snprintf(val, sizeof(val), "%u", s->resolution_mode);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 9 && memcmp(vname, "COLORMODE", 9) == 0) {
-            /* $COLORMODE$ returns 0 in palette-mapping mode, or the RGB
-             * bits/component value (1..8) in direct RGB mode. */
-            unsigned mode = (s->color_mode == 0) ? 0u : (unsigned)s->color_bits;
-            vval_len = snprintf(val, sizeof(val), "%u", mode);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 9 && memcmp(vname, "COORDSIZE", 9) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%u", s->coordinate_size);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 9 && memcmp(vname, "ISPALETTE", 9) == 0) {
-            val[0] = '1';
-            vval_len = 1;
-        } else if (vlen == 4 && vname[0] == 'A' && vname[1] == 'P' &&
-                   vname[2] == 'P' && vname[3] >= '0' && vname[3] <= '9') {
-            /* $APP0$-$APP9$ — application-defined variables */
-            int idx = vname[3] - '0';
-            vval_len = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
-            if (vval_len > (int)sizeof(val) - 1) vval_len = (int)sizeof(val) - 1;
-            memcpy(val, s->app_vars[idx], (size_t)vval_len);
-
-        /* FIX M3: Sound text variables (CB_PLAY_SOUND callback equivalent).
-         * In RIPSCRIP.DLL the host filled the sound callback slot and the DLL
-         * called it when these variables were expanded.  On the A2GSPU we
-         * cannot play audio on the card; instead we signal the IIgs:
-         *   $BEEP$  — push BEL (0x07) through TX FIFO; IIgs bridge loop calls
-         *             the IIgs BELL toolbox routine on receipt.
-         *   Others  — push CMD_PLAY_SOUND marker (0x3D) + sound-token string
-         *             + NUL so the IIgs can dispatch to DOC sound chip (future).
-         * All sound variables expand to the empty string in the text stream. */
-        } else if (vlen == 4 && memcmp(vname, "BEEP", 4) == 0) {
-            /* $BEEP$ — BEL character; IIgs bridge loop handles audible beep */
-            card_tx_push("\x07", 1);
-            val[0] = '\0';
-            vval_len = 0;
-        } else if (vlen == 4 && memcmp(vname, "BLIP", 4) == 0) {
-            /* $BLIP$ — short click tone; send CMD_PLAY_SOUND token to IIgs */
-            card_tx_push("\x3D" "BLIP\0", 6);  /* marker + "BLIP" + NUL */
-            val[0] = '\0';
-            vval_len = 0;
-        } else if (vlen == 5 && memcmp(vname, "ALARM", 5) == 0) {
-            /* $ALARM$ — alarm tone sequence */
-            card_tx_push("\x3D" "ALARM\0", 7);
-            val[0] = '\0';
-            vval_len = 0;
-        } else if (vlen == 6 && memcmp(vname, "PHASER", 6) == 0) {
-            /* $PHASER$ — phaser sweep tone */
-            card_tx_push("\x3D" "PHASER\0", 8);
-            val[0] = '\0';
-            vval_len = 0;
-        } else if (vlen == 5 && memcmp(vname, "MUSIC", 5) == 0) {
-            /* $MUSIC$ — background music cue */
-            card_tx_push("\x3D" "MUSIC\0", 7);
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* FIX TX1: $RAND$ — pseudo-random number.
-         * ripTextVarEngine @ 0x026218 calls rand() here; we use the same
-         * Knuth/POSIX LCG (multiplier 1103515245, addend 12345) so the
-         * generated sequence is compatible with the DLL ground truth. */
-        } else if (vlen == 4 && memcmp(vname, "RAND", 4) == 0) {
-            s->rand_state = s->rand_state * 1103515245u + 12345u;
-            vval_len = snprintf(val, sizeof(val), "%u",
-                                (unsigned)((s->rand_state >> 16) & 0x7FFFu));
-            if (vval_len < 0) vval_len = 0;
-
-        /* FIX TX2: $RIPVER$ — protocol version string.
-         * DLL ripTextVarEngine returns "RIPSCRIP030001" for v3.0.
-         * A2GSPU reports "RIPSCRIP032001" — v3.2 with the §A2G.8-13
-         * QoL extensions on top of the §A2G.1-7 v3.1 baseline. */
-        } else if (vlen == 6 && memcmp(vname, "RIPVER", 6) == 0) {
-            vval_len = snprintf(val, sizeof(val), "RIPSCRIP032001");
-            if (vval_len < 0) vval_len = 0;
-
-        /* FIX TX3: $REFRESH$ — re-enable and trigger a full screen refresh.
-         * DLL: clears the no-refresh flag and calls ripInvalidateAll().
-         * A2GSPU: clear refresh_suppress and mark full framebuffer dirty. */
-        } else if (vlen == 7 && memcmp(vname, "REFRESH", 7) == 0) {
-            s->refresh_suppress = false;
-            draw_mark_all_dirty();   /* equivalent to ripInvalidateAll() */
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* FIX TX4: $NOREFRESH$ — suppress automatic screen refresh.
-         * DLL: sets the no-refresh flag so that intermediate drawing steps
-         * don't cause visible flicker during multi-command scene build. */
-        } else if (vlen == 9 && memcmp(vname, "NOREFRESH", 9) == 0) {
-            s->refresh_suppress = true;
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* FIX TX5: $TEXTDATA$ — contents of the active bounded text buffer.
-         * DLL: returns the accumulated text from the '"' (ICON_QUERY) bounded
-         * text parameter.  A2GSPU: return empty string (no bounded text buffer
-         * maintained on the card side; data is rendered immediately on receipt). */
-        } else if (vlen == 8 && memcmp(vname, "TEXTDATA", 8) == 0) {
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* FIX TX6: $YEAR$ — 4-digit current year.
-         * DLL ripTextVarEngine @ 0x026218, handler @ 0x0390CA.
-         * Use host_date if synced (IIgs ProDOS clock); fall back to RP2350 RTC. */
-        } else if (vlen == 4 && memcmp(vname, "YEAR", 4) == 0) {
-            if (s->host_date[0] != '\0') {
-                /* host_date is "MM/DD/YY" — year is the last two digits.
-                 * Expand to 4-digit year by assuming 2000+ (BBS era is over). */
-                int yy = 0;
-                const char *p_slash2 = s->host_date + 6;  /* points past "MM/DD/" */
-                if (p_slash2[0] >= '0' && p_slash2[0] <= '9' &&
-                    p_slash2[1] >= '0' && p_slash2[1] <= '9') {
-                    yy = (p_slash2[0] - '0') * 10 + (p_slash2[1] - '0');
-                }
-                vval_len = snprintf(val, sizeof(val), "%04d", 2000 + yy);
-            } else {
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%04d", 1900 + tm->tm_year);
-            }
-            if (vval_len < 0) vval_len = 0;
-
-        /* FIX TX7: $WOYM$ — ISO week-of-year (Monday start), 2-digit string.
-         * DLL ripTextVarEngine @ 0x026218, handler @ 0x0390B0 ("WOYM"). */
-        } else if (vlen == 4 && memcmp(vname, "WOYM", 4) == 0) {
-            int week = 0;
-            if (s->host_date[0] != '\0') {
-                int year;
-                int month;
-                int day;
-                if (rip_parse_host_date(s->host_date, &year, &month, &day))
-                    week = rip_iso_week(year, month, day);
-            } else {
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                week = rip_iso_week(1900 + tm->tm_year,
-                                    tm->tm_mon + 1,
-                                    tm->tm_mday);
-            }
-            if (week < 1) week = 1;
-            if (week > 53) week = 53;
-            vval_len = snprintf(val, sizeof(val), "%02d", week);
-            if (vval_len < 0) vval_len = 0;
-
-        /* FIX TX8: $COMPAT$ — compatibility level string.
-         * DLL: reports a numeric mode flag used by host to detect capability.
-         * A2GSPU: return "1" (basic compatibility, level 1 extensions present). */
-        } else if (vlen == 6 && memcmp(vname, "COMPAT", 6) == 0) {
-            vval_len = snprintf(val, sizeof(val), "1");
-            if (vval_len < 0) vval_len = 0;
-
-        /* FIX TX9: $MKILL$ — kill/clear all mouse fields via text variable.
-         * DLL ripTextVarEngine: calling $MKILL$ is equivalent to !|1K|.
-         * A2GSPU: zero the mouse region table immediately. */
-        } else if (vlen == 5 && memcmp(vname, "MKILL", 5) == 0) {
-            s->num_mouse_regions = 0;
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* FIX TX10: $COPY$ — set write mode to COPY(0) via text variable.
-         * DLL: switches GDI ROP back to COPY mode (ripTextVarEngine). */
-        } else if (vlen == 4 && memcmp(vname, "COPY", 4) == 0) {
-            s->write_mode = 0;
-            draw_set_write_mode(0);
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* FIX TX11: $COFF$ — cursor off (hide hardware cursor).
-         * DLL: calls cursor hide callback.  A2GSPU: no hardware cursor;
-         * no-op but recognised so the variable doesn't pass through as literal. */
-        } else if (vlen == 4 && memcmp(vname, "COFF", 4) == 0) {
-            val[0] = '\0';
-            vval_len = 0;
-
-        } else if (vlen == 5 && memcmp(vname, "RESET", 5) == 0) {
-            rip_reset_windows_state(s, NULL);
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* $ABORT$ — abort the current RIPscrip scene (reset state).
-         * DLL: sets abort flag; parser discards remaining stream bytes.
-         * A2GSPU: reset the FSM to IDLE so the next !| starts fresh. */
-        } else if (vlen == 5 && memcmp(vname, "ABORT", 5) == 0) {
-            s->state = RIP_ST_IDLE;
-            clear_levels(s);
-            s->cmd_len = 0;
-            val[0] = '\0';
-            vval_len = 0;
-
-        /* §A2G (v3.2): Layout / introspection variables ----------------- */
-        } else if (vlen == 2 && memcmp(vname, "CX", 2) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d", s->draw_x);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 2 && memcmp(vname, "CY", 2) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d", s->draw_y);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 3 && memcmp(vname, "VPW", 3) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d",
-                                (int)(s->vp_x1 - s->vp_x0 + 1));
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 3 && memcmp(vname, "VPH", 3) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d",
-                                (int)(s->vp_y1 - s->vp_y0 + 1));
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 4 && memcmp(vname, "VPCX", 4) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d",
-                                (int)((s->vp_x0 + s->vp_x1) / 2));
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 4 && memcmp(vname, "VPCY", 4) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d",
-                                (int)((s->vp_y0 + s->vp_y1) / 2));
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 4 && memcmp(vname, "CCOL", 4) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d",
-                                (int)(s->draw_color & 0x0F));
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 5 && memcmp(vname, "CFCOL", 5) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d",
-                                (int)(s->fill_color & 0x0F));
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 5 && memcmp(vname, "CBCOL", 5) == 0) {
-            vval_len = snprintf(val, sizeof(val), "%d",
-                                (int)(s->back_color & 0x0F));
-            if (vval_len < 0) vval_len = 0;
-
-        /* §A2G (v3.2): Time component variables ------------------------- */
-        } else if (vlen == 4 && memcmp(vname, "HOUR", 4) == 0) {
-            if (s->host_time[0] >= '0' && s->host_time[0] <= '9' &&
-                s->host_time[1] >= '0' && s->host_time[1] <= '9') {
-                val[0] = s->host_time[0]; val[1] = s->host_time[1];
-                vval_len = 2;
-            } else {
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_hour);
-                if (vval_len < 0) vval_len = 0;
-            }
-        } else if (vlen == 3 && memcmp(vname, "MIN", 3) == 0) {
-            if (s->host_time[3] >= '0' && s->host_time[3] <= '9' &&
-                s->host_time[4] >= '0' && s->host_time[4] <= '9') {
-                val[0] = s->host_time[3]; val[1] = s->host_time[4];
-                vval_len = 2;
-            } else {
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_min);
-                if (vval_len < 0) vval_len = 0;
-            }
-        } else if (vlen == 3 && memcmp(vname, "SEC", 3) == 0) {
-            /* host_time is HH:MM only; SEC always reads from RTC. */
-            time_t now = time(NULL);
-            struct tm *tm = localtime(&now);
-            vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_sec);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 3 && memcmp(vname, "DOW", 3) == 0) {
-            int year, month, day, dow;
-            if (s->host_date[0] != '\0' &&
-                rip_parse_host_date(s->host_date, &year, &month, &day)) {
-                dow = rip_weekday_monday0(year, month, day);
-            } else {
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                /* tm_wday: 0=Sunday..6=Saturday. Convert to Monday=0. */
-                dow = (tm->tm_wday + 6) % 7;
-            }
-            vval_len = snprintf(val, sizeof(val), "%d", dow);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 3 && memcmp(vname, "DOM", 3) == 0) {
-            int year, month, day;
-            if (s->host_date[0] != '\0' &&
-                rip_parse_host_date(s->host_date, &year, &month, &day)) {
-                vval_len = snprintf(val, sizeof(val), "%02d", day);
-            } else {
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_mday);
-            }
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 5 && memcmp(vname, "MONTH", 5) == 0) {
-            int year, month, day;
-            if (s->host_date[0] != '\0' &&
-                rip_parse_host_date(s->host_date, &year, &month, &day)) {
-                vval_len = snprintf(val, sizeof(val), "%02d", month);
-            } else {
-                time_t now = time(NULL);
-                struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_mon + 1);
-            }
-            if (vval_len < 0) vval_len = 0;
-
-        /* §A2G (v3.2): EGA color-name aliases — expand to 2-digit MegaNum
-         * suitable as a |c, |S, |k, |a argument.  Each name maps to
-         * its EGA palette index (0-15).  Names are 16 chars max. */
-        } else if (vlen >= 3 && vlen <= 13) {
-            static const struct { const char *name; uint8_t len; uint8_t idx; }
-                color_names[] = {
-                    { "BLACK",        5, 0x0 },
-                    { "BLUE",         4, 0x1 },
-                    { "GREEN",        5, 0x2 },
-                    { "CYAN",         4, 0x3 },
-                    { "RED",          3, 0x4 },
-                    { "MAGENTA",      7, 0x5 },
-                    { "BROWN",        5, 0x6 },
-                    { "LIGHTGRAY",    9, 0x7 },
-                    { "DARKGRAY",     8, 0x8 },
-                    { "LIGHTBLUE",    9, 0x9 },
-                    { "LIGHTGREEN",  10, 0xA },
-                    { "LIGHTCYAN",    9, 0xB },
-                    { "LIGHTRED",     8, 0xC },
-                    { "LIGHTMAGENTA",12, 0xD },
-                    { "YELLOW",       6, 0xE },
-                    { "WHITE",        5, 0xF },
-                };
-            bool matched = false;
-            for (size_t ci = 0; ci < sizeof(color_names)/sizeof(color_names[0]); ci++) {
-                if (color_names[ci].len == (uint8_t)vlen &&
-                    memcmp(vname, color_names[ci].name, (size_t)vlen) == 0) {
-                    /* MegaNum encoding: index 0-15 → "00".."0F" */
-                    val[0] = '0';
-                    val[1] = (color_names[ci].idx < 10)
-                             ? (char)('0' + color_names[ci].idx)
-                             : (char)('A' + color_names[ci].idx - 10);
-                    vval_len = 2;
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched) {
-                /* Not a color name — fall through to user-var lookup */
-                int uidx = rip_user_var_find(s, vname, vlen);
-                if (uidx >= 0) {
-                    vval_len = (int)rip_strnlen(s->user_var_values[uidx],
-                                                sizeof(s->user_var_values[uidx]));
-                    if (vval_len > (int)sizeof(val) - 1)
-                        vval_len = (int)sizeof(val) - 1;
-                    memcpy(val, s->user_var_values[uidx], (size_t)vval_len);
-                }
-            }
-
-        } else {
-            int uidx = rip_user_var_find(s, vname, vlen);
-            if (uidx >= 0) {
-                vval_len = (int)rip_strnlen(s->user_var_values[uidx],
-                                            sizeof(s->user_var_values[uidx]));
-                if (vval_len > (int)sizeof(val) - 1)
-                    vval_len = (int)sizeof(val) - 1;
-                memcpy(val, s->user_var_values[uidx], (size_t)vval_len);
-            }
-        }
-
-        if (vval_len >= 0) {
-            /* Recognized variable — substitute its value */
-            int copy = vval_len;
-            if (o + copy > max_out - 1) copy = max_out - 1 - o;
-            memcpy(out + o, val, (size_t)copy);
-            o += copy;
-            i = j + 1; /* advance past closing '$' */
-        } else {
-            /* Unrecognized — emit literal '$' and retry from i+1 */
-            out[o++] = in[i++];
-        }
-    }
-
-    out[o] = '\0';
-    return o;
-}
 
 /* ══════════════════════════════════════════════════════════════════
  * TEXT WINDOW PASSTHROUGH — render text within RIP text window bounds
@@ -2037,125 +1071,12 @@ void rip_file_upload_end(void) {
  *   (none) — boolean: non-empty and not literal "0"
  * ══════════════════════════════════════════════════════════════════ */
 
-static bool eval_if_expr(rip_state_t *s, const char *expr) {
-    char expanded[128];
-    rip_expand_variables(s, expr, (int)strlen(expr), expanded, sizeof(expanded));
 
-    /* Check 2-char operators (!=, >=, <=) before 1-char (=, >, <) so
-     * that "5>=5" is parsed as ">=" rather than splitting on '='. */
-    char *op = strstr(expanded, "!=");
-    if (op) {
-        *op = '\0';
-        return strcmp(expanded, op + 2) != 0;  /* string inequality */
-    }
-    op = strstr(expanded, ">=");
-    if (op) {
-        *op = '\0';
-        return atoi(expanded) >= atoi(op + 2);
-    }
-    op = strstr(expanded, "<=");
-    if (op) {
-        *op = '\0';
-        return atoi(expanded) <= atoi(op + 2);
-    }
-    op = strchr(expanded, '=');
-    if (op) {
-        *op = '\0';
-        return strcmp(expanded, op + 1) == 0;  /* string equality */
-    }
-    op = strchr(expanded, '>');
-    if (op) {
-        *op = '\0';
-        return atoi(expanded) > atoi(op + 1);
-    }
-    op = strchr(expanded, '<');
-    if (op) {
-        *op = '\0';
-        return atoi(expanded) < atoi(op + 1);
-    }
-
-    /* Boolean: non-empty and not literal "0" */
-    return expanded[0] != '\0' && !(expanded[0] == '0' && expanded[1] == '\0');
-}
-
-static void preproc_restore_suppress(rip_state_t *s) {
-    uint8_t idx;
-
-    if (!s) return;
-    if (s->preproc_overflow > 0) {
-        s->preproc_suppress = true;
-        return;
-    }
-    if (s->preproc_depth == 0) {
-        s->preproc_suppress = false;
-        return;
-    }
-
-    idx = (uint8_t)(s->preproc_depth - 1);
-    s->preproc_suppress = s->preproc_parent_suppress[idx] ||
-                          !s->preproc_branch_active[idx];
-}
-
-static void preproc_push_if(rip_state_t *s, const char *expr) {
-    bool parent_suppress;
-    bool branch_active = false;
-    uint8_t idx;
-
-    if (s->preproc_overflow > 0) {
-        s->preproc_overflow++;
-        s->preproc_suppress = true;
-        return;
-    }
-    if (s->preproc_depth >= RIP_PREPROC_MAX_DEPTH) {
-        s->preproc_overflow = 1;
-        s->preproc_suppress = true;
-        return;
-    }
-
-    parent_suppress = s->preproc_suppress;
-    if (!parent_suppress)
-        branch_active = eval_if_expr(s, expr);
-
-    idx = s->preproc_depth++;
-    s->preproc_parent_suppress[idx] = parent_suppress;
-    s->preproc_branch_active[idx] = branch_active;
-    s->preproc_branch_taken[idx] = branch_active;
-    s->preproc_suppress = parent_suppress || !branch_active;
-}
-
-static void preproc_handle_else(rip_state_t *s) {
-    uint8_t idx;
-
-    if (s->preproc_depth == 0) return;
-    if (s->preproc_overflow > 0) {
-        s->preproc_suppress = true;
-        return;
-    }
-
-    idx = (uint8_t)(s->preproc_depth - 1);
-    if (s->preproc_parent_suppress[idx]) {
-        s->preproc_branch_active[idx] = false;
-    } else if (s->preproc_branch_taken[idx]) {
-        s->preproc_branch_active[idx] = false;
-    } else {
-        s->preproc_branch_active[idx] = true;
-        s->preproc_branch_taken[idx] = true;
-    }
-    s->preproc_suppress = s->preproc_parent_suppress[idx] ||
-                          !s->preproc_branch_active[idx];
-}
-
-static void preproc_handle_endif(rip_state_t *s) {
-    if (s->preproc_overflow > 0) {
-        s->preproc_overflow--;
-        preproc_restore_suppress(s);
-        return;
-    }
-    if (s->preproc_depth == 0) return;
-
-    s->preproc_depth--;
-    preproc_restore_suppress(s);
-}
+/* Preprocessor suppression-state machine lives in src/rip_preproc.c
+ * (extracted as the first step of audit candidate C-002).  This file
+ * keeps only the byte-level <<…>> recognition FSM (wired into the
+ * parser entry point further down) and the directive-dispatch glue
+ * that converts a recognised directive into a rip_preproc_*() call. */
 
 static void preproc_finalize_directive(rip_state_t *s) {
     const char *dir;
@@ -2168,11 +1089,16 @@ static void preproc_finalize_directive(rip_state_t *s) {
     dir = s->preproc_buf;
     if (strncmp(dir, "IF ", 3) == 0 || strcmp(dir, "IF") == 0) {
         const char *expr = (dir[2] == ' ') ? dir + 3 : "";
-        preproc_push_if(s, expr);
+        /* Pre-evaluate the IF expression here (the variable
+         * expansion engine lives in this file); the preprocessor
+         * module only needs the resulting bool.  A parent IF that
+         * is already suppressing short-circuits the evaluation. */
+        bool eval = s->preproc_suppress ? false : rip_eval_if_expr(s, expr);
+        rip_preproc_push_if(s, eval);
     } else if (strcmp(dir, "ELSE") == 0) {
-        preproc_handle_else(s);
+        rip_preproc_handle_else(s);
     } else if (strcmp(dir, "ENDIF") == 0) {
-        preproc_handle_endif(s);
+        rip_preproc_handle_endif(s);
     } else if (strncmp(dir, "DEBUG ", 6) == 0 || strcmp(dir, "DEBUG") == 0) {
         /* §A2G (v3.2): <<DEBUG msg>> — push "0x3E DEBUG: <msg>\r" to TX so the
          * host can log it.  Suppressed by parent IF/ELSE branches so that
@@ -2339,7 +1265,7 @@ static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode) {
     draw_set_write_mode(saved_mode);
 }
 
-static void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
+void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
     if (!s)
         return;
 
@@ -2511,7 +1437,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * v1.54 spec: !|1U = RIP_BUTTON. The DLL internal function
                    * name (ripCmd_MouseRegion) is misleading — the command letter is 'U'.
                    * x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1 res:1 text
-                   * text format: host_command<>display_label (or just text for both) */
+                   * text format (spec §3.4): icon_file<>display_label<>host_command.
+                   * A single segment with no <> serves as BOTH label and host
+                   * command (see the host-fallback at registration below). */
             if (len >= 12) {
                 int16_t bx0 = mega2(p), by0 = scale_y(mega2(p + 2));
                 int16_t bx1 = mega2(p + 4), by1 = scale_y1(mega2(p + 6));
@@ -2665,7 +1593,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * x:2 y:2 mode:2 res:1 */
             if (len >= 5 && s->clipboard.valid && s->clipboard.data) {
                 int16_t px = mega2(p), py = scale_y(mega2(p + 2));
-                /* mode at p+4: 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT */
+                /* mode at p+4: 0=COPY, 1=OR, 2=AND, 3=XOR, 4=NOT (matches drawing.h DRAW_MODE_* and the RIPscrip wire encoding per docs/spec §2.3) */
                 uint8_t mode = (len >= 6) ? mega2(p + 4) : 0;
                 if (mode > 4) mode = 0;
                 rip_blit_pixels(s, px, py, s->clipboard.data,
@@ -2779,8 +1707,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         case 'A': /* RIP_PLAY_AUDIO — play audio file.
                    * DLL: calls ripAudioPlay() which invokes CB_PLAY_SOUND.
                    * Format: mode:2 res:2 filename (free text, pipe-terminated).
-                   * A2GSPU: push CMD_PLAY_SOUND marker (0x3D) + filename + NUL
-                   * via TX FIFO; IIgs bridge loop dispatches to DOC sound chip. */
+                   * RIPlib:push CMD_PLAY_SOUND marker (0x3D) + filename + NUL
+                   * via TX FIFO; host bridge dispatches to DOC sound chip. */
             if (len >= 4) {
                 const char *fname = p + 4;
                 int fname_len = len - 4;
@@ -2798,7 +1726,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         case 'Z': /* RIP_PLAY_MIDI — MIDI file playback.
                    * DLL ground truth: sends to the Windows MIDI sequencer via
                    * CB_PLAY_MIDI.  Format: mode:2 res:2 filename.
-                   * A2GSPU: same TX FIFO path as RIP_PLAY_AUDIO. */
+                   * RIPlib:same TX FIFO path as RIP_PLAY_AUDIO. */
             if (len >= 4) {
                 const char *fname = p + 4;
                 int fname_len = len - 4;
@@ -2827,20 +1755,28 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * DLL stores in RIPINST.IconPath (rip_instance.c init cascade
                    * step 11, "IconPath" string at 0x10026218 region).
                    * Format: res:2 path (free text).
-                   * A2GSPU: store the path tag; consult on future icon requests. */
+                   * RIPlib:store the path tag; consult on future icon requests. */
             if (len >= 2) {
                 int plen = len - 2;
                 if (plen >= (int)sizeof(s->icon_dir))
                     plen = (int)sizeof(s->icon_dir) - 1;
-                memcpy(s->icon_dir, p + 2, (size_t)plen);
-                s->icon_dir[plen] = '\0';
+                /* C-013/ADR-0003: filter the wire-supplied path before
+                 * storing it.  Allows '/' (directories) but rejects '..',
+                 * control chars, '\\', ':'.  A consumer that opens the
+                 * path must still treat it as untrusted. */
+                if (rip_dirpath_is_safe(p + 2, plen)) {
+                    memcpy(s->icon_dir, p + 2, (size_t)plen);
+                    s->icon_dir[plen] = '\0';
+                } else {
+                    s->icon_dir[0] = '\0';
+                }
             }
             break;
 
         /* ── Font loading ───────────────────────────────────────── */
         case 'O': /* RIP_FONT_LOAD — load BGI/RFF font from file.
                    * DLL: loads font into the per-instance font table.
-                   * A2GSPU: built-in BGI fonts are pre-compiled in flash.
+                   * RIPlib:built-in BGI fonts are pre-compiled in flash.
                    * If the requested CHR name matches one, make it active;
                    * otherwise queue a file request for the host side. */
             if (len > 0) {
@@ -2862,7 +1798,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         case 'Q': /* RIP_QUERY_EXT — extended query command.
                    * DLL: routes to the same handler as the ESC-char (0x1B)
                    * QUERY command but with extended flags.  Format: flags:3 res:2 varname.
-                   * A2GSPU: route to the same handler inline — identical logic. */
+                   * RIPlib:route to the same handler inline — identical logic. */
             if (len >= 5) {
                 const char *vname = p + 5;
                 int vlen = len - 5;
@@ -2903,7 +1839,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * DLL: sets both the clipping rectangle and a zoom/scale
                    * factor for subsequent coordinate calculations.
                    * Format: x0:2 y0:2 x1:2 y1:2 scale:1
-                   * A2GSPU: set viewport rect (same as 'v'), store scale field.
+                   * RIPlib:set viewport rect (same as 'v'), store scale field.
                    * The fixed 640×400 framebuffer cannot actually scale, but
                    * we store the field so future capability queries are correct. */
             if (len >= 9) {
@@ -3130,15 +2066,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     * Recognized variables: $APP0$-$APP9$, $OVERFLOW$,
                     *   $OVERFLOW(NEXT)$, $OVERFLOW(PREV)$, $OVERFLOW(RESET)$
                     *
-                    * FIX M4: CB_INPUT_TEXT callback equivalent.
+                    * CB_INPUT_TEXT callback equivalent.
                     * When a RIP_QUERY targets a $APPn$ variable AND the variable
                     * is empty (BBS wants user to fill it in), instead of returning
-                    * the empty string we start a card→IIgs→card round-trip:
+                    * the empty string we start a parser→host→parser round-trip:
                     *   1. Push CMD_QUERY_PROMPT marker (0x3E) + prompt text + NUL
-                    *      via TX FIFO so the IIgs can display an input form.
+                    *      via TX FIFO so the host can display an input form.
                     *   2. Set query_pending and record the target variable name.
-                    *   3. Do NOT send a response to the BBS yet; wait for the IIgs
-                    *      to send CMD_QUERY_RESPONSE bytes (handled in main.c).
+                    *   3. Do NOT send a response to the BBS yet; wait for the host
+                    *      to send response bytes via rip_query_response_byte().
                     * If the variable already has content, return it immediately
                     * (BBS is just querying a stored value, not requesting input). */
             if (len >= 5) {
@@ -3244,7 +2180,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
     case 'S': /* v1.54 spec: 'S' = RIP_FILL_STYLE — pattern:2 color:2 */
         if (len >= 4) {
-            s->fill_pattern = (uint8_t)mega2(p);
+            /* spec §2.4: pattern range 0-12.  A malformed out-of-range
+             * value maps to 0 (no fill) rather than a wrapped junk pattern
+             * that would fill with a stale card style (C-012). */
+            int fp = mega2(p);
+            s->fill_pattern = (uint8_t)((fp < 0 || fp > 12) ? 0 : fp);
             s->fill_color = (uint8_t)(mega2(p + 2) & 0x0F);
             int8_t card_pat = bgi_fill_to_card(s->fill_pattern);
             if (card_pat >= 0)
@@ -3305,7 +2245,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->draw_y = scale_y(mega2(p + 2));
         }
         break;
-    case 'g': /* RIP_GOTOXY (text cursor) */
+    case 'g': /* RIP_GOTOXY (text cursor).  col/row are MegaNum-bounded to
+               * 0..1295.  Unlike graphics coordinates, RIPlib does NOT clamp
+               * these here: it does not own the text grid — the host's
+               * comp_set_cursor callback must clamp to its own dimensions. */
         if (len >= 4) {
             comp_set_cursor(c, mega2(p), mega2(p + 2));
         }
@@ -3396,7 +2339,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* ── Pixel ───────────────────────────────────────────────── */
     /* DLL command table entry 16: '@' = RIP_PIXEL (2 args: XY,XY).
-     * Previous A2GSPU incorrectly mapped 'X' to RIP_PIXEL — 'X' is not in
+     * An earlier RIPlib draft incorrectly mapped 'X' to RIP_PIXEL — 'X' is not in
      * the DLL command table.  '@' is the correct command letter. */
 
     /* ── Line ────────────────────────────────────────────────── */
@@ -4286,7 +3229,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* ── Extended button (v2.0+) ─────────────────────────────── */
-    /* DLL command table entry 12: ';' = RIP_BUTTON_EXT (7 args: XY,XY,2,XY,XY,2,2). */
+    /* DLL command table entry 12: ';' = RIP_BUTTON_EXT (7 args: XY,XY,2,XY,XY,2,2).
+     * Registers a clickable visual region only; this variant carries no
+     * host-command text (text_len stays 0 via the memset), unlike 1U/1M —
+     * intentional per the DLL tables (C-016). */
     case ';': /* RIP_BUTTON_EXT — x0:2 y0:2 x1:2 y1:2 style:2 lx:2 ly:2 rx:2 ry:2 flags:2 tidx:2 */
         if (len >= 14 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
             rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
@@ -4356,11 +3302,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * BYTE PROCESSING — 14-state FSM (DLL has 13; A2GSPU adds LEVEL3)
+ * BYTE PROCESSING — 14-state FSM (DLL has 13; RIPlib adds LEVEL3)
  *
  * DLL ground truth: ripParseStateMachine @ 0x10039E90
  * Jump table: 0x1003AB9C  (states 0-12, stored at pContext+0x00)
- * State 13 (LEVEL3_LETTER) is an A2GSPU addition for the '3' prefix.
+ * State 13 (LEVEL3_LETTER) is a RIPlib addition for the '3' prefix.
  * prevState saved at pContext+0x04 for line-continuation restore.
  * lastChar  saved at pContext+0x9F for '!' line-boundary detection.
  * ══════════════════════════════════════════════════════════════════ */
@@ -4867,17 +3813,17 @@ reprocess:
 }
 
 /* ══════════════════════════════════════════════════════════════════
- * HOST CALLBACK SHIMS — called from main.c Mosaic command handlers
+ * HOST CALLBACK SHIMS — called from the consumer's command handlers
  *
  * These replace the RIPSCRIP.DLL host-app callback slots (the 75-slot
  * FARPROC table) that riptel.exe filled at startup.  Each function
- * operates on g_rip_state directly; main.c calls them by extern decl
+ * operates on g_rip_state directly; consumers call them by extern decl
  * to keep rip_state_t opaque outside this compilation unit.
  * ══════════════════════════════════════════════════════════════════ */
 
-/* FIX V1: CMD_SYNC_DATE byte handler (CB_GET_TIME / date half).
- * Called by main.c for each BUS_MOSAIC_CMD_SYNC_DATE write.
- * data_byte: next date character from IIgs ProDOS GET_TIME result,
+/* CMD_SYNC_DATE byte handler (CB_GET_TIME / date half).
+ * Called by the host once per byte of the date string.
+ * data_byte: next date character from the host's wall-clock source,
  *   or 0x00 to commit the accumulated buffer to host_date. */
 void rip_sync_date_byte(uint8_t data_byte) {
     if (!g_rip_state) return;
@@ -4895,8 +3841,8 @@ void rip_sync_date_byte(uint8_t data_byte) {
     }
 }
 
-/* FIX V1: CMD_SYNC_TIME byte handler (CB_GET_TIME / time half).
- * Called by main.c for each BUS_MOSAIC_CMD_SYNC_TIME write.
+/* CMD_SYNC_TIME byte handler (CB_GET_TIME / time half).
+ * Called by the host once per byte of the time string.
  * data_byte: next time character, or 0x00 to commit to host_time. */
 void rip_sync_time_byte(uint8_t data_byte) {
     if (!g_rip_state) return;
@@ -4913,9 +3859,9 @@ void rip_sync_time_byte(uint8_t data_byte) {
     }
 }
 
-/* FIX M4: CMD_QUERY_RESPONSE byte handler (CB_INPUT_TEXT callback equivalent).
- * Called by main.c for each BUS_MOSAIC_CMD_QUERY_RESPONSE write.
- * data_byte: next response character typed by the user on the IIgs,
+/* CMD_QUERY_RESPONSE byte handler (CB_INPUT_TEXT callback equivalent).
+ * Called by the host once per byte of the query response.
+ * data_byte: next response character typed by the user on the host,
  *   or 0x00 to commit and send the response to the BBS.
  * On NUL: stores response in the target user variable, pushes it to the
  * BBS via TX FIFO, and clears query_pending. */

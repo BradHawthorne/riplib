@@ -1,5 +1,5 @@
 /*
- * rip_icn.c — BGI putimage (.ICN) format parser for A2GSPU card
+ * rip_icn.c — BGI putimage (.ICN) format parser for RIPlib
  *
  * ICN file layout (BGI getimage/putimage format):
  *   Bytes 0-1: (width - 1)  as uint16_t LE

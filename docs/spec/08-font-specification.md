@@ -35,7 +35,7 @@ Glyph data layout:
 
 Bit ordering:
 
-     8×8:    LSB-first (Apple IIe convention)
+     8×8:    LSB-first (bit 0 = leftmost pixel)
              Bit 0 = leftmost pixel, Bit 7 = rightmost pixel
              NOTE: CP437 source data is MSB-first. RIPlib reverses
              bits at init time for draw_text compatibility.

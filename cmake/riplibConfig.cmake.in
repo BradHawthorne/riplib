@@ -1,0 +1,21 @@
+# riplibConfig.cmake.in — package configuration template for find_package(riplib)
+#
+# Generated and installed by CMake's install(EXPORT ...) machinery.
+# After install, downstream projects can:
+#
+#   find_package(riplib REQUIRED)
+#   target_link_libraries(my_app PRIVATE riplib::riplib)
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/riplibTargets.cmake")
+
+# Validate the imported target exists.
+if(NOT TARGET riplib::riplib)
+    set(riplib_FOUND FALSE)
+    set(riplib_NOT_FOUND_MESSAGE
+        "riplib::riplib target missing from installed riplibTargets.cmake")
+    return()
+endif()
+
+check_required_components(riplib)

@@ -1,25 +1,24 @@
 /*
- * drawing.h — Unified rendering primitives for A2GSPU card
+ * drawing.h — Unified rendering primitives for RIPlib
  *
- * ALL framebuffer pixel operations go through this module. This is the
+ * ALL framebuffer pixel operations go through this module.  This is the
  * single source of truth for: pixel writes, lines, rectangles, circles,
  * ellipses, arcs, flood fill, Bezier curves, text overlay, region
  * copy/save/restore, and clipping.
  *
- * The rendering pipeline hierarchy:
- *   Mosaic commands (main.c) → draw_*() → framebuffer
- *   Protocol parsers         → draw_*() → framebuffer
- *   IIgs mode renderers      → framebuffer (direct, for Apple II video)
- *   Terminal grid renderer   → framebuffer (direct, cp437 glyph blit)
+ * The rendering pipeline hierarchy (per consumer):
+ *   Protocol parsers (ripscrip*.c) → draw_*() → framebuffer
+ *   Host-specific renderers        → framebuffer (direct, when their
+ *                                    pixel formats don't map to draw_*)
  *
- * Only IIgs display mode renderers (TEXT40/80, LORES, HIRES, SHR) and
- * the terminal grid renderer write framebuffer directly — they have
- * specialized pixel formats (Apple II character ROM, NTSC artifacts,
- * SHR scanline control bytes) that don't map to draw_*() primitives.
- * All UHR/Mosaic/protocol drawing MUST go through draw_*().
+ * Consumers with specialized pixel formats (NTSC artifacts, scanline
+ * control bytes, character-ROM tile renderers) may write the framebuffer
+ * directly; everything that's a generic 2-D vector or raster operation
+ * should go through draw_*() so write modes, fill patterns, and clipping
+ * stay consistent.
  *
  * Copyright (c) 2026 SimVU (Brad Hawthorne)
- * Licensed under the MIT License. See LICENSE.
+ * Licensed under the MIT License.  See LICENSE.
  */
 
 #pragma once
@@ -39,7 +38,11 @@ void draw_set_dirty_callback(draw_dirty_callback_t cb);
  * Used by the $REFRESH$ text variable (ripInvalidateAll equivalent). */
 void draw_mark_all_dirty(void);
 
-/* ── Initialization ──────────────────────────────────────────────── */
+/* ── Initialization ──────────────────────────────────────────────── *
+ * Contract: pitch >= width, and pitch * height must not exceed INT_MAX —
+ * the renderer indexes the framebuffer with int arithmetic on the hot
+ * paths, so a larger surface would overflow.  The shipped 640×400 target
+ * is far within this bound; protocol coordinates are capped at ~1480. */
 void draw_init(uint8_t *framebuf, uint16_t pitch, uint16_t width, uint16_t height);
 
 /* ── Clip save/restore ───────────────────────────────────────────── *
@@ -111,7 +114,11 @@ void draw_elliptical_pie(int16_t cx, int16_t cy, int16_t rx, int16_t ry,
                           int16_t start_deg, int16_t end_deg, bool fill);
 void draw_thick_line(int16_t x0, int16_t y0, int16_t x1, int16_t y1);
 
-/* ── Raster / region operations ──────────────────────────────────── */
+/* ── Raster / region operations ──────────────────────────────────── *
+ * Buffer contract: `dest` / `src` point to exactly w*h bytes with row
+ * stride = w.  The screen rect [x,y,w,h] is clipped to the framebuffer,
+ * but the caller buffer is always indexed at the full, unclipped w*h —
+ * size it to w*h, not to the clipped extent. */
 void    draw_copy_rect(int16_t sx, int16_t sy, int16_t dx, int16_t dy,
                        int16_t w, int16_t h);
 void    draw_save_region(int16_t x, int16_t y, int16_t w, int16_t h,
