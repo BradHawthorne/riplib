@@ -84,6 +84,13 @@ LEVEL 0 — Extended Commands (v2.0+):
      D    FILL_PATTERN_EXT       18    !|D<p0>..<p7><color>|
      <    GET_IMAGE_EXT          8     !|<<x0><y0><x1><y1>|
      t    REGION_TEXT            var   !|t<justify><text>|
+     `    COMPOSITE_ICON         var   !|`<n><pairs..><mode>|
+     !    COMMENT                var   !|!<text>|   (consumed, no output)
+     ( )  GROUP_BEGIN / _END     0     !|(|  !|)|  (no-op markers)
+
+     (The backtick COMPOSITE_ICON, the '!' comment marker, and the
+      '('/')' group markers are RIPlib extensions beyond the published
+      TeleGrafix tables — see 11-dll-deviations.md §DEV.4.)
 
 LEVEL 1 — Interactive (prefix '1'):
 
@@ -109,6 +116,15 @@ LEVEL 1 — Interactive (prefix '1'):
      D    DEFINE_VARIABLE        var   !|1D<name>=<value>|
      O    FONT_LOAD              var   !|1O<filename>|
      Q    QUERY_EXT              var   !|1Q<flags><res><varname>|
+     V    SET_VIEWPORT_EXT       9     !|1V<x0><y0><x1><y1><scale>|
+     X    CLIPBOARD_OP           var   !|1X<op>[<params>]|
+     R    READ_SCENE             var   !|1R<filename>|
+
+     (1V/1X/1R are RIPlib extensions beyond the published TeleGrafix
+      tables — see 11-dll-deviations.md §DEV.4. 1V sets the viewport
+      and stores a scale field; 1X is a compound clipboard op
+      [0=clear 1=flipH 2=flipV 3=rot180 4=invert 5=capture 6=paste];
+      1R queues a scene-file request to the host.)
 
 LEVEL 2 — Drawing Ports (prefix '2'):
 

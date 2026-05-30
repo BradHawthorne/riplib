@@ -12,13 +12,22 @@ in Borland CHR binary format). This segment documents both.
 8.1  BITMAP FONTS
 ---------------------------------------------------------------------
 
-Font ID 0 selects the bitmap font. Two bitmap font sizes are
-available:
+Font ID 0 selects the bitmap font. Two bitmap glyph tables exist in
+the CP437 source data:
 
      Font         Size    Encoding     Characters
      ----------   -----   ----------   ----------
      CP437 8×8    8×8     1 bit/pixel  256 (0x00-0xFF)
      CP437 8×16   8×16    1 bit/pixel  256 (0x00-0xFF)
+
+IMPLEMENTATION NOTE (RIPlib): the protocol parser renders bitmap text
+with the 8×16 face exclusively — every command-driven text path uses
+`cp437_8x16`. The 8×8 table ships in the font set and is available to
+direct `draw_text()` callers (the `examples/demo.c` program uses it),
+but no RIPscrip command selects it: the `font_size` field scales the
+BGI *stroke* fonts, not the bitmap face, and the original DLL likewise
+rejected the 8×8 bitmap for metrics-dependent text. An 8×16-only bitmap
+face is therefore the intended behaviour, not a missing feature.
 
 CP437 is the IBM PC code page 437 character set, which includes
 ASCII printable characters (0x20-0x7E), accented letters

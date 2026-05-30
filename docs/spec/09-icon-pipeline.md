@@ -38,10 +38,20 @@ are decoded to this common representation.
 When a RIP_LOAD_ICON command references an icon by filename, the
 lookup proceeds in this order:
 
-     1. Flash BMP table — linear scan of 95 entries
-     2. Flash ICN table — linear scan of 3 entries
-     3. PSRAM cache — linear scan of up to 64 entries
+     1. PSRAM runtime cache — linear scan of up to 64 entries
+     2. Flash BMP table — linear scan of 95 entries
+     3. Flash ICN table — linear scan of 3 entries
      4. Not found — queue file request for BBS transfer
+
+The runtime cache is checked FIRST (ahead of the flash tables) so that
+an icon uploaded by the BBS, or one captured/generated at runtime
+(e.g. via clipboard "write icon"), supersedes a same-named bundled
+flash asset for the current session. This lets a stream override a
+built-in icon without a name collision. The cache is per-session and
+cleared on reset, so the flash defaults are always restored for a new
+session. (RIPlib chooses cache-first deliberately; see
+`11-dll-deviations.md` §DEV.2 for the rationale and the contrast with
+a flash-first order.)
 
 Filename matching:
      - Case-insensitive comparison

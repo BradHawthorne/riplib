@@ -834,17 +834,23 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      * Stores text_scale and text_rotation in ripscrip2_state_t for
      * introspection AND projects them onto the BGI rendering knobs
      * that subsequent text commands actually read:
-     *   - text_scale (1..7) → rs->font_size (BGI integer scale 1-10)
+     *   - text_scale (1..10) → rs->font_size (BGI integer scale 1-10)
      *   - text_rotation snapped to the nearest 90° quadrant →
      *     rs->font_dir (0=horizontal, 1=vertical CW, 2=vertical CCW)
+     *
+     * Scale is clamped to the renderer's real range 1-10 (bgi_font.c caps
+     * scale at 10), matching the 'Y' RIP_FONT_STYLE handler's clamp.  An
+     * out-of-range value falls back to 1 rather than being bit-masked —
+     * masking would silently corrupt valid scales (e.g. 10 & 0x07 == 2).
      *
      * 180° has no font_dir mapping — the BGI renderer doesn't support
      * upside-down text — so it falls back to horizontal, matching what
      * legacy clients did with the unsupported angle. */
     case RIP2_CMD_SCALE_TEXT: {
         if (param_count >= 1) {
-            s->text_scale = (uint8_t)(params[0] & 0x07);
-            if (rs && s->text_scale > 0)
+            int sc = params[0];
+            s->text_scale = (uint8_t)((sc >= 1 && sc <= 10) ? sc : 1);
+            if (rs)
                 rs->font_size = s->text_scale;
         }
         if (param_count >= 2) {

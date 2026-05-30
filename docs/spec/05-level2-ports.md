@@ -286,11 +286,25 @@ between color1 and color2.
 
      Function:     Scalable Text
      Command:      |26
-     Arguments:    (implementation-defined, variable format)
-     Format:       !|26...|
+     Arguments:    scale:2 rotation:2
+     Format:       !|26<scale><rotation>|
 
-Extended text rendering with scalable size parameters beyond
-the standard 1-10 range.
+Sets the active text scale and rotation for subsequent text commands.
+
+     scale     Integer magnification, clamped to 1-10 (the BGI stroke
+               renderer's supported range; the same range the |Y
+               RIP_FONT_STYLE size field uses). Projected onto the
+               BGI font_size. Out-of-range values fall back to 1.
+     rotation  Degrees, snapped to the nearest 90° quadrant:
+               0°→horizontal, 90°→vertical CW, 270°→vertical CCW.
+               180° has no stroke-renderer mapping and falls back to
+               horizontal.
+
+NOTE: earlier draft spec text described scaling "beyond the standard
+1-10 range." RIPlib's stroke renderer tops out at scale 10, so the
+implementation clamps there rather than honouring larger values. This
+is the renderer's true ceiling, documented in `11-dll-deviations.md`
+§DEV.3.
 
 
 ---------------------------------------------------------------------

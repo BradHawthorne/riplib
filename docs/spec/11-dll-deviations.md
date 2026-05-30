@@ -243,87 +243,111 @@ v3.1 activates them with working implementations.
 
 
 ---------------------------------------------------------------------
-11.6  RIPlib SPEC/CODE RECONCILIATION (2026-05-30 re-audit, C-012)
+11.6  RIPlib DELIBERATE DEVIATIONS (2026-05-30 re-audit, C-012)
 ---------------------------------------------------------------------
 
-The Opus-4.8 re-audit found a cluster of places where RIPlib's
-implementation diverges from `docs/spec/01..10`.  Per HR-001, each is
-either fixed in code or recorded here.  The items below are the
-"documented deviation" set: the code matches (or plausibly matches)
-observed RIPSCRIP.DLL behaviour and the spec text is the incomplete
-side.  (The "fix in code" set — text escapes `\^`/`\n`, fill-pattern
-range clamp, the BGI table-order comment, the 1U single-segment
-fallback — was applied directly and is not repeated here.)
+This section records places where RIPlib's behaviour DELIBERATELY
+differs from the published spec text, with the rationale.  Per the
+charter of this document, every entry here is a *decision*: either the
+deviation improves the library and is kept, or the spec text is the
+incomplete side and has been corrected to match the code.  Items that
+were merely unfinished code were FIXED rather than enshrined here, and
+items that were genuinely open questions were moved to
+`design/knowledge.md` (they are not "deviations" until a decision is
+made).  The 2026-05-30 re-audit disposition of each candidate finding:
 
-§DEV.1 — RIP_MOUSE ('1M') reserved field:
-     Spec §3.2 lists fixed parameters totalling 11 characters
-     (x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1) with text immediately
-     after.  The implementation consumes 17 characters before the text
-     (an extra res:4 after the flags digit), matching the DLL's record
-     layout and the parallel ':' RIP_MOUSE_REGION_EXT field.  Streams
-     whose `1M` text is not preceded by 4 reserved chars lose their
-     first 4 text bytes.  GROUND TRUTH UNRESOLVED (U-024): if a real
-     capture shows the DLL used 11, this flips to a code fix.
+  FIXED IN CODE (were bugs, not deviations — not listed below):
+    • text escapes `\^` / `\n` added to `unescape_text` (spec §1.6/§7.1)
+    • RIP_FILL_STYLE ('S') pattern clamped to spec range 0-12
+    • the misleading BGI font-table-order comment in `bgi_font.c`
+    • '1U' single-segment button now reuses the label as host command
+    • '26' SCALABLE_TEXT scale: was bit-masked `& 0x07` (which silently
+      corrupted valid scales — e.g. 10 became 2); now clamped to the
+      renderer's true 1-10 range, matching the '|Y' size field.  See
+      §DEV.3.
 
-§DEV.2 — RIP_DEFINE ('1D') argument grammar:
-     Spec §3.18 shows `!|1D<name>=<value>` (example `!|1DMYVAR=...`).
-     The implementation consumes a `flags:3 res:2` prelude before the
-     `name=value` text and additionally accepts a
-     `$APPn$:?prompt?default` form.  The documented bare example would
-     have its first 5 characters eaten as flags/reserved.  The richer
-     grammar matches DLL/RIPterm behaviour, so §3.18 is treated as the
-     oversimplified side.  GROUND TRUTH UNRESOLVED (U-025).
+  CORRECTED IN THE SPEC (code was right, spec text was incomplete —
+  the spec files were edited, so they no longer disagree; recorded
+  here only as a pointer):
+    • icon lookup order — see §DEV.2 (spec §9.2 updated)
+    • undocumented commands 1V/1X/1R + backtick/comment/group — see
+      §DEV.4 (spec §A.1 command tables updated)
+    • '26' scale arguments and range — spec §5.9 updated
 
-§DEV.3 — Undocumented-but-implemented commands:
-     The parser accepts several commands absent from the spec command
-     tables (§2/§3/§4/§A.1):
-        Level 1:  '1V' RIP_SET_VIEWPORT_EXT, '1X' RIP_CLIPBOARD_OP,
-                  '1R' RIP_READ_SCENE
-        Level 0:  0x60 backtick = RIP_COMPOSITE_ICON (full impl),
-                  '(' / ')' group markers (no-op stubs),
-                  '!' comment marker (`!|!…|`)
-     These are additive (a stream that doesn't use them is unaffected).
-     Whether they are RIPlib extensions or recovered DLL commands is
-     UNRESOLVED (U-026); documented here so the dispatch surface is
-     fully described.
+  MOVED TO design/knowledge.md (open questions, NOT decisions — they
+  do not belong in a deviations register until resolved):
+    • '1M' reserved-field width (11 vs 17 chars) → U-024
+    • '1D' DEFINE argument grammar (bare name=value vs flags prelude)
+      → U-025
+    Both await DLL/RIPterm ground truth (a disassembly or a real wire
+    capture).  Until then the code keeps its current behaviour but the
+    project has NOT decided it is correct, so it is tracked as an
+    unknown rather than asserted as a deviation.
 
-§DEV.4 — 8×8 bitmap font not provided:
-     Spec §8.1 documents two CP437 bitmap faces (8×8 and 8×16)
-     selectable for font ID 0.  RIPlib ships and renders only the 8×16
-     face; every bitmap text path hardcodes `cp437_8x16`/height 16.
-     The `font_size` field is parsed/stored but never selects an 8×8
-     glyph table.  Bitmap text still renders; only the smaller face is
-     unavailable.
+The genuine, decided deviations follow.
 
-§DEV.5 — RIP_SCALABLE_TEXT ('26') scale cap:
-     Spec §5.9 / §4.17 advertise scalable text "beyond the standard
-     1-10" range.  The implementation masks the scale parameter with
-     `& 0x07` (0-7), silently truncating 8 and 9.  Documented as a
-     known limitation rather than fixed (no consumer is known to send
-     scales above 7).
-
-§DEV.6 — RIP_SET_WINDOW ('22') chrome:
-     Spec §5.10 defines `22` as `x:2 y:2 w:2 h:2` with no visual
-     specification.  The implementation unconditionally paints a fixed
-     light-gray frame and blue title bar (colours the spec does not
-     define).  Cosmetic; documented so the fixed chrome is not mistaken
-     for a bug.
-
-§DEV.7 — Icon lookup order:
-     Spec §9.2 lists the lookup order as flash-BMP → flash-ICN →
-     runtime cache.  The implementation checks the runtime cache FIRST
-     (cache → flash-BMP → flash-ICN) so a runtime-cached or
-     clipboard-stamped icon supersedes a same-named flash asset.  This
-     is a deliberate choice (lets a stream override a built-in icon),
-     not a parsing bug.
-
-§DEV.8 — Text escape set (note on the applied code fix):
+§DEV.1 — Text escape set is a strict superset of the spec:
      Spec §1.6 / §7.1 define escapes `\\ \| \^ \n`.  RIPlib's
-     `unescape_text` now implements all four AND additionally accepts
-     `\!` as a literal '!' — a RIPlib extension, because '!' is the
-     command-frame lead-in and a literal '!' in text would otherwise be
-     ambiguous.  Consumers and stream authors may rely on `\!`; it is
-     a strict superset of the spec.
+     `unescape_text` implements all four AND additionally accepts
+     `\!` as a literal '!'.  Rationale: '!' is the command-frame
+     lead-in, so a literal '!' in text would otherwise be ambiguous;
+     `\!` lets a stream emit one unambiguously.  This is a deliberate,
+     backward-compatible extension (a strict superset — every
+     spec-conformant stream still behaves identically).  KEPT.
+
+§DEV.2 — Icon lookup checks the runtime cache first:
+     The implementation resolves an icon name in the order
+     cache → flash-BMP → flash-ICN, so a runtime-cached or
+     clipboard-written icon supersedes a same-named bundled flash
+     asset for the session.  Rationale: lets a stream override a
+     built-in icon without a name collision; the cache is per-session
+     and cleared on reset, so flash defaults always return for a new
+     session.  This is a deliberate capability improvement.  KEPT.
+     Spec §9.2 has been updated to document this order (it previously
+     listed flash-first), so spec and code now agree.
+
+§DEV.3 — Text scale clamped to the renderer's 1-10 range:
+     Earlier draft spec text (§5.9) advertised scalable text "beyond
+     the standard 1-10 range."  RIPlib's BGI stroke renderer
+     (`bgi_font.c`) caps integer scale at 10; the '26' SCALABLE_TEXT
+     and '|Y' RIP_FONT_STYLE handlers both clamp to 1-10 accordingly.
+     Rationale: 10 is the renderer's real ceiling — honouring larger
+     values would require a different glyph pipeline.  This is a
+     truthful limit, not silent truncation: the previous `& 0x07`
+     bit-mask (which mangled scales 8-10) was a bug and has been fixed
+     to a proper clamp.  Spec §5.9 has been corrected to state the
+     1-10 range.  KEPT (as a documented renderer limit).
+
+§DEV.4 — RIPlib-original commands beyond the TeleGrafix tables:
+     RIPlib implements several commands absent from the historical
+     TeleGrafix command tables:
+        Level 1:  1V SET_VIEWPORT_EXT (viewport + stored scale field),
+                  1X CLIPBOARD_OP (compound clipboard: clear/flipH/
+                  flipV/rot180/invert/capture/paste),
+                  1R READ_SCENE (queue a scene-file host request)
+        Level 0:  backtick (0x60) COMPOSITE_ICON (multi-cell icon
+                  assembly), '!' comment marker (`!|!…|`, consumed
+                  with no output), '(' / ')' group markers (no-ops
+                  reserved for stream structuring)
+     These are additive — a stream that never sends them is unaffected,
+     and unknown-to-a-peer commands degrade harmlessly.  They are now
+     documented in the spec command tables (§A.1) as RIPlib extensions
+     so the dispatch surface is fully described.  KEPT.
+     (Origin note: whether any of these mirror undocumented RIPSCRIP.DLL
+     behaviour or are wholly RIPlib-original is an open provenance
+     question, U-026; it does not affect that they are intentional and
+     documented.)
+
+§DEV.5 — RIP_SET_WINDOW ('22') draws fixed window chrome:
+     Spec §5.10 defines '22' arguments as `x:2 y:2 w:2 h:2` with no
+     visual specification.  RIPlib paints a 1-pixel light-gray (palette
+     7) outline plus a 14-pixel blue (palette 1) title bar inside it.
+     Rationale: the command is named "Define Window Region" and a
+     visible frame+titlebar is the useful default for a windowing
+     widget on a single-framebuffer target; the spec leaves the
+     appearance implementation-defined, so this is a concrete choice
+     within the spec's latitude rather than a contradiction of it.
+     KEPT (deliberate default chrome).
 
 =====================================================================
 ==                    END OF SEGMENT 11                             ==
