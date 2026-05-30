@@ -25,6 +25,7 @@
 #include "bgi_font.h"
 #include "drawing.h"
 #include <limits.h>
+#include <stddef.h>  /* size_t — not portably pulled in by the above (glibc/clang) */
 
 /* Sign-extend a 7-bit value to int16_t */
 static int16_t sign7(uint8_t v) {
