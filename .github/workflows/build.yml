@@ -51,10 +51,12 @@ jobs:
 
     - name: Fuzz harness (compile + short run, libFuzzer / clang)
       run: |
+        # Do NOT put -fsanitize=fuzzer in global CMAKE_C_FLAGS: it injects a
+        # main() that collides with CMake's compiler-probe test program and
+        # breaks configure.  The fuzzer flag is scoped to the fuzz_parser
+        # target in tests/CMakeLists.txt; here we only enable the option.
         cmake -B build-fuzz \
           -DCMAKE_C_COMPILER=clang \
-          -DCMAKE_C_FLAGS="-fsanitize=fuzzer,address,undefined -g -O1" \
-          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=fuzzer,address,undefined" \
           -DRIPLIB_BUILD_TESTS=ON -DRIPLIB_BUILD_FUZZ=ON
         cmake --build build-fuzz --target fuzz_parser
         ./build-fuzz/tests/fuzz_parser -max_total_time=30 -rss_limit_mb=2048
