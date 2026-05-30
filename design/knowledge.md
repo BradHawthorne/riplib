@@ -53,6 +53,31 @@ Each rule must change a future decision.
   agents both manufacture phantom findings; a clean re-read is the cheap filter.
 - **Recorded**: 2026-05-30
 
+### HR-003 — Local newlib(ARM)+MSVC cannot reproduce glibc/host link bugs; CI is ground truth for link-time + platform-divergence issues
+- **Rule**: A clean local build is necessary but NOT sufficient. The local
+  toolchains (arm-none-eabi-gcc = newlib bare-metal, library-only; MSVC = math
+  in CRT) structurally cannot surface a host gcc/clang **link** failure such as
+  a missing `-lm`. For anything that only manifests at the final executable
+  link or differs by libc/platform (libm, POSIX feature-test macros, `-lpthread`,
+  linker GC, ABI), treat **CI as the only ground truth** and verify there before
+  declaring done. Watch the run to completion; do not infer green from a partial
+  local pass.
+- **Origin**: 2026-05-30. After pushing the audit work (e2f5652) with local
+  verification "238/238 on MSVC + clean ARM", CI went RED — 6/10 jobs failed at
+  the Build/link step. riplib (STATIC, calls sinf/cosf/atan2f/sqrtf) linked
+  libm `PRIVATE`, so the dependency didn't propagate to consumer executables;
+  `nm libriplib.a` showed `U sinf` etc. Fix: link `m` `PUBLIC` (8f3c9d2) → all
+  10 jobs green. The two passing local configs (MSVC, library-only ARM) were
+  exactly the two that can't see the bug.
+- **Applies to**: any CMake `target_link_libraries` visibility choice on a
+  static lib; any "it builds locally, ship it" moment; release checklists.
+- **How to apply**: a library's external deps (libm, pthread, …) must be
+  `PUBLIC`/`INTERFACE` on a STATIC lib so they reach the final link. After any
+  push, poll the run via the GitHub REST API (`/actions/runs?branch=main`,
+  cache-bust the URL) until `status=completed`, then confirm `conclusion=success`
+  and spot-check the per-job list.
+- **Recorded**: 2026-05-30
+
 ---
 
 ## Prior art register
