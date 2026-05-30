@@ -79,7 +79,14 @@ target_include_directories(riplib PUBLIC
 )
 
 if(NOT MSVC)
-    target_link_libraries(riplib PRIVATE m)  # math library (not needed on MSVC)
+    # PUBLIC, not PRIVATE: riplib is a STATIC library that calls libm
+    # (sinf/cosf/atan2f/sqrtf in drawing.c + ripscrip2.c).  A static archive
+    # does not resolve its own external symbols — they stay undefined (nm shows
+    # `U sinf` etc.) until the final executable link.  With PRIVATE the `m`
+    # dependency would not propagate to consumers (tests, examples, downstream
+    # apps), so their link fails with "undefined reference to sinf" under
+    # gcc/clang.  MSVC gets math from its CRT and needs no -lm.
+    target_link_libraries(riplib PUBLIC m)
 endif()
 
 # ── Optional: build example ─────────────────────────────────────────
