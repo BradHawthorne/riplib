@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project(riplib VERSION 1.2.1 LANGUAGES C)
+project(riplib VERSION 1.2.2 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 99)
 # Only pull in CTest (and its Experimental/Nightly/… targets + BUILD_TESTING)
