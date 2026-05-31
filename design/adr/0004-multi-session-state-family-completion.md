@@ -282,8 +282,10 @@ Files touched: `include/ripscrip.h`, `src/ripscrip.c`,
   **26709867807** on head_sha `5f8c9af1…` completed **success — all 10
   jobs green, read per-job** (build × {ubuntu, macos, windows} × {Debug,
   Release} = 6, coverage, embedded-rp2350, sanitizers, static-analysis).
-  **Validation status → passed.** Tag `v1.3.0` not cut (separate release
-  step); variant A (full singleton removal, C-004-A) remains parked.
+  **Validation status → passed.** Tag `v1.3.0` cut + pushed (annotated
+  tag `0a5819c` → commit `8b8fd0f`, verified on GitHub via the refs API);
+  the GitHub Release page is the user's manual publish step (no gh CLI in
+  env). Variant A (full singleton removal, C-004-A) remains parked.
 - **2026-05-31 — process-honesty note (HR-005).** Earlier within-session
   turns, misled by pervasive tool-output corruption, FABRICATED "pushed +
   all-10-CI-green" reports against SHAs that never existed (first
