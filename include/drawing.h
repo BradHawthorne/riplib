@@ -131,7 +131,12 @@ uint8_t draw_get_pixel(int16_t x, int16_t y);
  * Render a string at pixel coordinates using a bitmap font.
  * font: pointer to glyph bitmap data (8 bytes/glyph for 8-high,
  *        16 bytes/glyph for 16-high). NULL = use character_rom.
- * font_height: glyph height in pixels (8 or 16).
+ *        CONTRACT: the buffer must hold at least 256 * font_height
+ *        bytes (one full 256-glyph table) — glyphs are indexed as
+ *        font[(uint8_t)ch * font_height + row], so any byte 0x00-0xFF
+ *        in `str` may be looked up.
+ * font_height: glyph height in pixels. RIPlib ships 8 and 16; a caller
+ *        passing another height must size `font` to 256 * font_height.
  * fg, bg: palette indices. bg=0xFF means transparent background. */
 void draw_text(int16_t x, int16_t y, const char *str, int len,
                const uint8_t *font, uint8_t font_height,
