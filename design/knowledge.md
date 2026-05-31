@@ -83,6 +83,36 @@ Each rule must change a future decision.
   and spot-check the per-job list.
 - **Recorded**: 2026-05-30
 
+### HR-004 — For a source-vendored / static-only library, struct opacification buys encapsulation discipline, not ABI stability — weigh accordingly
+- **Rule**: Before opacifying a public struct (forward-typedef + private
+  internal header), check the *distribution model*. Opacification's
+  headline benefit is a stable **binary ABI** across versions so prebuilt
+  binaries keep linking when the struct layout changes. If the library
+  ships as **vendored source and/or a STATIC archive that consumers
+  recompile from the matching header** (no `.so`/`.dll`), that benefit
+  does not apply — every consumer rebuilds against the current layout
+  anyway. What remains is *source-level encapsulation discipline*
+  (stopping consumers from coding against internal fields), which a
+  documented opaque-by-policy convention (visible struct + "INTERNAL,
+  do not touch" comment) already largely delivers. Do not pay the
+  breaking-change cost of full opacification for an ABI guarantee no one
+  in your distribution model can use.
+- **Origin**: 2026-05-31, C-003-B re-evaluation (ADR-0005). The decision
+  to promote `rip_state_t` from opaque-by-policy (variant C) to full
+  opacification (variant B) turned on this: C-005/T-003 fixed RIPlib's
+  distribution as source-vendored + `add_library(... STATIC ...)` only.
+  That collapsed B's benefit to discipline-already-provided-by-C and
+  re-parked B (rather than promoting it) with a promote-to-kill clause
+  toward *permanent* opaque-by-policy.
+- **Applies to**: any future revisit of C-003-B; any decision to opacify
+  another public type (e.g. drawing/port state); any "should this be an
+  opaque handle?" question for a library distributed as source or static.
+- **How to apply**: if distribution is source/static-only and no
+  binary-distribution path is planned, prefer opaque-by-policy and treat
+  full opacification as unjustified until a real binary-ABI consumer
+  appears (ADR-0005 resume condition (b)).
+- **Recorded**: 2026-05-31
+
 ---
 
 ## Prior art register
@@ -147,15 +177,16 @@ to be answered together (one spike or one hardware test resolves several).
 
 | ID    | Question | Date raised | Status | Answer + source |
 |-------|----------|-------------|--------|-----------------|
-| U-012 | Is multi-session RIPlib usage a real scenario today, or speculative? A Synchronet-style multi-connection BBS server would need it; a single-card embedded use would not. The answer drives whether (A) breaking-change-with-explicit-state or (B) document-single-session-constraint wins | 2026-05-25 | open | — |
+| U-012 | Is multi-session RIPlib usage a real scenario today, or speculative? A Synchronet-style multi-connection BBS server would need it; a single-card embedded use would not. The answer drives whether (A) breaking-change-with-explicit-state or (B) document-single-session-constraint wins | 2026-05-25 | open | — Still open, but **no longer gates shipped-contract correctness**. The 2026-05-31 C-004 resume (ADR-0004) found the `_state()` family was incomplete (4 of 6 globals had no reentrant counterpart) and committed variant A′ (additive completion) to fix that *independently of U-012* — A′ is API honesty, not speculative multi-session support. U-012 now gates only **variant A** (the parked full singleton removal, C-004-A): A ships when U-012 resolves "yes" (a concrete embedder reports single-session as a blocker). |
+| U-027 | Once variant A′ (the completed `_state()` family) ships in 1.3.0, does any embedder actually call the new reentrant entrypoints (`rip_sync_date_byte_state` / `rip_sync_time_byte_state` / `rip_query_response_byte_state` / `rip_apply_palette_state`)? | 2026-05-31 | open | — Phase-7 observability question for C-004. "Yes" also resolves U-012 toward shipping variant A (full singleton removal). "No, indefinitely" argues for *promoting variant A to a kill* (single-session is the real product) rather than a perpetual park — see the C-004-A promote-to-kill clause in `decisions.md`. |
 
 ### Raised by C-003 — rip_state_t opaque-by-policy
 
 | ID    | Question | Date raised | Status | Answer + source |
 |-------|----------|-------------|--------|-----------------|
 | U-020 | How many direct-field-access sites does `tests/test_ripscrip.c` have? | 2026-05-25 | answered 2026-05-25 | **211 sites** (grep against an ~40-field union). Heavy white-box. Drives the design: variant A (full opacification + accessor calls) would require rewriting all 211 sites; variants B and C leave them untouched (B via opt-in private header, C by keeping the struct visible). |
-| U-021 | Does A2GSPU's vendored copy (`platform_a2gspu.c` + their integration glue) access `rip_state_t` fields directly outside of the public API? | 2026-05-25 | open | Cannot be answered from this environment. Resolution gates the timing of any future variant-B promotion: if A2GSPU is API-only today, B can land at the next major; if A2GSPU has direct accesses, B requires coordinated migration. Inspect their source tree to answer. |
-| U-022 | Are there legitimate consumer patterns (debugging, serialisation, hot-path optimisation) that require permanent direct field access? | 2026-05-25 | open | Should be answered before any future variant-B promotion. If yes, the accessor set for B needs to cover those patterns; if no, B can be strict. |
+| U-021 | Does A2GSPU's vendored copy (`platform_a2gspu.c` + their integration glue) access `rip_state_t` fields directly outside of the public API? | 2026-05-25 | open | Cannot be answered from this environment. Resolution gates the timing of any future variant-B promotion: if A2GSPU is API-only today, B can land at the next major; if A2GSPU has direct accesses, B requires coordinated migration. Inspect their source tree to answer. **2026-05-31 (ADR-0005):** this is now the named **resume condition (a)** for the re-parked C-003-B — B promotes only if a consumer is found to direct-access fields *and* that coupling causes real friction. |
+| U-022 | Are there legitimate consumer patterns (debugging, serialisation, hot-path optimisation) that require permanent direct field access? | 2026-05-25 | open | Should be answered before any future variant-B promotion. If yes, the accessor set for B needs to cover those patterns; if no, B can be strict. **2026-05-31 (ADR-0005):** if "yes," B must keep the internal-header escape hatch (or grow an accessor API à la variant A); if "no," B can be strict — but per HR-004 the source/static-only distribution may make *permanent opaque-by-policy* the right terminal answer regardless. |
 
 ### Raised by C-006 — Test-coverage gap pack
 
