@@ -156,6 +156,13 @@ Each rule must change a future decision.
 - **How to apply**: see the 8 numbered points. Litmus test before reporting "done":
   *"Which primitive command output, produced THIS turn, proves this?"* If the answer
   is "my memory" or "a log line I can't re-derive," it is unverified — say so.
+  **Tooling**: `bash scripts/repo-status.sh` emits all the git facts (HEAD, remote,
+  SYNCED, AHEAD/BEHIND, DIRTY, DESCRIBE) plus the HEAD's CI run/conclusion in ONE
+  ASCII block wrapped in `>>>REPO-STATUS BEGIN/END` sentinels — if you do not see the
+  END line the capture was truncated/garbled, so re-run rather than infer. It prints
+  `UNKNOWN` for anything it cannot derive from a primitive (e.g. CI when the API is
+  unreachable from `curl`; in that case fall back to the per-job PowerShell
+  `Invoke-RestMethod` query against `/actions/runs/<id>/jobs`). It never guesses.
 - **Recorded**: 2026-05-31
 
 ---
