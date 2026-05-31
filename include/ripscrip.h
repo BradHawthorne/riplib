@@ -518,11 +518,17 @@ void rip_session_reset(rip_state_t *s);
 
 void rip_process(rip_state_t *s, void *ctx, uint8_t ch);
 
-/* Stateful host-event helpers for multi-session integrations. */
+/* Stateful host-event helpers for multi-session integrations.  This is
+ * the complete reentrant surface: every globals-based wrapper further
+ * down has a fully reentrant *_state() form declared here. */
 void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked);
 void rip_file_upload_begin_state(rip_state_t *s, uint8_t name_len);
 void rip_file_upload_byte_state(rip_state_t *s, uint8_t data_byte);
 void rip_file_upload_end_state(rip_state_t *s);
+void rip_sync_date_byte_state(rip_state_t *s, uint8_t data_byte);      /* CB_GET_TIME date half */
+void rip_sync_time_byte_state(rip_state_t *s, uint8_t data_byte);      /* CB_GET_TIME time half */
+void rip_query_response_byte_state(rip_state_t *s, uint8_t data_byte); /* CB_INPUT_TEXT */
+void rip_apply_palette_state(rip_state_t *s);                          /* palette coexistence */
 
 /* Single-session host-event wrappers.  Route through the global
  * g_rip_state set by the most recent rip_init_first() call.
@@ -542,7 +548,7 @@ void rip_file_upload_end(void);
  * surfaces.  They operate on the single active session (set by the
  * most recent rip_init_first), which makes them convenient for
  * single-session embedders but unsafe for multi-session ones — see
- * the *_state() variants below. */
+ * the *_state() variants above. */
 void rip_sync_date_byte(uint8_t data_byte);      /* CB_GET_TIME date half */
 void rip_sync_time_byte(uint8_t data_byte);      /* CB_GET_TIME time half */
 void rip_query_response_byte(uint8_t data_byte); /* CB_INPUT_TEXT */
@@ -555,9 +561,10 @@ void rip_query_response_byte(uint8_t data_byte); /* CB_INPUT_TEXT */
  * saved_palette_rgb565 back to hardware; falls back to EGA defaults
  * if no snapshot has been taken yet.
  *
- * API asymmetry: rip_save_palette() takes an explicit `s` but
- * rip_apply_palette() uses the global g_rip_state.  Single-session
- * by design — see SESSION SAFETY at the top of this header. */
+ * rip_save_palette(s) and rip_apply_palette_state(s) (declared above
+ * with the reentrant family) form the explicit-state pair;
+ * rip_apply_palette() is the single-session wrapper over g_rip_state.
+ * See SESSION SAFETY below. */
 void rip_save_palette(rip_state_t *s);
 void rip_apply_palette(void);
 

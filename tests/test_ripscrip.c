@@ -2960,6 +2960,72 @@ static void test_global_file_upload_caches_icn(void) {
         FAIL("global upload wrappers did not cache ICN");
 }
 
+/*
+ * C-004 variant A' (ADR-0004): the reentrant completions for the host
+ * time-sync, query-response, and palette entrypoints must operate on the
+ * rip_state_t passed to them, independent of g_rip_state.  After two
+ * init_fixture() calls the global points at session B, so feeding the
+ * *_state() forms with &A proves they do not fall back to the global.
+ */
+static void test_state_api_sync_query_palette_isolation(void) {
+    rip_state_t a;
+    rip_state_t b;
+    comp_context_t ctx_a;
+    comp_context_t ctx_b;
+
+    TEST("_state() sync/query/palette target passed session");
+    init_fixture(&a, &ctx_a);
+    init_fixture(&b, &ctx_b);   /* g_rip_state == &b after this */
+
+    /* Date -> A, time -> B, via the reentrant per-byte shims. */
+    const char *date = "05-30-2026";
+    for (const char *p = date; *p; p++)
+        rip_sync_date_byte_state(&a, (uint8_t)*p);
+    rip_sync_date_byte_state(&a, 0x00);   /* commit */
+
+    const char *tod = "12:34:56";
+    for (const char *p = tod; *p; p++)
+        rip_sync_time_byte_state(&b, (uint8_t)*p);
+    rip_sync_time_byte_state(&b, 0x00);   /* commit */
+
+    bool sync_ok = strcmp(a.host_date, "05-30-2026") == 0 &&
+                   a.host_time[0] == '\0' &&
+                   strcmp(b.host_time, "12:34:56") == 0 &&
+                   b.host_date[0] == '\0';
+
+    /* Query response -> A's $APP0$, independent of the global (B). */
+    a.query_pending = true;
+    strcpy(a.query_var_name, "$APP0$");
+    rip_query_response_byte_state(&a, 'h');
+    rip_query_response_byte_state(&a, 'i');
+    rip_query_response_byte_state(&a, 0x00);   /* commit */
+    bool query_ok = strcmp(a.app_vars[0], "hi") == 0 &&
+                    a.query_pending == false &&
+                    b.query_pending == false;
+
+    /* Palette: A has a snapshot, B does not.  apply_palette_state(&a)
+     * must write A's snapshot even though g_rip_state == &b; apply for
+     * B (no snapshot) must fall back to EGA defaults (no sentinel). */
+    for (int i = 0; i < 16; i++)
+        a.saved_palette_rgb565[i] = (uint16_t)(0x7777 + i);
+    memset(palette, 0, sizeof(palette));
+    rip_apply_palette_state(&a);
+    bool a_snapshot_written = false;
+    for (int i = 0; i < (int)(sizeof(palette) / sizeof(palette[0])); i++)
+        if (palette[i] == 0x7777) { a_snapshot_written = true; break; }
+
+    memset(palette, 0, sizeof(palette));
+    rip_apply_palette_state(&b);   /* no snapshot -> EGA defaults */
+    bool b_used_defaults = true;
+    for (int i = 0; i < (int)(sizeof(palette) / sizeof(palette[0])); i++)
+        if (palette[i] == 0x7777) { b_used_defaults = false; break; }
+
+    if (sync_ok && query_ok && a_snapshot_written && b_used_defaults)
+        PASS();
+    else
+        FAIL("a _state host-event call did not target the passed session");
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * WIRE-LEVEL COVERAGE TESTS — every protocol command exercised at
  * least once via feed_script(). Identified by spec-vs-test audit:
@@ -4450,6 +4516,7 @@ int main(void) {
     test_load_icon_clipboard_flag_stores_pixels();
     test_global_mouse_event_dispatches();
     test_global_file_upload_caches_icn();
+    test_state_api_sync_query_palette_isolation();
 
     /* Audit C-006 — test-coverage gap pack */
     test_level3_prefix_silently_dropped();

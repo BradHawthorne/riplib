@@ -325,26 +325,32 @@ void rip_save_palette(rip_state_t *s) {
  * overwrites entries 240-255 after a mode switch back to RIPscrip.
  * Uses saved_palette_rgb565 if a snapshot exists (non-zero); otherwise
  * falls back to EGA defaults so a fresh session still has correct colors. */
-void rip_apply_palette(void) {
-    if (!g_rip_state) return;
+void rip_apply_palette_state(rip_state_t *s) {
+    if (!s) return;
     /* Check whether a non-default snapshot exists. A BBS that called
      * RIP_SET_PALETTE will have written at least one non-default value; if
      * saved_palette_rgb565 is entirely zero the snapshot has never been taken
      * (new session) and we restore EGA defaults instead. */
     bool has_snapshot = false;
     for (int i = 0; i < 16; i++) {
-        if (g_rip_state->saved_palette_rgb565[i] != 0) {
+        if (s->saved_palette_rgb565[i] != 0) {
             has_snapshot = true;
             break;
         }
     }
     if (has_snapshot) {
         for (int i = 0; i < 16; i++)
-            palette_write_rgb565(palette_slot(i), g_rip_state->saved_palette_rgb565[i]);
+            palette_write_rgb565(palette_slot(i), s->saved_palette_rgb565[i]);
     } else {
         for (int i = 0; i < 16; i++)
             palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
     }
+}
+
+/* Single-session wrapper — routes through g_rip_state.
+ * See SESSION SAFETY in ripscrip.h. */
+void rip_apply_palette(void) {
+    rip_apply_palette_state(g_rip_state);
 }
 
 /* Boot-time init — call ONCE at power-on (or on first use).
@@ -3839,38 +3845,41 @@ reprocess:
 /* CMD_SYNC_DATE byte handler (CB_GET_TIME / date half).
  * Called by the host once per byte of the date string.
  * data_byte: next date character from the host's wall-clock source,
- *   or 0x00 to commit the accumulated buffer to host_date. */
-void rip_sync_date_byte(uint8_t data_byte) {
-    if (!g_rip_state) return;
+ *   or 0x00 to commit the accumulated buffer to host_date.
+ * The *_state form is reentrant across distinct rip_state_t instances;
+ * rip_sync_date_byte() wraps the single active session (g_rip_state). */
+void rip_sync_date_byte_state(rip_state_t *s, uint8_t data_byte) {
+    if (!s) return;
     if (data_byte == '\0') {
         /* NUL — commit accumulated buffer to host_date */
-        int len = g_rip_state->sync_date_len;
-        if (len > (int)sizeof(g_rip_state->host_date) - 1)
-            len = (int)sizeof(g_rip_state->host_date) - 1;
-        memcpy(g_rip_state->host_date, g_rip_state->sync_date_buf, (size_t)len);
-        g_rip_state->host_date[len] = '\0';
-        g_rip_state->sync_date_len = 0;
+        int len = s->sync_date_len;
+        if (len > (int)sizeof(s->host_date) - 1)
+            len = (int)sizeof(s->host_date) - 1;
+        memcpy(s->host_date, s->sync_date_buf, (size_t)len);
+        s->host_date[len] = '\0';
+        s->sync_date_len = 0;
     } else {
-        if (g_rip_state->sync_date_len < (int)sizeof(g_rip_state->sync_date_buf) - 1)
-            g_rip_state->sync_date_buf[g_rip_state->sync_date_len++] = (char)data_byte;
+        if (s->sync_date_len < (int)sizeof(s->sync_date_buf) - 1)
+            s->sync_date_buf[s->sync_date_len++] = (char)data_byte;
     }
 }
 
 /* CMD_SYNC_TIME byte handler (CB_GET_TIME / time half).
  * Called by the host once per byte of the time string.
- * data_byte: next time character, or 0x00 to commit to host_time. */
-void rip_sync_time_byte(uint8_t data_byte) {
-    if (!g_rip_state) return;
+ * data_byte: next time character, or 0x00 to commit to host_time.
+ * rip_sync_time_byte() wraps the single active session. */
+void rip_sync_time_byte_state(rip_state_t *s, uint8_t data_byte) {
+    if (!s) return;
     if (data_byte == '\0') {
-        int len = g_rip_state->sync_time_len;
-        if (len > (int)sizeof(g_rip_state->host_time) - 1)
-            len = (int)sizeof(g_rip_state->host_time) - 1;
-        memcpy(g_rip_state->host_time, g_rip_state->sync_time_buf, (size_t)len);
-        g_rip_state->host_time[len] = '\0';
-        g_rip_state->sync_time_len = 0;
+        int len = s->sync_time_len;
+        if (len > (int)sizeof(s->host_time) - 1)
+            len = (int)sizeof(s->host_time) - 1;
+        memcpy(s->host_time, s->sync_time_buf, (size_t)len);
+        s->host_time[len] = '\0';
+        s->sync_time_len = 0;
     } else {
-        if (g_rip_state->sync_time_len < (int)sizeof(g_rip_state->sync_time_buf) - 1)
-            g_rip_state->sync_time_buf[g_rip_state->sync_time_len++] = (char)data_byte;
+        if (s->sync_time_len < (int)sizeof(s->sync_time_buf) - 1)
+            s->sync_time_buf[s->sync_time_len++] = (char)data_byte;
     }
 }
 
@@ -3879,9 +3888,9 @@ void rip_sync_time_byte(uint8_t data_byte) {
  * data_byte: next response character typed by the user on the host,
  *   or 0x00 to commit and send the response to the BBS.
  * On NUL: stores response in the target user variable, pushes it to the
- * BBS via TX FIFO, and clears query_pending. */
-void rip_query_response_byte(uint8_t data_byte) {
-    rip_state_t *s = g_rip_state;
+ * BBS via TX FIFO, and clears query_pending.
+ * rip_query_response_byte() wraps the single active session. */
+void rip_query_response_byte_state(rip_state_t *s, uint8_t data_byte) {
     if (!s || !s->query_pending) return;
 
     if (data_byte == '\0') {
@@ -3910,4 +3919,18 @@ void rip_query_response_byte(uint8_t data_byte) {
         if (s->query_response_len < (int)sizeof(s->query_response) - 1)
             s->query_response[s->query_response_len++] = (char)data_byte;
     }
+}
+
+/* Single-session wrappers — route through g_rip_state.
+ * See SESSION SAFETY in ripscrip.h. */
+void rip_sync_date_byte(uint8_t data_byte) {
+    rip_sync_date_byte_state(g_rip_state, data_byte);
+}
+
+void rip_sync_time_byte(uint8_t data_byte) {
+    rip_sync_time_byte_state(g_rip_state, data_byte);
+}
+
+void rip_query_response_byte(uint8_t data_byte) {
+    rip_query_response_byte_state(g_rip_state, data_byte);
 }
