@@ -349,6 +349,27 @@ The genuine, decided deviations follow.
      within the spec's latitude rather than a contradiction of it.
      KEPT (deliberate default chrome).
 
+§DEV.6 — RIP_TEXT_WINDOW ('w'): a FULL-SCREEN window defers to the host
+     text path, only a SMALLER window activates RIPlib's text renderer:
+     The 'w' handler sets s->tw_active true only when the requested rect
+     is smaller than the full 640x350 EGA screen; a full-screen window
+     (0,0,639,349) leaves tw_active = false.  Consequence: a sub-screen
+     text window routes subsequent plain text through rip_tw_putchar ->
+     draw_text (honouring wrap and font size), while a full-screen window
+     lets text fall through to the host VT100/ANSI passthrough
+     (comp_passthrough_vt100), which is the normal terminal flow.
+     Rationale: "full-screen window == terminal default" — a stream that
+     wraps the whole screen is treated as ordinary terminal output, not
+     as a graphics-mode text box.  NOTE: the two routes are NOT the same
+     renderer; in a build with no host compositor (the standalone
+     library, where comp_passthrough_vt100 is a no-op stub) a full-screen
+     'w' window followed by text produces no visible glyphs.  This is an
+     intentional heuristic, but it is ambiguous for a stream that expects
+     graphics-mode rendering of a full-screen text window — documented
+     here so the routing is not mistaken for a bug.  KEPT (intentional
+     heuristic; the misleading in-code comment that claimed "both paths
+     route to the same renderer" was corrected).
+
 =====================================================================
 ==                    END OF SEGMENT 11                             ==
 ==           DLL Deviations, Errata & Known Bugs                   ==

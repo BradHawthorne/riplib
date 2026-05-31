@@ -2614,7 +2614,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * IcyTerm: NoMore (0 args). BBS sends 3+ consecutive '#' commands for noise immunity.
                * Note: previous code had '#' as EraseWindow and '>' as NoMore — both wrong.
                * Correct mapping confirmed by v1.54 spec and IcyTerm command.rs:NoMore → "|#". */
-        /* No-op: scene terminator; mouse regions already activated incrementally */
+        /* Scene terminator; mouse regions already activated incrementally.
+         * Defensively close any open text block so a malformed stream that
+         * omits '|1E' before '|#' cannot bleed stale text into the next
+         * scene's '|t'/'|1t' (REGION_TEXT) commands.  Well-formed streams
+         * send '|1E' first, so this is a no-op for them.  ('|#' is only a
+         * scene-boundary marker — full state reset remains '|*'.) */
+        s->text_block.active = false;
         break;
 
     /* §A2G (v3.2): state push/pop — backward-compatible QoL extension. */

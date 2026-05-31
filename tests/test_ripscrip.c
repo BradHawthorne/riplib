@@ -966,6 +966,22 @@ static void test_l1_text_block_lifecycle(void) {
         FAIL("1E did not deactivate block");
 }
 
+/* Audit (2026-05-30): the '#' RIP_NO_MORE scene terminator defensively
+ * closes an open text block, so a malformed stream that omits '|1E'
+ * before '|#' cannot bleed stale text into the next scene's REGION_TEXT. */
+static void test_scene_terminator_closes_text_block(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|# (NO_MORE) closes an open text block");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1T05050F0F00|");
+    if (!s.text_block.active) { FAIL("setup: 1T did not open block"); return; }
+    feed_script(&s, &ctx, "!|#|");
+    if (!s.text_block.active)
+        PASS();
+    else
+        FAIL("# did not close the text block");
+}
+
 static void test_text_xy_expands_variables(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -4424,6 +4440,7 @@ int main(void) {
     test_save_and_stamp_icon_slot();
     test_save_icon_slot_updates_load_alias();
     test_l1_text_block_lifecycle();
+    test_scene_terminator_closes_text_block();
     test_text_xy_expands_variables();
     test_l1_audio_pushes_marker();
     test_iso_week_var_expansion();

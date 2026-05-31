@@ -40,6 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target instead of global flags, so the CMake compiler-probe no longer
   fails to configure.
 
+### Changed
+- The `|#` (RIP_NO_MORE) scene terminator now defensively closes any open
+  text block, so a malformed stream that omits `|1E` before `|#` cannot
+  bleed stale text into the next scene's REGION_TEXT. Well-formed streams
+  (which send `|1E`) are unaffected; full state reset remains `|*`.
+  Covered by a new regression test (`test_ripscrip` is now 239 checks).
+- Audit-driven comment/contract accuracy fixes (no behaviour change):
+  documented `draw_text`'s font-buffer size contract (≥ 256×font_height
+  bytes) in `drawing.h`; the `$RAND$` comment now states the real
+  guarantee (deterministic Knuth/POSIX LCG) instead of unverifiable
+  bit-for-bit DLL compatibility; corrected the `RIP_TEXT_WINDOW` routing
+  comment and documented the full-screen-window heuristic as deviation
+  §DEV.6.
+
 ## [1.2.1] — 2026-05-11
 
 Patch release for the RIPscrip v3.2 surface.
