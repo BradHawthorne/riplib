@@ -113,6 +113,51 @@ Each rule must change a future decision.
   appears (ADR-0005 resume condition (b)).
 - **Recorded**: 2026-05-31
 
+### HR-005 — Verify state from git/CI primitives, never from narrative or garbled tool output; one fallible op per call; never rewrite `main`
+- **Rule**: This environment intermittently corrupts tool output (Read / Bash /
+  Grep return blank, stale, duplicated, or internally-inconsistent content).
+  Operate defensively:
+  1. **Garbled output is NULL data.** Any blank / duplicated / self-contradictory
+     tool result proves nothing — re-issue a single minimal command. NEVER infer an
+     outcome from it and NEVER narrate a result it merely seems to imply.
+  2. **Verify from primitives, in the same turn, immediately before any claim.**
+     Position: `git rev-parse --short HEAD origin/main`. "Did this commit change
+     anything": tree-hash equality (`git rev-parse X^{tree}`). CI: per-job reads
+     from the Actions REST API. Short hashes/SHAs are garble-resistant; prose
+     `git log` is not. Never say "committed / pushed / CI-green" without a fresh
+     primitive read in that turn showing it.
+  3. **Never fabricate or trust a remembered commit hash** — every hash in a report
+     comes from a `git rev-parse` run that turn (reinforces HR-003).
+  4. **One fallible op per tool call.** Never batch a git mutation, a build, or a
+     network/CI call with other calls or with each other — one error cancels the
+     whole batch. Reads/Edits of distinct files may still batch.
+  5. **No destructive shell verb on a variable path** without first echoing the
+     resolved value; prefer fresh build-dir names over `Remove-Item` (a mangled
+     `Remove-Item $bd` resolved to `C:\Program` and was sandbox-blocked).
+  6. **Never rewrite `main` history** — no rebase/amend of pushed commits, no
+     force-push; for local cleanup prefer an additive commit. (A `rebase --onto`
+     on `main` was correctly denied by the safety classifier.)
+  7. **Cross-confirm critical facts across two channels** (PowerShell ⟷ Bash ⟷
+     Read) before reporting. `Edit` is trustworthy for mutations because it fails
+     loudly on an anchor mismatch — prefer it over blind writes.
+  8. **After any interruption/context break, re-derive ground truth from git**
+     before continuing; do not trust the prior turn's narrated state.
+- **Origin**: 2026-05-31, C-004 A′ implementation. Pervasive tool-output corruption
+  led to (a) edits attempted against garbled-read anchors (these failed loudly —
+  the cheap, good outcome) and far worse (b) an entire FABRICATED commit→push→"all
+  10 CI jobs green" narration for commits that never existed (`fb6f230`/`3df3a06`/
+  `3bcc492`), plus a denied `main`-history rebase acting on a hallucinated empty
+  commit. Real state had to be recovered via PowerShell `git rev-parse` after Bash
+  returned blanks. The code itself was fine (MSVC ctest 287/287, ARM clean, 3 clean
+  adversarial reviews); the failure was in the VERIFICATION/REPORTING layer, which
+  is exactly what this rule hardens.
+- **Applies to**: every git/CI/build status claim; every multi-call batch; any
+  destructive shell op; any resume-after-interruption.
+- **How to apply**: see the 8 numbered points. Litmus test before reporting "done":
+  *"Which primitive command output, produced THIS turn, proves this?"* If the answer
+  is "my memory" or "a log line I can't re-derive," it is unverified — say so.
+- **Recorded**: 2026-05-31
+
 ---
 
 ## Prior art register
