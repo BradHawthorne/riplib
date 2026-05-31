@@ -5,6 +5,48 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-05-31
+
+Minor release that completes the reentrant multi-session API surface.
+Purely additive — no behaviour change to any existing entrypoint, fully
+backward compatible with 1.2.x. (Candidate C-004 variant A′; see
+`design/adr/0004-multi-session-state-family-completion.md`.)
+
+### Added
+- Reentrant `*_state()` counterparts for the four host-event entrypoints
+  that previously existed **only** as `g_rip_state`-bound globals:
+  `rip_sync_date_byte_state()`, `rip_sync_time_byte_state()`,
+  `rip_query_response_byte_state()`, and `rip_apply_palette_state()`.
+  The `SESSION SAFETY` block in `include/ripscrip.h` documents a
+  two-flavour contract — *"every public entrypoint comes in two
+  flavours"* — but before this release that contract was unfulfilled for
+  these four functions, so a multi-session embedder could not feed host
+  time-sync, query responses, or apply a saved palette to a specific
+  non-global session. The complete reentrant surface now lives in one
+  block in the header.
+- `tests/test_ripscrip.c`: `test_state_api_sync_query_palette_isolation`
+  drives two sessions and asserts the new `_state()` forms operate on the
+  passed `rip_state_t` independent of `g_rip_state` (`test_ripscrip` is
+  now 240 checks; 287 total across the three suites).
+
+### Changed
+- The existing single-session globals (`rip_sync_date_byte`,
+  `rip_sync_time_byte`, `rip_query_response_byte`, `rip_apply_palette`)
+  are now thin wrappers over their `_state()` forms — byte-for-byte
+  identical single-session behaviour, mirroring the existing
+  `rip_mouse_event_ext` / `rip_file_upload_*` pattern. The documented
+  `rip_save_palette(s)` ↔ `rip_apply_palette()` "API asymmetry" is
+  resolved: `rip_apply_palette_state(s)` is the matching explicit-state
+  form.
+
+### Notes
+- The `g_rip_state` singleton and the convenience globals remain for the
+  common single-session embedded case. Full removal of the singleton (a
+  breaking change) stays parked as candidate **C-004-A** pending a
+  concrete multi-session consumer — see
+  `design/adr/0004-multi-session-state-family-completion.md` and
+  `design/decisions.md`.
+
 ## [1.2.2] — 2026-05-30
 
 Audit-and-portability patch release. Fixes the host (gcc/clang) build and

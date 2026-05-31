@@ -300,9 +300,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The suite currently ships 285 individual checks across three binaries:
+The suite currently ships 287 individual checks across three binaries:
 - `test_drawing` — 41 rendering primitives, fonts, and edge-case checks.
-- `test_ripscrip` — 238 FSM transitions, dispatched commands, mouse
+- `test_ripscrip` — 240 FSM transitions, dispatched commands, mouse
   hit-testing, variable expansion, host callbacks, port system.
 - `test_compat` — 6 fixture replays with FNV-1a frame-hash lockdown so
   pixel-level regressions show up immediately.
