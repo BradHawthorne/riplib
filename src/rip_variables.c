@@ -362,9 +362,11 @@ int rip_expand_variables(rip_state_t *s,
             vval_len = 0;
 
         /* $RAND$ — pseudo-random number.
-         * ripTextVarEngine @ 0x026218 calls rand() here; we use the same
-         * Knuth/POSIX LCG (multiplier 1103515245, addend 12345) so the
-         * generated sequence is compatible with the DLL ground truth. */
+         * 32-bit LCG with the standard Knuth/POSIX constants (multiplier
+         * 1103515245, addend 12345).  The sequence is deterministic and
+         * reproducible from a fixed seed, which is the property RIPscrip
+         * streams rely on.  (Bit-for-bit equivalence with the original
+         * RIPSCRIP.DLL rand() is unverified — see open question U-005.) */
         } else if (vlen == 4 && memcmp(vname, "RAND", 4) == 0) {
             s->rand_state = s->rand_state * 1103515245u + 12345u;
             vval_len = snprintf(val, sizeof(val), "%u",
