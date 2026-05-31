@@ -2300,11 +2300,20 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             /* Initialize cursor to top-left of text window (scaled) */
             s->tw_cur_x = s->tw_x0;
             s->tw_cur_y = scale_y(s->tw_y0);
-            /* Non-default text window → route passthrough text to draw_text.
-             * Heuristic: any rect different from the full screen counts as
-             * "active".  A BBS that explicitly sets the full-screen rect
-             * will look identical to "no text window" — acceptable since
-             * both paths route to the same renderer. */
+            /* A text window SMALLER than the full screen activates RIPlib's
+             * own text renderer (rip_tw_putchar → draw_text, honouring
+             * tw_wrap and tw_font_size).  A full-screen rect is treated as
+             * "no special window", so subsequent text falls through to the
+             * host VT100/ANSI path (comp_passthrough_vt100) — the normal
+             * terminal flow.  NOTE: these are DIFFERENT render paths, not
+             * "the same renderer": comp_passthrough_vt100 is a host callback
+             * (inert in the standalone build), while rip_tw_putchar renders
+             * glyphs into the framebuffer.  Consequence: in a build with no
+             * host compositor, a BBS that sets a *full-screen* RIP text
+             * window and then sends text produces no visible glyphs.  This
+             * heuristic is intentional (full-screen = terminal default) but
+             * ambiguous for streams that expect graphics-mode rendering of a
+             * full-screen window. */
             s->tw_active = (s->tw_x0 != 0 || s->tw_y0 != 0 ||
                             s->tw_x1 != 639 || s->tw_y1 != 349);
         }
