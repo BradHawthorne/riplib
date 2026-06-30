@@ -13,7 +13,7 @@ the chronological decisions log, and the theme index — lives in this single fi
   syntax and gaps"). The audit itself was *not* a single decision — it was a survey
   that surfaced candidate decisions. See *Live candidates* below for what came out of it.
 - **Platform independence is a binding constraint** (added 2026-05-25 mid-audit):
-  RIPlib must stay platform-independent wherever possible. Apple II, A2FUSION, A2GSPU,
+  RIPlib must stay platform-independent wherever possible. Apple II, A2GSPU,
   RP2350, RIPtel, ProDOS, and other consumer-specific references inside the library
   itself (public headers, source files, examples, public docs) are counter to the
   repo's goals. The only acceptable places for those names are: `README.md` Origins
