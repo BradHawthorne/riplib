@@ -784,6 +784,27 @@ static void test_l1_image_style_stored(void) {
         FAIL("1i image_style not stored");
 }
 
+static void test_l3_delay_is_recorded_not_slept(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|3D records a delay request and never blocks");
+    init_fixture(&s, &ctx);
+    /* ticks:4 = "0056" -> 5*36 + 6 = 186 sixtieths of a second (3.1 s).
+     * The driver would busy-wait here; RIPlib must return immediately and
+     * hand the request to the host. */
+    feed_script(&s, &ctx, "!|3D0056|");
+    if (rip_take_delay(&s) != 186) {
+        FAIL("|3D did not record the tick count");
+        return;
+    }
+    /* Taking it clears it, so a host polling twice does not delay twice. */
+    if (rip_take_delay(&s) == 0)
+        PASS();
+    else
+        FAIL("rip_take_delay did not clear the pending request");
+}
+
 static void test_l1_viewport_ext(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -4862,6 +4883,7 @@ int main(void) {
     test_l1_mouse_region_define();
     test_l1_button_registers_region();
     test_l1_image_style_stored();
+    test_l3_delay_is_recorded_not_slept();
     test_l1_viewport_ext();
     test_l1_query_ext_returns_app_var();
     test_l1_define_query_and_expand_generic_var();

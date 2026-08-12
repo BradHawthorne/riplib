@@ -875,14 +875,55 @@ D-8  '|1k' AND '|3D' — HOW FAR THE ANALYSIS ACTUALLY GOT.
             actually does is not established: it references no strings, so
             naming it needs semantic tracing rather than string mining.
 
-     '|3D'  Both handlers (RVA 0x038BD2 and 0x024AF4, one 4-digit argument
-            each) reference NO strings at all.  Nothing beyond the
-            dispatch entry has been established.
+     '|3D'  RESOLVED 2026-08-12 — see below.  The earlier position, that
+            both handlers "reference NO strings at all" and nothing beyond
+            the dispatch entry was established, was true only of STRING
+            evidence.  Following the CALL TARGETS settled it, and resolving
+            the driver's import table named the decisive one.
 
-     Both are absent from the 116-file corpus, so no shipped content
-     exercises them, and RIPlib accepts and consumes them without acting.
-     That is a bounded, evidenced gap — not an unknown, and not a claim of
-     completeness.
+            Slot 122 (RVA 0x038BD2) is a five-instruction thunk that hands
+            arg[0] to 0x100282CA, which busy-waits on WINMM!timeGetTime.
+            Its arithmetic fixes the unit beyond doubt: the count is split
+            into chunks of 3900 with 0xFDE8 = 65000 ms waited per chunk
+            (3900/60 = 65 s), then the remainder waited as
+            remainder * 1000 / 60 ms.  So '|3D' is RIP_DELAY and its field
+            is in SIXTIETHS OF A SECOND.
+
+            Slot 125 (RVA 0x024AF4) is a different command that happens to
+            share the letter.  It copies a TEXT parameter into a 256-byte
+            buffer, looks it up via 0x1003F71A, calls 0x1003F80E with the
+            result, and on a return of 2 calls 0x10006C01 — which names
+            itself RIP_Suspend() in its own error path.  It never reads the
+            decoded argument array, so it does not match its argc=1/mega4
+            row; that row is the mis-associated one.  What it looks up is
+            not established, and it is NOT the reading RIPlib implements.
+
+            RIPlib implements the slot-122 reading and deliberately does
+            NOT busy-wait: a rendering library that blocks its caller for
+            up to 65 seconds per chunk is unusable on the cooperative and
+            single-threaded hosts RIPlib targets.  The request is recorded
+            and handed over by rip_take_delay(); ignoring it is safe,
+            because a delay is a pacing hint and not a rendering
+            instruction.
+
+            METHOD NOTE.  Three evidence classes had already been tried on
+            these handlers and all three came up empty, because every one
+            of them keys on STRINGS.  What worked was resolving the import
+            directory and reading call targets — the same pass also
+            confirmed GDI32!Polygon as the skewed-oval renderer (12.14).
+            Where a handler names nothing, name what it CALLS.
+
+     Both are absent from the shipped corpus, so no vendor content
+     exercises them.  '|3D' is now implemented as RIP_DELAY; '|1k' is
+     implemented with the flags semantics bbs-land documents, and only
+     the identity of 0x10012D63 remains open.  That residue is a bounded,
+     evidenced gap — not an unknown, and not a claim of completeness.
+
+     Corpus note: this entry and several others said "116-file corpus".
+     The RIPtel 3.1 installation examined here ships 35 .RIP scenes
+     (scripts/corpus-scan.py; 12,328 command instances, 70 distinct
+     opcodes).  Where 116 appears in older text it refers to a larger
+     collection catalogued elsewhere, not to what was measured.
 
 D-5  RESOLVED 2026-08-12.  FOUR DRIVER COMMANDS WERE UNIMPLEMENTED.
      Measured by diffing the dispatch table against RIPlib's handler

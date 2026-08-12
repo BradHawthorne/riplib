@@ -155,6 +155,17 @@ typedef void (*rip_url_handler_t)(const char *url, int len);
  * Call after rip_init_first(), which zeroes the state. */
 void rip_set_url_handler(rip_state_t *s, rip_url_handler_t handler);
 
+/* Take any pending '|3D' RIP_DELAY request, in sixtieths of a second, and
+ * clear it.  Returns 0 when none is pending.
+ *
+ * The original driver implements this by busy-waiting on timeGetTime().
+ * RIPlib deliberately does not: blocking a caller for up to 65 seconds per
+ * chunk is unusable on the cooperative and single-threaded hosts RIPlib
+ * targets.  Poll this after feeding a frame and honour it however suits the
+ * host — sleep, defer the next feed, or ignore it.  Ignoring it is safe;
+ * the delay is a pacing hint, not a rendering instruction. */
+uint32_t rip_take_delay(rip_state_t *s);
+
 /* Text block state (1T/1t/1E) */
 typedef struct {
     int16_t  x0, y0, x1, y1;   /* Text region bounds */
@@ -558,6 +569,9 @@ struct rip_state_s {
     uint8_t mega_base;
     /* '|2R' RIP_SetRefresh reserved field (slot 117, one mega4). */
     uint32_t refresh_res;
+    /* '|3D' RIP_DELAY request, in sixtieths of a second.  RIPlib never
+     * blocks; read and clear it with rip_take_delay(). */
+    uint32_t delay_ticks;
 
     /* RIP_ICON_STYLE ('&') parameters for subsequent icon rendering.
      * Coordinates are stored in pixels.  style follows 1S where possible:

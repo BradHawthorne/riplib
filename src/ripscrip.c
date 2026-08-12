@@ -1629,6 +1629,16 @@ void rip_set_url_handler(rip_state_t *s, rip_url_handler_t handler) {
         s->url_handler = handler;
 }
 
+uint32_t rip_take_delay(rip_state_t *s) {
+    uint32_t d;
+
+    if (!s)
+        return 0;
+    d = s->delay_ticks;
+    s->delay_ticks = 0;
+    return d;
+}
+
 /* Poly-bezier family — '|t' (line), '|x' (filled), '|z' (outline).
  *
  * D-2, fixed 2026-08-12.  The driver accepts THREE distinct signatures for
@@ -1839,12 +1849,33 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             else if (len >= 2) s->baud_emulation = (uint32_t)mega2(p);
             break;
 
-        case 'D': /* Two dispatch slots (122 and 125) carry 'D' with distinct
-                   * handlers (RVA 0x038BD2 and 0x024AF4), both taking a single
-                   * 4-digit field.  Which one a stream reaches is selected by
-                   * state we have not recovered, and neither handler names
-                   * itself.  Accepted and consumed so the frame stays in sync;
-                   * deliberately not acted on.  See docs/spec §12.12. */
+        case 'D': /* RIP_DELAY — ticks:4, in sixtieths of a second.
+                   *
+                   * RESOLVED 2026-08-12.  Two slots carry 'D' (122 and 125).
+                   * Slot 122 (RVA 0x038BD2) is a five-instruction thunk that
+                   * passes arg[0] straight to 0x100282CA, which busy-waits on
+                   * WINMM!timeGetTime.  Its arithmetic fixes the unit beyond
+                   * doubt: it splits the count into chunks of 3900, waits
+                   * 0xFDE8 = 65000 ms per chunk (3900/60 = 65 s), then waits
+                   * remainder * 1000 / 60 ms.  So the field is 1/60 s ticks.
+                   *
+                   * Slot 125 (RVA 0x024AF4) is a different command: it copies
+                   * a TEXT parameter into a 256-byte buffer, looks it up, and
+                   * on a result of 2 calls RIP_Suspend (0x10006C01, which
+                   * names itself).  It never touches the decoded argument
+                   * array, so it does not match its own argc=1/mega4 row —
+                   * that row is the mis-associated one, and slot 122 is the
+                   * reading '|3D' actually supports.  See §12.12.
+                   *
+                   * RIPlib does NOT busy-wait.  A rendering library that
+                   * blocks the caller for up to 65 seconds a chunk is
+                   * unusable on a cooperative or single-threaded host, which
+                   * is most of RIPlib's targets.  The request is recorded and
+                   * the host decides; rip_take_delay() hands it over. */
+            if (len >= 4)
+                s->delay_ticks = (uint32_t)mega4(p);
+            else if (len >= 2)
+                s->delay_ticks = (uint32_t)mega2(p);
             break;
 
         /* RIPlib extensions.  '&' and '-' were previously bound at Level 0,
