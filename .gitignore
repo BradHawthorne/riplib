@@ -1,5 +1,6 @@
 build/
 build-*/
+build2/
 *.pgm
 
 # consumer-handoff/ holds A2GSPU-bound content extracted from RIPlib during

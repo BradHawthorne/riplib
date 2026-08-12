@@ -145,6 +145,176 @@ static int16_t scale_y1(int16_t y) {
     return (int16_t)((y * 8 + 6) / 7);
 }
 
+/* -- Skewed-oval geometry -------------------------------------------------
+ * RIPscrip's skewed-oval family ('&', '-', '[', ']', '+', '_') is rendered
+ * by the driver as a point-per-degree polygon, not by a GDI ellipse call.
+ * The generator at RVA 0x010160 walks start..end inclusive and emits
+ *
+ *     X  = rx * cos(t) >> 14         Y  = ry * sin(t) >> 14
+ *     px = cx + (X * cos(skew) - Y * sin(skew)) >> 14
+ *     py = cy - (X * sin(skew) + Y * cos(skew)) >> 14
+ *
+ * an axis-aligned ellipse point rotated by `skew` degrees, Y inverted for
+ * screen coordinates.  `skew` is therefore a rotation angle in whole
+ * degrees, not a shear factor.  The driver then hands the run to Polygon()
+ * (filled variants) or strokes it (open variants).
+ *
+ * The table below is the driver's own Q14 sine table, transcribed verbatim
+ * from RVA 0x07b638 by scripts/dll-disasm.py.  The driver carries a second
+ * cosine table at RVA 0x07b098; it equals sin(t+90) for 358 of its 360
+ * entries and differs by one LSB on the remaining two, so a single table
+ * serves both with a worst-case error of 1/16384 of a radius. */
+#define RIP_Q14           14
+#define RIP_OVAL_MAX_PTS  121   /* a full turn at 3 deg steps */
+
+static const int16_t rip_sin_q14[360] = {
+          0,     285,     571,     857,    1142,    1427,    1712,    1996,    2280,    2563,
+       2845,    3126,    3406,    3685,    3963,    4240,    4516,    4790,    5062,    5334,
+       5603,    5871,    6137,    6401,    6663,    6924,    7182,    7438,    7691,    7943,
+       8191,    8438,    8682,    8923,    9161,    9397,    9630,    9860,   10086,   10310,
+      10531,   10748,   10963,   11173,   11381,   11585,   11785,   11982,   12175,   12365,
+      12550,   12732,   12910,   13084,   13254,   13420,   13582,   13740,   13894,   14043,
+      14188,   14329,   14466,   14598,   14725,   14848,   14967,   15081,   15190,   15295,
+      15395,   15491,   15582,   15668,   15749,   15825,   15897,   15964,   16025,   16082,
+      16135,   16182,   16224,   16261,   16294,   16321,   16344,   16361,   16374,   16381,
+      16384,   16381,   16374,   16361,   16344,   16321,   16294,   16261,   16224,   16182,
+      16135,   16082,   16025,   15964,   15897,   15825,   15749,   15668,   15582,   15491,
+      15395,   15295,   15190,   15081,   14967,   14848,   14725,   14598,   14466,   14329,
+      14188,   14043,   13894,   13740,   13582,   13420,   13254,   13084,   12910,   12732,
+      12550,   12365,   12175,   11982,   11785,   11585,   11381,   11173,   10963,   10748,
+      10531,   10310,   10086,    9860,    9630,    9397,    9161,    8923,    8682,    8438,
+       8191,    7943,    7691,    7438,    7182,    6924,    6663,    6401,    6137,    5871,
+       5603,    5334,    5062,    4790,    4516,    4240,    3963,    3685,    3406,    3126,
+       2845,    2563,    2280,    1996,    1712,    1427,    1142,     857,     571,     285,
+          0,    -285,    -571,    -857,   -1142,   -1427,   -1712,   -1996,   -2280,   -2563,
+      -2845,   -3126,   -3406,   -3685,   -3963,   -4240,   -4516,   -4790,   -5062,   -5334,
+      -5603,   -5871,   -6137,   -6401,   -6663,   -6924,   -7182,   -7438,   -7691,   -7943,
+      -8191,   -8438,   -8682,   -8923,   -9161,   -9397,   -9630,   -9860,  -10086,  -10310,
+     -10531,  -10748,  -10963,  -11173,  -11381,  -11585,  -11785,  -11982,  -12175,  -12365,
+     -12550,  -12732,  -12910,  -13084,  -13254,  -13420,  -13582,  -13740,  -13894,  -14043,
+     -14188,  -14329,  -14466,  -14598,  -14725,  -14848,  -14967,  -15081,  -15190,  -15295,
+     -15395,  -15491,  -15582,  -15668,  -15749,  -15825,  -15897,  -15964,  -16025,  -16082,
+     -16135,  -16182,  -16224,  -16261,  -16294,  -16321,  -16344,  -16361,  -16374,  -16381,
+     -16384,  -16381,  -16374,  -16361,  -16344,  -16321,  -16294,  -16261,  -16224,  -16182,
+     -16135,  -16082,  -16025,  -15964,  -15897,  -15825,  -15749,  -15668,  -15582,  -15491,
+     -15395,  -15295,  -15190,  -15081,  -14967,  -14848,  -14725,  -14598,  -14466,  -14329,
+     -14188,  -14043,  -13894,  -13740,  -13582,  -13420,  -13254,  -13084,  -12910,  -12732,
+     -12550,  -12365,  -12175,  -11982,  -11785,  -11585,  -11381,  -11173,  -10963,  -10748,
+     -10531,  -10310,  -10086,   -9860,   -9630,   -9397,   -9161,   -8923,   -8682,   -8438,
+      -8192,   -7943,   -7691,   -7438,   -7182,   -6924,   -6663,   -6401,   -6137,   -5871,
+      -5603,   -5334,   -5062,   -4790,   -4516,   -4240,   -3963,   -3685,   -3406,   -3126,
+      -2845,   -2563,   -2280,   -1996,   -1712,   -1427,   -1142,    -857,    -571,    -285,
+};
+
+static int32_t rip_sin14(int a) {
+    return rip_sin_q14[((a % 360) + 360) % 360];
+}
+static int32_t rip_cos14(int a) {
+    return rip_sin14(a + 90);
+}
+
+/* Emit the skewed-oval outline over [start,end] degrees inclusive as x,y
+ * pairs.  Steps one degree at a time where the span fits the buffer and
+ * coarsens uniformly when it does not, then always lands exactly on `end`
+ * so an arc terminates where the stream said it should.  Callers pass
+ * coordinates already run through scale_y(); this routine is pure geometry.
+ * Returns the number of POINTS written (not the number of int16_t). */
+static int rip_skewed_oval_points(int16_t cx, int16_t cy,
+                                  int16_t rx, int16_t ry, int16_t skew,
+                                  int start, int end,
+                                  int16_t *pts, int max_pts)
+{
+    int32_t cs, sn, X, Y;
+    int span, step, n = 0, t, last = start;
+
+    if (end < start || max_pts < 2)
+        return 0;
+
+    cs   = rip_cos14(skew);
+    sn   = rip_sin14(skew);
+    span = end - start;
+    step = span / (max_pts - 1) + 1;
+
+    for (t = start; t <= end && n < max_pts; t += step) {
+        X = ((int32_t)rx * rip_cos14(t)) >> RIP_Q14;
+        Y = ((int32_t)ry * rip_sin14(t)) >> RIP_Q14;
+        pts[2 * n]     = (int16_t)(cx + ((X * cs - Y * sn) >> RIP_Q14));
+        pts[2 * n + 1] = (int16_t)(cy - ((X * sn + Y * cs) >> RIP_Q14));
+        last = t;
+        n++;
+    }
+    if (n > 0 && n < max_pts && last != end) {
+        X = ((int32_t)rx * rip_cos14(end)) >> RIP_Q14;
+        Y = ((int32_t)ry * rip_sin14(end)) >> RIP_Q14;
+        pts[2 * n]     = (int16_t)(cx + ((X * cs - Y * sn) >> RIP_Q14));
+        pts[2 * n + 1] = (int16_t)(cy - ((X * sn + Y * cs) >> RIP_Q14));
+        n++;
+    }
+    return n;
+}
+
+/* Defined further down with the other fill helpers; the skewed-oval renderer
+ * needs them here so the family honours |N the same way |O and |I do. */
+static bool rip_begin_filled_border(rip_state_t *s, uint8_t *saved_mode);
+static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode);
+
+/* How the point run from rip_skewed_oval_points() is closed. */
+typedef enum {
+    RIP_OVAL_OUTLINE,   /* open run, stroked as a polyline (arc)          */
+    RIP_OVAL_CLOSED,    /* run closed end-to-start (full oval, chord)     */
+    RIP_OVAL_PIE        /* run closed through the centre (pie slice)      */
+} rip_oval_close_t;
+
+/* Shared renderer for the skewed-oval family.  `fill` requests the interior
+ * be painted with the current fill state before the border is stroked, which
+ * mirrors the driver handing the same point run to Polygon() twice. */
+static void rip_draw_skewed_oval(rip_state_t *s,
+                                 int16_t cx, int16_t cy,
+                                 int16_t rx, int16_t ry, int16_t skew,
+                                 int start, int end,
+                                 rip_oval_close_t close, bool fill)
+{
+    int16_t pts[2 * (RIP_OVAL_MAX_PTS + 1)];
+    uint8_t border_mode;
+    int n;
+
+    n = rip_skewed_oval_points(cx, cy, rx, ry, skew, start, end,
+                               pts, RIP_OVAL_MAX_PTS);
+    if (n < 2)
+        return;
+
+    if (close == RIP_OVAL_PIE) {
+        pts[2 * n]     = cx;          /* close through the centre */
+        pts[2 * n + 1] = cy;
+        n++;
+    }
+
+    if (fill && s->fill_pattern != 0) {
+        draw_set_color(s->palette[s->fill_color & 0x0F]);
+        draw_polygon(pts, n, true);
+    }
+
+    if (close == RIP_OVAL_OUTLINE) {
+        draw_set_color(s->palette[s->draw_color & 0x0F]);
+        draw_polyline(pts, n);
+        return;
+    }
+
+    if (fill) {
+        /* Filled variants honour the border flag the same way the other
+         * filled primitives do, so |N00 suppresses the outline. */
+        if (rip_begin_filled_border(s, &border_mode)) {
+            draw_polygon(pts, n, false);
+            rip_end_filled_border(s, border_mode);
+        } else {
+            draw_set_color(s->palette[s->draw_color & 0x0F]);
+        }
+    } else {
+        draw_set_color(s->palette[s->draw_color & 0x0F]);
+        draw_polygon(pts, n, false);
+    }
+}
+
 static void clamp_ega_rect(int16_t *x0, int16_t *y0,
                            int16_t *x1, int16_t *y1) {
     int16_t tx0 = *x0;
@@ -1613,6 +1783,40 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * state we have not recovered, and neither handler names
                    * itself.  Accepted and consumed so the frame stays in sync;
                    * deliberately not acted on.  See docs/spec §12.12. */
+            break;
+
+        /* RIPlib extensions.  '&' and '-' were previously bound at Level 0,
+         * where the driver's dispatch table assigns the skewed-oval family
+         * instead.  The two capabilities are kept here rather than dropped;
+         * neither letter appears among the driver's Level 3 commands
+         * (D, e, ESC, G, R, U), so nothing in the protocol is displaced. */
+        case '&': /* icon display style -- x0:2 y0:2 x1:2 y1:2 style:2 align:2 scale:2 */
+            if (len >= 14) {
+                int16_t x0 = mega2(p),     y0 = scale_y(mega2(p + 2));
+                int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
+                if (x0 > x1) { int16_t tmp = x0; x0 = x1; x1 = tmp; }
+                if (y0 > y1) { int16_t tmp = y0; y0 = y1; y1 = tmp; }
+                s->icon_style_x0 = x0;
+                s->icon_style_y0 = y0;
+                s->icon_style_x1 = x1;
+                s->icon_style_y1 = y1;
+                s->icon_style_style = (uint8_t)(mega2(p + 8) & 0x03);
+                s->icon_style_align = (uint8_t)(mega2(p + 10) & 0x03);
+                s->icon_style_scale = (uint8_t)(mega2(p + 12) & 0xFF);
+                s->icon_style_active = true;
+            } else {
+                s->icon_style_active = false;
+            }
+            break;
+
+        case '-': /* bounded text box -- x0:2 y0:2 x1:2 y1:2 flags:2 text */
+            if (len >= 10) {
+                int16_t bx0 = mega2(p),     by0 = scale_y(mega2(p + 2));
+                int16_t bx1 = mega2(p + 4), by1 = scale_y1(mega2(p + 6));
+                uint8_t bflags = (uint8_t)(mega2(p + 8) & 0xFF);
+                rip_render_text_box(s, bx0, by0, bx1, by1, bflags,
+                                    p + 10, len - 10);
+            }
             break;
 
         default:
@@ -3262,39 +3466,23 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             (void)rip_save_clipboard_slot(s, (uint16_t)mega2(p));
         break;
 
-    /* -- Scroll region (v2.0+) ------------------------------------------- */
-    /* DLL command table entry 7: '+' = RIP_SCROLL (7 args: XY,XY,XY,XY,2,2,2) */
-    case '+': /* RIP_SCROLL -- x0:2 y0:2 x1:2 y1:2 dx:2 dy:2 fill_col:2 */
+    /* -- Skewed-oval family (v2.0+) ---------------------------------------
+     * Six letters share one geometry generator in the driver (RVA 0x010160);
+     * see rip_draw_skewed_oval().  Command identities and argument layouts
+     * come from TeleGrafix's own commented demo ICONS/NEWCMDS.RIP, which
+     * draws a coordinate grid and places each shape on an intersection,
+     * corroborated by the dispatch table's arities and argument-type bytes.
+     * See docs/spec/12-dll-provenance.md section 12.14. */
+
+    /* Dispatch slot 7, argc 7: XY, XY, XY, XY, mega2, mega2, mega2. */
+    case '+': /* RIP_SKEWED_OVAL_CHORD -- cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2 */
         if (len >= 14) {
-            int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
-            int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
-            int16_t dx  = mega2(p + 8);
-            int16_t dy  = scale_y(mega2(p + 10));
-            int16_t fc  = mega2(p + 12) & 0x0F;
-            int16_t rw  = sx1 - sx0 + 1, rh = sy1 - sy0 + 1;
-            if (rw > 0 && rh > 0) {
-                draw_copy_rect(sx0, sy0, sx0 + dx, sy0 + dy, rw, rh);
-                /* Clear the exposed strip(s) left behind by the scroll.
-                 * Clamp strip extent to the source rect so a delta larger
-                 * than the rect (|dx|>=rw or |dy|>=rh) clears just the
-                 * source rect rather than spilling outside. */
-                draw_set_color(s->palette[fc]);
-                if (dy > 0) {
-                    int16_t h = dy < rh ? dy : rh;
-                    draw_rect(sx0, sy0, rw, h, true);
-                } else if (dy < 0) {
-                    int16_t h = -dy < rh ? -dy : rh;
-                    draw_rect(sx0, (int16_t)(sy1 - h + 1), rw, h, true);
-                }
-                if (dx > 0) {
-                    int16_t w = dx < rw ? dx : rw;
-                    draw_rect(sx0, sy0, w, rh, true);
-                } else if (dx < 0) {
-                    int16_t w = -dx < rw ? -dx : rw;
-                    draw_rect((int16_t)(sx1 - w + 1), sy0, w, rh, true);
-                }
-                draw_set_color(s->palette[s->draw_color & 0x0F]);
-            }
+            int16_t cx = mega2(p),      cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4),  ry = scale_y(mega2(p + 6));
+            int16_t sa = mega2(p + 8),  ea = mega2(p + 10);
+            int16_t sk = mega2(p + 12);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, sa, ea,
+                                 RIP_OVAL_CLOSED, true);
         }
         break;
 
@@ -3322,16 +3510,16 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* -- Extended positioned text (v2.0+) -------------------------------- */
-    /* DLL command table entry 9: '-' = RIP_TEXT_XY_EXT (5 args: XY,XY,XY,XY,2 + text).
-     * Route through the shared text renderer inside the supplied box so
-     * escapes, variables, clipping, and justification stay consistent. */
-    case '-': /* RIP_TEXT_XY_EXT -- x0:2 y0:2 x1:2 y1:2 flags:2 text */
+    /* Dispatch slot 9, argc 5: XY, XY, XY, XY, mega2.  The handler at RVA
+     * 0x01c348 is instruction-for-instruction identical to '&' at 0x01f904
+     * apart from frame size -- the filled/outline pair of one shape. */
+    case '-': /* RIP_FILLED_SKEWED_OVAL -- cx:2 cy:2 rx:2 ry:2 skew:2 */
         if (len >= 10) {
-            int16_t bx0 = mega2(p),     by0 = scale_y(mega2(p + 2));
-            int16_t bx1 = mega2(p + 4), by1 = scale_y1(mega2(p + 6));
-            uint8_t flags = (uint8_t)(mega2(p + 8) & 0xFF);
-            rip_render_text_box(s, bx0, by0, bx1, by1, flags, p + 10, len - 10);
+            int16_t cx = mega2(p),     cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4), ry = scale_y(mega2(p + 6));
+            int16_t sk = mega2(p + 8);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, 0, 360,
+                                 RIP_OVAL_CLOSED, true);
         }
         break;
 
@@ -3505,60 +3693,41 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* DLL binary: '[' = RIP_FILLED_POLYGON_EXT (args: XY,XY,XY,XY,2,2,2) */
-    case '[': /* RIP_FILLED_POLYGON_EXT -- x0:2 y0:2 x1:2 y1:2 mode:2 p1:2 p2:2 */
-        /* Extended filled polygon with rendering mode override.
-         * Simplified to a two-corner filled rectangle using current fill state. */
-        if (len >= 8) {
-            int16_t ex0 = mega2(p),     ey0 = scale_y(mega2(p + 2));
-            int16_t ex1 = mega2(p + 4), ey1 = scale_y1(mega2(p + 6));
-            uint8_t border_mode;
-            /* mode:2 at p+8, param1:2 at p+10, param2:2 at p+12 -- ignored */
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
-                draw_rect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1, true);
-            }
-            if (rip_begin_filled_border(s, &border_mode)) {
-                draw_rect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1, false);
-                rip_end_filled_border(s, border_mode);
-            } else {
-                draw_set_color(s->palette[s->draw_color & 0x0F]);
-            }
+    /* Dispatch slot 62, argc 7: XY, XY, XY, XY, mega2, mega2, mega2. */
+    case '[': /* RIP_SKEWED_OVAL_PIE_SLICE -- cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2 */
+        if (len >= 14) {
+            int16_t cx = mega2(p),      cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4),  ry = scale_y(mega2(p + 6));
+            int16_t sa = mega2(p + 8),  ea = mega2(p + 10);
+            int16_t sk = mega2(p + 12);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, sa, ea,
+                                 RIP_OVAL_PIE, true);
         }
         break;
 
-    /* DLL binary: ']' = RIP_POLYLINE_EXT (args: XY,XY,XY,XY,2,2,2) */
-    case ']': /* RIP_POLYLINE_EXT -- x0:2 y0:2 x1:2 y1:2 mode:2 p1:2 p2:2 */
-        /* Extended polyline with rendering mode override.
-         * Simplified to a line segment between the two corner points. */
-        if (len >= 8) {
-            int16_t ex0 = mega2(p),     ey0 = scale_y(mega2(p + 2));
-            int16_t ex1 = mega2(p + 4), ey1 = scale_y(mega2(p + 6));
-            /* mode:2 at p+8 -- ignored, current write mode applies */
-            if (s->line_thick > 1)
-                draw_thick_line(ex0, ey0, ex1, ey1);
-            else
-                draw_line(ex0, ey0, ex1, ey1);
+    /* Dispatch slot 63, argc 7: XY, XY, XY, XY, mega2, mega2, mega2.
+     * An arc is the open member of the family -- stroked, never filled. */
+    case ']': /* RIP_SKEWED_OVAL_ARC -- cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2 */
+        if (len >= 14) {
+            int16_t cx = mega2(p),      cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4),  ry = scale_y(mega2(p + 6));
+            int16_t sa = mega2(p + 8),  ea = mega2(p + 10);
+            int16_t sk = mega2(p + 12);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, sa, ea,
+                                 RIP_OVAL_OUTLINE, false);
         }
         break;
 
-    /* DLL binary: '_' = RIP_DRAW_TO (6 args: XY,XY,2,2,XY,XY) */
-    case '_': /* RIP_DRAW_TO -- x0:2 y0:2 mode:2 param:2 x1:2 y1:2 */
-        /* Cursor move with optional line draw.
-         * mode=0: move only, mode!=0: draw line then move. */
+    /* Dispatch slot 95, argc 6: XY, XY, mega2, mega2, XY, XY.  The angles
+     * sit in the middle here, matching the layout riplib already uses for
+     * 'V' RIP_OVAL_ARC.  Not a skewed variant -- there is no skew field. */
+    case '_': /* RIP_FILLED_OVAL_CHORD -- cx:2 cy:2 start:2 end:2 rx:2 ry:2 */
         if (len >= 12) {
-            int16_t nx0  = mega2(p),     ny0 = scale_y(mega2(p + 2));
-            int16_t draw = mega2(p + 4); /* mode:2 */
-            /* param:2 at p+6 -- style hint, ignored */
-            int16_t nx1  = mega2(p + 8), ny1 = scale_y(mega2(p + 10));
-            if (draw) {
-                if (s->line_thick > 1)
-                    draw_thick_line(nx0, ny0, nx1, ny1);
-                else
-                    draw_line(nx0, ny0, nx1, ny1);
-            }
-            s->draw_x = nx1;
-            s->draw_y = ny1;
+            int16_t cx = mega2(p),     cy = scale_y(mega2(p + 2));
+            int16_t sa = mega2(p + 4), ea = mega2(p + 6);
+            int16_t rx = mega2(p + 8), ry = scale_y(mega2(p + 10));
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, 0, sa, ea,
+                                 RIP_OVAL_CLOSED, true);
         }
         break;
 
@@ -3686,24 +3855,20 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* ── Icon display style (v2.0+) ──────────────────────────── */
-    /* DLL command table entry 3: '&' = RIP_ICON_STYLE (5 args: XY,XY,2,2,2). */
-    case '&': /* RIP_ICON_STYLE — x0:2 y0:2 x1:2 y1:2 style:2 align:2 scale:2 */
-        if (len >= 14) {
-            int16_t x0 = mega2(p),     y0 = scale_y(mega2(p + 2));
-            int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
-            if (x0 > x1) { int16_t t = x0; x0 = x1; x1 = t; }
-            if (y0 > y1) { int16_t t = y0; y0 = y1; y1 = t; }
-            s->icon_style_x0 = x0;
-            s->icon_style_y0 = y0;
-            s->icon_style_x1 = x1;
-            s->icon_style_y1 = y1;
-            s->icon_style_style = (uint8_t)(mega2(p + 8) & 0x03);
-            s->icon_style_align = (uint8_t)(mega2(p + 10) & 0x03);
-            s->icon_style_scale = (uint8_t)(mega2(p + 12) & 0xFF);
-            s->icon_style_active = true;
-        } else {
-            s->icon_style_active = false;
+    /* Dispatch slot 3, argc 5.  The entry records its 3rd and 4th arguments
+     * as mega2, but the handler at RVA 0x01f904 passes (arg0,arg1) and then
+     * (arg2,arg3) to the same coordinate-pair mapper at 0x10031084, so both
+     * pairs are coordinates and the recorded types are a defect in RIPlib's
+     * dispatch parser — see docs/spec/12 §12.14, defect D-9.  The handler is
+     * otherwise instruction-for-instruction identical to '-' at 0x01c348,
+     * the filled member of the same shape. */
+    case '&': /* RIP_SKEWED_OVAL — cx:2 cy:2 rx:2 ry:2 skew:2 */
+        if (len >= 10) {
+            int16_t cx = mega2(p),     cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4), ry = scale_y(mega2(p + 6));
+            int16_t sk = mega2(p + 8);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, 0, 360,
+                                 RIP_OVAL_CLOSED, false);
         }
         break;
 

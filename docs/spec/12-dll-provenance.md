@@ -32,8 +32,30 @@ summarized away.  See design/bbs-land-alignment.md.
      Image base:   0x10000000
      Build date:   October 16, 1997
      Build path:   C:\src\rip3\dll32\   (recoverable from .rdata)
-     Driver:       RIPscrip 3.0.7
+     Driver:       see "Version labelling" below
      Ships in:     RIPtel Visual Telnet 3.1
+
+Version labelling (CORRECTED 2026-08-12).  This document previously
+recorded the driver as "RIPscrip 3.0.7".  The binary does not support
+that string: it contains "3.0.7" ZERO times, and the value returned by
+its own ripProductVersion() entry point is the literal
+
+     3.00.04
+
+which appears exactly once, in the .rdata block alongside the other
+ripProductName()/ripVendorName()/ripProductPlatform() constants
+("RIPscrip", "TeleGrafix Communications, Inc.", "Win32").  RIPTEL.EXE
+from the same install carries "3.1" and no 3.0.x string at all.
+
+"3.0.7" is an EXTERNAL label, not a self-report: bbs-land's artifact
+catalogue records a RIPSCRIP.DLL of that name as extracted from
+rtel3100.exe, and RIPlib adopted the label from there.  Whether that
+build is byte-identical to this one is unverified — the catalogue does
+not publish a hash.  Other RIPlib documents still use "3.0.7" as a
+shorthand for this driver; where they do, it means "the image with the
+MD5 above", which is the only identifier that is actually checkable.
+Treat the size+MD5 pair as authoritative and the version string as
+provenance metadata.
 
 Every address in segments 11 and 12 is an absolute virtual address
 valid ONLY for this exact image.  A different build invalidates them
@@ -831,9 +853,134 @@ D-7  'riplib_host_tx' CARRIES CONSUMER TERMINOLOGY IN THE PUBLIC API.
      port must implement, and its name says "card".  Renaming is a
      breaking API change and therefore a v2.0.0-shaped decision.
 
+D-9  THE DISPATCH PARSER MIS-TYPES SOME ARGUMENTS.  Recorded
+     2026-08-12.  scripts/dll-dispatch-table.py records '|&' (slot 3) as
+     XY, XY, mega2, mega2, mega2 — but the handler at RVA 0x01f904 hands
+     BOTH (arg0,arg1) and (arg2,arg3) to the coordinate-pair mapper at
+     0x10031084, so arguments 2 and 3 are coordinates, not plain
+     MegaNums.  The paired handler '|-' (slot 9) is recorded correctly as
+     XY, XY, XY, XY, mega2 despite being the same shape, which is what
+     makes the '|&' row provably wrong rather than merely doubtful.
+
+     A second symptom, recorded earlier and still open: '|F' RIP_FILL is
+     read as argc=0 at RVA 0x01B2FD, one byte before '|G' at 0x01B2FE.
+     A zero-argument flood fill is not a plausible command, and the
+     one-byte offset points at the same defect — the parser walking into
+     an entry at the wrong boundary or following a thunk.
+
+     Both symptoms are in RIPlib's EXTRACTION script, not in the driver.
+     Consequence: argument TYPE bytes in segment 13 are advisory where
+     they disagree with a handler's own behaviour, while argument COUNTS
+     have held up everywhere they have been checked (all six members of
+     the skewed-oval family matched TeleGrafix's demo exactly).  Until
+     the parser is fixed, prefer handler evidence over recorded types.
+
 
 ---------------------------------------------------------------------
-12.13  STILL OPEN
+12.14  CLASS H — NEWCMDS.RIP, TELEGRAFIX'S OWN COMMENTED DEMO
+---------------------------------------------------------------------
+
+A ninth evidence class, and the strongest yet for command IDENTITY:
+the RIPterm/RIPtel installation ships 35 .RIP scenes, and one of them
+(ICONS/NEWCMDS.RIP, 1,747 bytes, dated 8 April 1997) is a commented
+demonstration file in which TeleGrafix names each command it exercises:
+
+     !|! Show RIP_SKEWED_OVAL
+     !|N01|&20151G0M1M
+
+     !|! Show a RIP_SKEWED_OVAL_ARC
+     !|N01|]50151G0M20601M
+
+     !|! Show a RIP_FILLED_OVAL_CHORD
+     !|N01|_B03F90601G0M|!  With    a border
+     !|N00|_B05P90601G0M|!  Without a border
+
+This is not an inference from the binary; it is the vendor writing down
+what the letter means, next to a working example of its argument layout.
+
+WHAT IT ESTABLISHES
+
+     |&   RIP_SKEWED_OVAL             5 args   10 chars
+     |-   RIP_FILLED_SKEWED_OVAL      5 args   10 chars
+     |]   RIP_SKEWED_OVAL_ARC         7 args   14 chars
+     |[   RIP_SKEWED_OVAL_PIE_SLICE   7 args   14 chars
+     |+   RIP_SKEWED_OVAL_CHORD       7 args   14 chars
+     |_   RIP_FILLED_OVAL_CHORD       6 args   12 chars
+
+Every one of those arities matches the dispatch table's recorded argc
+exactly.  The file also proves the coordinate layout on its own: before
+drawing anything it strokes a grid
+
+     !|L2000209Q   (x=72)     !|L0015HR15  (y=41)
+     !|L5000509Q   (x=180)    !|L003FHR3F  (y=123)
+     !|L8000809Q   (x=288)    !|L005PHR5P  (y=205)
+     !|LB000B09Q   (x=396)
+
+and then places each shape on an intersection.  Decoding the demo
+payloads as MegaNum pairs puts every shape's first two arguments on a
+grid node, and leaves radii 52/22 IDENTICAL across all seven shapes —
+which is what a "same shape, seven variants" demo must look like.
+
+FIELD ORDER, SETTLED BY DISASSEMBLY
+
+The handler for '|-' (RVA 0x01c348) and the handler for '|&'
+(RVA 0x01f904) are instruction-for-instruction identical apart from
+frame size and stack offsets — the filled and outline members of one
+shape.  Both load five arguments and hand (arg0,arg1) and then
+(arg2,arg3) to the SAME coordinate-pair mapper at 0x10031084, then pass
+everything to the generator at 0x10010160:
+
+     push ecx           ; POINT buffer (8 KB)
+     push eax           ; &bounding rect
+     push ebx           ; 0x168 = 360      <- end angle
+     push 0             ;                  <- start angle
+     push edi           ; arg[4]  = skew
+     push [ebp-0x14]    ; arg[3]  = ry
+     push [ebp-0x10]    ; arg[2]  = rx
+     push [ebp-0x0c]    ; arg[1]  = cy
+     push [ebp-0x08]    ; arg[0]  = cx
+     push esi           ; engine state
+     call 0x10010160
+     ...
+     call Polygon(hdc, pts, 360)
+
+So the non-arc members are the arc generator with start/end pinned to
+0..360, and the driver renders the whole family as a 360-point polygon
+rather than with a GDI ellipse call.
+
+WHAT 'SKEW' ACTUALLY IS
+
+The generator at 0x10010160 indexes two Q14 fixed-point tables — sine at
+RVA 0x07b638, cosine at 0x07b098, 360 entries each, verified against
+libm to 1 LSB — and its inner loop is a plain 2-D rotation:
+
+     X  = rx * cos(t) >> 14          Y  = ry * sin(t) >> 14
+     px = cx + (X * cos(skew) - Y * sin(skew)) >> 14
+     py = cy - (X * sin(skew) + Y * cos(skew)) >> 14
+
+emitting one point per degree over [start,end] inclusive and tracking a
+bounding rect as it goes.  'skew' is therefore a ROTATION ANGLE IN WHOLE
+DEGREES, not a shear factor or an aspect ratio.  The Y subtraction is
+the screen-coordinate inversion, so angles run counter-clockwise from
+east.  RIPlib reproduces this arithmetic exactly; see
+rip_skewed_oval_points() in src/ripscrip.c.
+
+The cosine table equals sin(t+90) for 358 of its 360 entries and differs
+by one LSB on the other two, so RIPlib ships a single sine table.
+
+WHAT IT COST
+
+RIPlib had all six letters bound to unrelated commands — ICON_STYLE,
+TEXT_XY_EXT, POLYLINE_EXT, FILLED_POLYGON_EXT, SCROLL and DRAW_TO — and
+rendered them as rectangles and line segments.  Section 12.12 had
+already marked four of the six REFUTED on arity grounds alone; the code
+was never changed to match, which is the failure this class caught.  The
+two capabilities that had no protocol basis but were worth keeping (icon
+display style, bounded text box) moved to '|3&' and '|3-', letters the
+driver's Level 3 set does not use.
+
+---------------------------------------------------------------------
+12.15  STILL OPEN
 ---------------------------------------------------------------------
 
 Requires reading further handler bodies:

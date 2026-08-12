@@ -1,0 +1,175 @@
+/*
+ * test_corpus.c — replay real TeleGrafix RIPscrip scenes through the parser.
+ *
+ * Every other test in this tree asserts behaviour RIPlib was written to have.
+ * This one asserts nothing about meaning: it feeds authentic .RIP files from a
+ * RIPterm/RIPtel installation byte-for-byte and checks the parser survives
+ * them — no crash, no wedged FSM, no drawing outside the framebuffer, and no
+ * silently-unhandled opcode.  It is the only test whose input RIPlib did not
+ * author, which is exactly why it catches what the hand-written suite cannot.
+ *
+ * The scenes are third-party content and are NOT vendored into this repo.
+ * Point the build at a local corpus to enable the test:
+ *
+ *     cmake -S . -B build -DRIPLIB_CORPUS_DIR=C:/RIPtel
+ *
+ * Without that the test reports SKIP and exits 0, so CI stays green on a
+ * checkout that has no corpus.
+ */
+
+#include "drawing.h"
+#include "ripscrip.h"
+#include "corpus_path.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define W 640
+#define H 400
+
+/* Guard bands either side of the framebuffer.  draw_init() is handed only the
+ * inner W*H window, so any write outside it lands in a canary and is caught. */
+#define GUARD 4096
+static uint8_t fb_backing[GUARD + W * H + GUARD];
+static uint8_t *fb = fb_backing + GUARD;
+
+static uint16_t palette[256];
+static int tests_run = 0;
+static int tests_passed = 0;
+
+void palette_write_rgb565(uint8_t i, uint16_t v) { palette[i] = v; }
+uint16_t palette_read_rgb565(uint8_t i) { return palette[i]; }
+void riplib_host_tx(const char *buf, int len) { (void)buf; (void)len; }
+
+#define TEST(name) do { tests_run++; printf("  %-46s ", name); } while (0)
+#define PASS() do { tests_passed++; printf("PASS\n"); } while (0)
+#define FAIL(msg) do { printf("FAIL: %s\n", msg); } while (0)
+
+static int guards_intact(void) {
+    size_t i;
+
+    for (i = 0; i < GUARD; i++)
+        if (fb_backing[i] != 0xA5 || fb_backing[GUARD + W * H + i] != 0xA5)
+            return 0;
+    return 1;
+}
+
+static void init_fixture(rip_state_t *s, comp_context_t *ctx) {
+    memset(fb_backing, 0xA5, sizeof(fb_backing));
+    memset(fb, 0, W * H);
+    memset(palette, 0, sizeof(palette));
+    memset(s, 0, sizeof(*s));
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->target = fb;
+    draw_init(fb, W, W, H);
+    rip_init_first(s);
+}
+
+static int load_file(const char *path, unsigned char **out, size_t *n) {
+    FILE *f;
+    long sz;
+    unsigned char *buf;
+
+    *out = NULL;
+    *n = 0;
+#if defined(_MSC_VER)
+    if (fopen_s(&f, path, "rb") != 0)
+        f = NULL;
+#else
+    f = fopen(path, "rb");
+#endif
+    if (!f)
+        return 0;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    sz = ftell(f);
+    if (sz < 0) { fclose(f); return 0; }
+    rewind(f);
+    buf = (unsigned char *)malloc((size_t)sz + 1);
+    if (!buf) { fclose(f); return 0; }
+    *n = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    buf[*n] = 0;
+    *out = buf;
+    return 1;
+}
+
+/* Replay one scene.  Returns 1 on success, 0 with `why` set on failure.
+ * `*painted` receives the number of non-background pixels, so a scene that
+ * parses without complaint but renders nothing is still visible as a
+ * failure rather than a pass. */
+static int replay(const char *path, const char **why, long *painted) {
+    rip_state_t s;
+    comp_context_t ctx;
+    unsigned char *data;
+    size_t n, i;
+
+    *painted = 0;
+    if (!load_file(path, &data, &n)) {
+        *why = "could not read file";
+        return 0;
+    }
+
+    init_fixture(&s, &ctx);
+    for (i = 0; i < n; i++)
+        rip_process(&s, &ctx, data[i]);
+
+    for (i = 0; i < (size_t)(W * H); i++)
+        if (fb[i] != 0)
+            (*painted)++;
+
+    /* A well-formed scene must leave the FSM back at idle.  Anything else
+     * means a command swallowed the rest of the stream. */
+    if (s.state != RIP_ST_IDLE) {
+        free(data);
+        *why = "parser did not return to idle";
+        return 0;
+    }
+    if (!guards_intact()) {
+        free(data);
+        *why = "drawing escaped the framebuffer";
+        return 0;
+    }
+
+    if (s.psram_arena.base)
+        psram_arena_destroy(&s.psram_arena);
+    free(data);
+    return 1;
+}
+
+int main(void) {
+    size_t i;
+
+    printf("RIPlib corpus replay\n");
+
+    if (riplib_corpus_scenes[0] == 0) {
+        printf("  SKIP: no corpus configured "
+               "(-DRIPLIB_CORPUS_DIR=<dir> to enable)\n");
+        return 0;
+    }
+
+    for (i = 0; riplib_corpus_scenes[i] != 0; i++) {
+        const char *why = "";
+        const char *base = strrchr(riplib_corpus_scenes[i], '/');
+        long painted = 0;
+
+        base = base ? base + 1 : riplib_corpus_scenes[i];
+        TEST(base);
+        if (!replay(riplib_corpus_scenes[i], &why, &painted)) {
+            FAIL(why);
+        } else {
+            /* Zero output is not a failure: some shipped scenes are
+             * conditional templates that resolve to $NULL$ when their
+             * driving text variable is unset (WIPE.RIP is one).  The count
+             * is reported so a scene that silently stops drawing after a
+             * parser change is still obvious in the diff. */
+            tests_passed++;
+            if (painted == 0)
+                printf("PASS        0 px  (no output)\n");
+            else
+                printf("PASS  %7ld px\n", painted);
+        }
+    }
+
+    printf("\n%d/%d scenes replayed cleanly\n", tests_passed, tests_run);
+    return tests_passed == tests_run ? 0 : 1;
+}

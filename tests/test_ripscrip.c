@@ -1122,7 +1122,7 @@ static void test_text_xy_ext_renders_via_shared_helper(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("- (TEXT_XY_EXT) routes through shared text path (regression for L14)");
+    TEST("|3- (bounded text box) routes through shared text path (regression for L14)");
     init_fixture(&s, &ctx);
     /* Bitmap font path (font_id == 0).  Before L14 this passed NULL
      * font to draw_text, which silently dropped the entire string.
@@ -1130,14 +1130,14 @@ static void test_text_xy_ext_renders_via_shared_helper(void) {
      * easily verify without comparing rendered glyphs. */
     tx_reset();
     /* x0=05 y0=05 x1=14(40) y1=0K(20) flags=00 body=$BEEP$ */
-    feed_script(&s, &ctx, "!|-0505140K00$BEEP$|");
+    feed_script(&s, &ctx, "!|3-0505140K00$BEEP$|");
     int has_bel = 0;
     for (size_t i = 0; i < tx_len; i++)
         if (tx_capture[i] == 0x07) { has_bel = 1; break; }
     if (has_bel)
         PASS();
     else
-        FAIL("- did not run shared text rendering (still uses old broken code)");
+        FAIL("|3- did not run shared text rendering");
 }
 
 static void test_text_xy_ext_clips_to_box(void) {
@@ -1146,10 +1146,10 @@ static void test_text_xy_ext_clips_to_box(void) {
     int inside = 0;
     int outside = 0;
 
-    TEST("- (TEXT_XY_EXT) clips glyphs to its bounding box");
+    TEST("|3- (bounded text box) clips glyphs to its bounding box");
     init_fixture(&s, &ctx);
     /* Box (5,5)-(12,20), flags=00, long text would extend past x=12. */
-    feed_script(&s, &ctx, "!|-05050C0K00AAAA|");
+    feed_script(&s, &ctx, "!|3-05050C0K00AAAA|");
     for (int y = 5; y <= 23 && !inside; y++)
         for (int x = 5; x <= 12 && !inside; x++)
             if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) inside = 1;
@@ -1159,23 +1159,26 @@ static void test_text_xy_ext_clips_to_box(void) {
     if (inside && !outside)
         PASS();
     else
-        FAIL("TEXT_XY_EXT ignored its clipping box");
+        FAIL("|3- ignored its clipping box");
 }
 
 static void test_draw_to_moves_cursor(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("_ DRAW_TO updates draw cursor and optionally draws a line");
+    TEST("_ FILLED_OVAL_CHORD fills the arc side and not beyond the chord");
     init_fixture(&s, &ctx);
-    /* x0=05 y0=05 mode=01 (draw on) param=00 x1=0F y1=0F */
-    feed_script(&s, &ctx, "!|_050501000F0F|");
-    /* Pixel between (5,5) and (15,15) on the diagonal — e.g. (10, 11)
-     * (scale_y skews Y by 8/7).  Just check that draw_x/draw_y advanced. */
-    if (s.draw_x == 15 && s.draw_y == /* scale_y(15) = 17 */ 17)
+    feed_script(&s, &ctx, "!|c0F|S0104|");
+    /* cx=2S(100) cy=2S(100) start=00(0) end=50(180) rx=14(40) ry=0K(20).
+     * Angles run counter-clockwise from east with Y inverted, so 0..180 is
+     * the UPPER half and the chord closes flat across the centre line.
+     * Centre lands at (100, scale_y(100)=114); ry scales to 22. */
+    feed_script(&s, &ctx, "!|_2S2S0050140K|");
+    if (draw_get_pixel(100, 105) == s.palette[4] &&
+        draw_get_pixel(100, 125) != s.palette[4])
         PASS();
     else
-        FAIL("DRAW_TO did not update cursor position");
+        FAIL("FILLED_OVAL_CHORD did not fill the arc side only");
 }
 
 static void test_icon_request_queue_dequeue(void) {
@@ -2042,23 +2045,26 @@ static void test_filled_border_disabled_skips_rect_outline(void) {
     comp_context_t ctx;
     int outline_pixel;
     int interior_pixel;
+    int scan_x, scan_y;
 
-    TEST("N00 also disables outlines on filled rects via [");
+    TEST("N00 also disables outlines on the filled pie slice via [");
     init_fixture(&s, &ctx);
-    /* fill_pattern=1 (solid), fill_color=4 (red), draw_color=15 (white).
-     * filled_borders OFF.  Then [ filled-rect-ext.  Outline pixel must
-     * be the fill color, not the draw color. */
+    /* fill_pattern=1 (solid), fill_color=4 (red), draw_color=15 (white),
+     * filled_borders OFF.  With the border suppressed, the draw colour
+     * must not appear anywhere in the shape's bounding box. */
     feed_script(&s, &ctx, "!|c0F|S0104|N00|");
-    /* [ rect with bx0=0A by0=0A bx1=0F by1=0F mode=00 p1=00 p2=00 */
-    feed_script(&s, &ctx, "!|[0A0A0F0F000000|");
-    /* Top-left corner (10, 11) should be fill-color (palette[4]=244) since
-     * outline was suppressed. */
-    outline_pixel = draw_get_pixel(10, 11);
-    interior_pixel = draw_get_pixel(12, 13);
-    if (outline_pixel == s.palette[4] && interior_pixel == s.palette[4])
+    /* cx=2S(100) cy=2S(100) rx=14(40) ry=0K(20) start=00 end=50(180) skew=00 */
+    feed_script(&s, &ctx, "!|[2S2S140K005000|");
+    outline_pixel = 0;
+    for (scan_y = 85; scan_y <= 120; scan_y++)
+        for (scan_x = 55; scan_x <= 145; scan_x++)
+            if (draw_get_pixel((int16_t)scan_x, (int16_t)scan_y) == s.palette[15])
+                outline_pixel = 1;
+    interior_pixel = draw_get_pixel(100, 105);
+    if (!outline_pixel && interior_pixel == s.palette[4])
         PASS();
     else
-        FAIL("rect outline drew despite N00");
+        FAIL("pie-slice outline drew despite N00");
 }
 
 static void test_filled_border_helper_always_sets_copy_mode(void) {
@@ -2366,7 +2372,7 @@ static void test_icon_style_tile_mode_repeats(void) {
     }
     /* ICON_STYLE box (0,0)-(15,7) — 16x8 box, mode=01 (tile),
      * align=00 scale=00.  Each field is 2 chars. */
-    feed_script(&s, &ctx, "!|&00000F0701000000|");
+    feed_script(&s, &ctx, "!|3&00000F0701000000|");
     if (!s.icon_style_active) { FAIL("setup: & not active"); return; }
     feed_script(&s, &ctx, "!|1I000000000TILEME|");
     /* In tile mode the 4x4 icon should appear at multiple cell origins
@@ -4098,7 +4104,7 @@ static void test_icon_style_stretch_mode(void) {
         FAIL("setup: cache"); return;
     }
     /* |& sets style box (5,5)-(25,25), mode=00 (stretch), align=00, scale=00 */
-    feed_script(&s, &ctx, "!|&050519190000000000|");
+    feed_script(&s, &ctx, "!|3&050519190000000000|");
     feed_script(&s, &ctx, "!|1I000000000MINI|");
     if (draw_get_pixel(15, 15) != 0) PASS();
     else FAIL("stretch mode left center empty");
@@ -4118,7 +4124,7 @@ static void test_icon_style_center_mode(void) {
     /* style box (10,10)-(50,50), mode=02 (center).  scale_y(10)=11,
      * scale_y1(50)=58 → effective box (10,11)-(50,58).  Centering 2×2
      * in a 41×48 box → top-left at (29, 34). */
-    feed_script(&s, &ctx, "!|&0A0A1E1E0200000000|");
+    feed_script(&s, &ctx, "!|3&0A0A1E1E0200000000|");
     feed_script(&s, &ctx, "!|1I000000000CTR|");
     if (draw_get_pixel(29, 34) != 0 || draw_get_pixel(30, 34) != 0) PASS();
     else FAIL("center mode missed expected location");
@@ -4608,7 +4614,7 @@ static void test_icon_style_proportional_mode(void) {
     if (!rip_icon_cache_pixels(&s.icon_state, "WIDE", 4, pixels, 2, 1)) {
         FAIL("setup: cache"); return;
     }
-    feed_script(&s, &ctx, "!|&0A0A1E1E0300000000|");
+    feed_script(&s, &ctx, "!|3&0A0A1E1E0300000000|");
     feed_script(&s, &ctx, "!|1I000000000WIDE|");
     int found = 0;
     for (int y = 10; y < 30 && !found; y++)

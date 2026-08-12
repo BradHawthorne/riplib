@@ -23,6 +23,39 @@ target_include_directories(test_compat PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_test(NAME compat_tests COMMAND test_compat)
 
+# ── Optional corpus replay ───────────────────────────────────────
+# Replays authentic TeleGrafix .RIP scenes through the parser.  Those files
+# are third-party content and are deliberately NOT vendored here; point the
+# build at a local RIPterm/RIPtel installation to enable the test:
+#
+#     cmake -S . -B build -DRIPLIB_CORPUS_DIR=C:/RIPtel
+#
+# With no corpus configured the test still builds and runs, reporting SKIP,
+# so a plain checkout stays green.
+set(RIPLIB_CORPUS_DIR "" CACHE PATH
+    "Directory of real .RIP scenes to replay in corpus_tests (optional)")
+
+set(_corpus_scenes "")
+if(RIPLIB_CORPUS_DIR)
+    file(GLOB_RECURSE _corpus_files
+         "${RIPLIB_CORPUS_DIR}/*.RIP" "${RIPLIB_CORPUS_DIR}/*.rip")
+    # Case-insensitive filesystems match both globs for one file.
+    list(REMOVE_DUPLICATES _corpus_files)
+    foreach(_f IN LISTS _corpus_files)
+        string(APPEND _corpus_scenes "    \"${_f}\",\n")
+    endforeach()
+    list(LENGTH _corpus_files _corpus_count)
+    message(STATUS "Corpus replay: ${_corpus_count} scene(s) from ${RIPLIB_CORPUS_DIR}")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/corpus_path.h"
+"#pragma once\nstatic const char *const riplib_corpus_scenes[] = {\n${_corpus_scenes}    0\n};\n")
+
+add_executable(test_corpus test_corpus.c)
+target_link_libraries(test_corpus PRIVATE riplib)
+target_include_directories(test_corpus PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+add_test(NAME corpus_tests COMMAND test_corpus)
+
 # ── Optional libFuzzer harness ───────────────────────────────────
 # Build with: cmake -DRIPLIB_BUILD_FUZZ=ON -DCMAKE_C_COMPILER=clang
 #
