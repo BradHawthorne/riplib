@@ -197,6 +197,20 @@ jobs:
     - name: No consumer-specific names outside sanctioned locations
       run: bash scripts/check-branding.sh --verbose
 
+  command-docs:
+    name: spec/code agreement (command names)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # The parser and the spec's command table drifted apart repeatedly, in
+    # both directions: segment 12 recorded opcode assignments as REFUTED
+    # that the code never adopted, and segment 10's appendix was corrected
+    # ahead of the code and sat right for months while the parser stayed
+    # wrong. Either way a reader trusting one of them was misled.
+    - name: Parser and appendix agree on command names
+      run: python3 scripts/check-command-docs.py
+
   static-analysis:
     runs-on: ubuntu-latest
     steps:

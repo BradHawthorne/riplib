@@ -148,8 +148,13 @@ The full command letter tables are in Segments 2-5.
 1.5  MEGANUM ENCODING
 ---------------------------------------------------------------------
 
-RIPscrip encodes numeric parameters using "MegaNum" base-36 digits.
-Each digit is a single ASCII character:
+RIPscrip encodes numeric parameters using "MegaNum" digits.  The
+default radix is 36; a second radix of 64 exists and is mandatory for
+four commands — see §1.5.1, which a decoder must read before assuming
+base 36 everywhere.
+
+In base 36 each digit is a single ASCII character, and the letters are
+case-INSENSITIVE ('a' and 'A' are both 10):
 
      Character   Value       Character   Value
      ---------   -----       ---------   -----
@@ -200,6 +205,60 @@ Examples:
      "2S"   = 100         (2-digit, x=100)
      "1E"   = 50          (2-digit, y=50)
      "5K"   = 200         (2-digit, x=200)
+
+
+---------------------------------------------------------------------
+1.5.1  THE SECOND RADIX — BASE 64
+---------------------------------------------------------------------
+
+Base 36 is not the whole story.  RIPscrip has a SECOND radix, and a
+handful of commands always use it regardless of any global setting.
+A decoder that assumes base 36 everywhere will mis-read them.
+
+THE ALPHABET.  Base 64 extends the base-36 set with lowercase letters
+and two punctuation symbols.  It is CASE-SENSITIVE, unlike base 36:
+
+     Character   Value       Character   Value
+     ---------   -----       ---------   -----
+     0 .. 9      0 .. 9      a .. z      36 .. 61
+     A .. Z      10 .. 35    #           62
+                             &           63
+
+     mega2_64(p) = value(p[0]) * 64 + value(p[1])
+     mega4_64(p) = value(p[0]) * 262144 + ... + value(p[3])
+
+     Width   Min   Max        Note
+     -----   ---   --------   -------------------------------------
+     2       0     4095
+     4       0     16777215   exactly 0xFFFFFF — a 24-bit RGB value
+
+That last row is not a coincidence.  The driver's palette handler
+rejects an RGB argument above 0xFFFFFF ("RGB Color value is out of
+range!"), and a 4-digit field only reaches 24 bits in this radix; in
+base 36 it caps at 1679615 and the check could never fire.
+
+WHICH COMMANDS.  The radix is selected PER COMMAND, not globally.
+The driver's dispatch record carries a two-bit field that is consulted
+before any global setting:
+
+     always base 36    |J  |N
+     always base 64    |D  |d  |h  |y
+     global default    every other command (base 36 unless changed)
+
+'|J' RIP_SET_BASE_MATH sets the global radix and accepts only 36 or 64,
+forcing 36 for anything else.  It is itself permanently base 36 — the
+command that SETS the radix must decode unambiguously.  A consequence
+worth knowing: '|J10' means 36 in base 36 and 64 in base 64, so it
+ASSERTS the current radix rather than changing it.  Every '|J' in
+TeleGrafix's shipped content is '|J10'.
+
+A single file may mix both.  TUNNEL.RIP carries base-64 '|d' palette
+payloads and '|fZKQO', which is 1280x960 only in base 36.
+
+RIPlib decodes the four always-64 commands with the base-64 helpers in
+src/rip_meganum.h and everything else in base 36.  It does not
+implement a global switch to base 64, because no known content selects
+one; see docs/spec/12-dll-provenance.md D-12.
 
 
 ---------------------------------------------------------------------

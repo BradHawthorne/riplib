@@ -74,27 +74,36 @@ fills with fill color, then draws outline in draw color.
 
 
 ---------------------------------------------------------------------
-4.4  RIP_SCROLL — Scroll Screen Region
+4.4  RIP_SKEWED_OVAL_CHORD — Rotated Elliptical Chord
 ---------------------------------------------------------------------
 
-     Function:     Scroll Screen Region
+     Function:     Skewed Oval Chord
      Command:      |+
-     Arguments:    x0:2 y0:2 x1:2 y1:2 dx:2 dy:2 fill_color:2
-     Format:       !|+<x0><y0><x1><y1><dx><dy><fill>|
+     Arguments:    cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2
+     Format:       !|+<cx><cy><rx><ry><start><end><skew>|
 
-Scrolls a rectangular region by (dx, dy) pixels and fills the
-vacated area with fill_color.
+CORRECTED.  This letter was documented as RIP_SCROLL.  The dispatch
+record gives argc 7 with types XY,XY,XY,XY,mega2,mega2,mega2, and
+TeleGrafix's own commented demo ICONS/NEWCMDS.RIP labels it
+"RIP_SKEWED_OVAL_CHORD".
+
+The six skewed-oval commands below share one geometry generator.  Angles
+run counter-clockwise from east; `skew` rotates the whole ellipse and is a
+whole number of degrees, not a shear factor or an aspect ratio.  A sweep
+whose end angle is less than its start wraps through 0.  Origin: the
+driver walks the outline one point per degree and hands the run to a
+polygon fill, so these are polygons, not GDI ellipses.  See
+docs/spec/12-dll-provenance.md section 12.14.
+
+Draws the arc from `start` to `end` and closes it with a straight line
+between the endpoints, filling the enclosed area.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x0,y0       2,2     coords    Region top-left
-     x1,y1       2,2     coords    Region bottom-right
-     dx          2       signed    Horizontal scroll offset
-     dy          2       signed    Vertical scroll offset
-     fill_color  2       0-15      Color for vacated area
-
-Implementation: uses draw_copy_rect for the shift, then
-draw_rect to fill the vacated strip.
+     cx,cy       2,2     coords    Centre of the ellipse
+     rx,ry       2,2     coords    Radii, before rotation
+     start,end   2,2     0-359     Sweep, counter-clockwise from east
+     skew        2       0-359     Rotation of the whole ellipse
 
 
 ---------------------------------------------------------------------
@@ -113,23 +122,30 @@ and differs in size, RIPlib scales the source region into it.
 
 
 ---------------------------------------------------------------------
-4.6  RIP_TEXT_XY_EXT — Extended Text at Position
+4.6  RIP_FILLED_SKEWED_OVAL — Filled Rotated Ellipse
 ---------------------------------------------------------------------
 
-     Function:     Extended Text at Position
+     Function:     Filled Skewed Oval
      Command:      |-
-     Arguments:    x0:2 y0:2 x1:2 y1:2 flags:2 text
-     Format:       !|-<x0><y0><x1><y1><flags><text>|
+     Arguments:    cx:2 cy:2 rx:2 ry:2 skew:2
+     Format:       !|-<cx><cy><rx><ry><skew>|
 
-Draws text at (x0,y0) with a bounding box (x0,y0)-(x1,y1).
-Flags control justification and clipping behavior.
+CORRECTED.  This letter was documented as RIP_TEXT_XY_EXT.  Its handler
+is instruction-for-instruction identical to '|&' apart from frame size --
+the filled and outline members of one shape -- and NEWCMDS.RIP labels it
+"RIP_FILLED_SKEWED_OVAL".
+
+Draws the full ellipse (a 0..360 sweep of the shared generator) filled
+with the current fill state, honouring '|N' for the border.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x0,y0       2,2     coords    Text position / box top-left
-     x1,y1       2,2     coords    Bounding box bottom-right
-     flags       2       0-63      Justification + clip flags
-     text        var     ASCII     Text to render
+     cx,cy       2,2     coords    Centre of the ellipse
+     rx,ry       2,2     coords    Radii, before rotation
+     skew        2       0-359     Rotation, whole degrees
+
+The bounded-text capability this section used to describe is not lost:
+RIPlib keeps it on '|3-' as a library extension.
 
 
 ---------------------------------------------------------------------
@@ -170,41 +186,57 @@ additional formatting control.
 
 
 ---------------------------------------------------------------------
-4.9  RIP_FILLED_POLYGON_EXT — Extended Filled Polygon
+4.9  RIP_SKEWED_OVAL_PIE_SLICE — Rotated Elliptical Pie Slice
 ---------------------------------------------------------------------
 
-     Function:     Extended Filled Polygon
+     Function:     Skewed Oval Pie Slice
      Command:      |[
-     Arguments:    x0:2 y0:2 x1:2 y1:2 mode:2 p1:2 p2:2
-     Format:       !|[<x0><y0><x1><y1><mode><p1><p2>|
+     Arguments:    cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2
+     Format:       !|[<cx><cy><rx><ry><start><end><skew>|
 
-Extended polygon fill with additional parameters for fill
-mode and pattern control.
+CORRECTED from RIP_FILLED_POLYGON_EXT.  A polygon command takes a
+variable vertex count by nature, yet this entry is fixed-arity 7 with the
+same signature as '|+' and '|]' -- three letters, one family.
+
+Draws the arc from `start` to `end` and closes it through the CENTRE,
+filling the wedge.  Fields are as section 4.4.
 
 
 ---------------------------------------------------------------------
-4.10  RIP_POLYLINE_EXT — Extended Polyline
+4.10  RIP_SKEWED_OVAL_ARC — Rotated Elliptical Arc
 ---------------------------------------------------------------------
 
-     Function:     Extended Polyline
+     Function:     Skewed Oval Arc
      Command:      |]
-     Arguments:    x0:2 y0:2 x1:2 y1:2 mode:2 p1:2 p2:2
-     Format:       !|]<x0><y0><x1><y1><mode><p1><p2>|
+     Arguments:    cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2
+     Format:       !|]<cx><cy><rx><ry><start><end><skew>|
 
-Extended polyline with line mode and pattern parameters.
+CORRECTED from RIP_POLYLINE_EXT.  This is the OPEN member of the family:
+the run is stroked and never filled, and the driver reaches
+GDI32!Polyline here where its four siblings reach GDI32!Polygon.
+
+Fields are as section 4.4.
 
 
 ---------------------------------------------------------------------
-4.11  RIP_DRAW_TO — Draw Line To Position
+4.11  RIP_FILLED_OVAL_CHORD — Filled Elliptical Chord
 ---------------------------------------------------------------------
 
-     Function:     Draw To (line from current position)
+     Function:     Filled Oval Chord
      Command:      |_
-     Arguments:    x0:2 y0:2 mode:2 param:2 x1:2 y1:2
-     Format:       !|_<x0><y0><mode><param><x1><y1>|
+     Arguments:    cx:2 cy:2 start:2 end:2 rx:2 ry:2
+     Format:       !|_<cx><cy><start><end><rx><ry>|
 
-Draws a line from (x0,y0) to (x1,y1) with extended mode
-and parameter control. Updates the drawing cursor.
+CORRECTED from RIP_DRAW_TO, which needs a single coordinate pair against
+this entry's six arguments.
+
+NOTE THE FIELD ORDER: the angles sit in the MIDDLE here, matching '|V'
+RIP_OVAL_ARC rather than the four skewed members above.  The dispatch
+types confirm it -- XY,XY,mega2,mega2,XY,XY -- and this is not a skewed
+variant, so there is no skew field.
+
+TeleGrafix's demo issues this one with start=324 end=216, a sweep that
+wraps through 0.  A decoder that rejects end < start draws nothing.
 
 
 ---------------------------------------------------------------------
@@ -225,17 +257,24 @@ timing coordinates. Used for simple sprite-like animations.
 
 
 ---------------------------------------------------------------------
-4.13  RIP_KILL_MOUSE_EXT — Extended Kill Mouse Fields
+4.13  RIP_FILLED_RECTANGLE — Filled Rectangle
 ---------------------------------------------------------------------
 
-     Function:     Kill Mouse Fields in Region
-     Command:      |K     (Level 0, extended context)
+     Function:     Filled Rectangle
+     Command:      |K
      Arguments:    x0:2 y0:2 x1:2 y1:2
      Format:       !|K<x0><y0><x1><y1>|
 
-Clears mouse regions that overlap the specified rectangle.
-Unlike RIP_KILL_MOUSE (Level 1), this only removes regions
-within the given bounds.
+CORRECTED from RIP_KILL_MOUSE_EXT.  Four coordinate pairs describe a
+rectangle, not a mouse operation; the handler orders (x0,x1) and (y0,y1)
+through the driver's pair-ordering helper, which is rectangle setup, and
+it reaches GDI32!Rectangle -- the same primitive as '|B' RIP_BAR and
+'|R' RIP_RECTANGLE.  SyncTERM binds 'K' the same way.
+
+Fills with the current fill state and honours '|N' for the border.
+
+The mouse-field kill this section used to describe is '|1k'
+RIP_KILL_ENCLOSED_MOUSE_FIELDS, which is a separate and real command.
 
 
 ---------------------------------------------------------------------
@@ -252,17 +291,38 @@ and reserved fields for future use.
 
 
 ---------------------------------------------------------------------
-4.15  RIP_BUTTON_EXT — Extended Button
+4.15  RIP_POLY_MARKER — Draw a Marker Glyph
 ---------------------------------------------------------------------
 
-     Function:     Extended Button
+     Function:     Poly Marker
      Command:      |;
-     Arguments:    x0:2 y0:2 x1:2 y1:2 style:2 lx:2 ly:2
-                   rx:2 ry:2 flags:2 tidx:2
-     Format:       !|;<x0><y0><x1><y1><style><lx><ly><rx><ry><flags><tidx>|
+     Arguments:    x:2 y:2 marker:2 w:2 h:2 rotation:2 flags:2
+     Format:       !|;<x><y><marker><w><h><rotation><flags>|
 
-Extended button with separate label and icon positioning
-coordinates and a style table index.
+CORRECTED from RIP_BUTTON_EXT.  The handler names itself
+RIP_PolyMarker() and validates every scalar field with its own
+diagnostic, which gives the signature outright:
+
+     marker   < 36     "Invalid marker number"
+     rotation < 360    "Invalid marker rotation angle (>=360)"
+     flags    <= 3     "Invalid marker flags value"
+
+TeleGrafix's ICONS/MARKER.RIP -- titled "RIPscrip Markers" on screen --
+exercises exactly numbers 0..35, rotations 0..300 and sizes from 1x1
+upward, matching every bound.
+
+     Parameter   Width   Range     Description
+     ---------   -----   -------   -----------
+     x,y         2,2     coords    Marker centre
+     marker      2       0-35      Which of 36 glyph designs
+     w,h         2,2     coords    Marker size
+     rotation    2       0-359     Rotation, whole degrees
+     flags       2       0-3       Presentation flags
+
+IMPLEMENTATION LIMIT: the 36 glyph DESIGNS have not been recovered from
+the driver.  RIPlib places, sizes and rotates the marker correctly but
+renders one neutral glyph for every marker number.  Geometry is
+faithful; glyph identity is not.
 
 
 ---------------------------------------------------------------------
@@ -289,22 +349,69 @@ Extended text window with color, font, and formatting control.
 
 
 ---------------------------------------------------------------------
-4.17  RIP_EXT_FONT_STYLE — Extended Font Style
+4.17  RIP_ONE_DRAWING_PALETTE — Set One Palette Entry
+---------------------------------------------------------------------
+
+     Function:     One Drawing Palette
+     Command:      |d                        (BASE 64 -- see 1.5.1)
+     Arguments:    index:2 bits:1 rgb:4
+     Format:       !|d<index><bits><rgb>|
+
+CORRECTED.  This section documented '|d' as RIP_EXT_FONT_STYLE.  It is a
+palette command: the handler names itself RIP_OneDrawingPalette() and
+validates all three fields with distinct diagnostics --
+
+     index <= 255       "Color palette index out of range"
+     bits  == 8         "Bits value out of range"
+     rgb   <= 0xFFFFFF  "RGB Color value is out of range!"
+
+Extended font style is '|y' RIP_EXT_FONT_STYLE, section 4.17a.
+
+     Parameter   Width   Range        Description
+     ---------   -----   ----------   ------------------------------
+     index       2       0-255        Palette entry to write
+     bits        1       8 exactly    Bits per channel
+     rgb         4       0-0xFFFFFF   24-bit colour, 0xRRGGBB
+
+The rgb bound is why this command is base 64: a 4-digit base-64 field
+spans exactly 0..0xFFFFFF, while base 36 caps at 1679615 and the
+handler's own range check could never fire.  '|D' (section 4.26) is the
+block form.
+
+
+---------------------------------------------------------------------
+4.17a  RIP_EXT_FONT_STYLE — Extended Font Style
 ---------------------------------------------------------------------
 
      Function:     Extended Font Style
-     Command:      |d
-     Arguments:    font_id:2 attr:1 size:4
-     Format:       !|d<font_id><attr><size>|
+     Command:      |y                        (BASE 64 -- see 1.5.1)
+     Arguments:    11 fields, 26 characters total
+     Widths:       1,1,4,2,2,2,2,2,2,2,6
+     Format:       !|y<26 chars>|
 
-Sets font with extended size range (4-digit MegaNum allows
-sizes beyond the standard 1-10 range).
+The driver's real extended font-style command.  Field widths come from
+the dispatch record and total 26 characters, which independently matches
+the "26-digit layout" recovered from FONTS.RIP by the bbs-land
+reconstruction.
 
-     Parameter   Width   Range     Description
-     ---------   -----   -------   -----------
-     font_id     2       0-10      Font ID
-     attr        1       0-15      Attribute flags
-     size        4       1-9999    Extended size
+Fields identified from the handler's validation branches:
+
+     Field   Offset  Description
+     -----   ------  --------------------------------------------
+     arg5    10      String rotation:    0 / 90 / 180 / 270
+     arg6    12      Character rotation: same set
+     arg8    16      Character spacing, per cent; must be non-zero
+
+The driver compares rotations against 0/900/1800/2700 -- tenths of a
+degree -- after scaling the 2-digit wire field by 10.
+
+The remaining fields are parsed at their correct widths but not
+interpreted; their meanings have not been recovered, and assigning them
+would be a guess.
+
+Base 64 shows plainly in real content: every '|y' in TeleGrafix's
+shipped scenes carries "1a1a" in its two scale fields, which is 100,100
+in base 64 -- a percentage -- and a meaningless 46,46 in base 36.
 
 
 ---------------------------------------------------------------------
@@ -350,12 +457,18 @@ Attribute bits:
 ---------------------------------------------------------------------
 
      Function:     Scene Header
-     Command:      |h
+     Command:      |h                        (BASE 64 -- see 1.5.1)
      Arguments:    type:2 id:4 flags:2
      Format:       !|h<type><id><flags>|
 
 Defines metadata for the current RIPscrip scene (type,
 identifier, and behavioral flags).
+
+The driver accepts several signatures for this letter and selects among
+them by how many characters the stream supplies; RIPlib takes the first
+match by length.  No scene in TeleGrafix's shipped content uses '|h', so
+the base-64 marking follows the dispatch record rather than observed
+content.
 
 
 ---------------------------------------------------------------------
@@ -367,10 +480,20 @@ identifier, and behavioral flags).
      Arguments:    byte_size:1 res:3
      Format:       !|n<byte_size><res>|
 
-Sets the encoded byte width for variable-width X/Y parameters.
-RIPlib records the requested size for `$COORDSIZE$` and state
-introspection. The embedded renderer continues to map supported
-commands into its fixed 640x400 indexed framebuffer.
+Sets the encoded byte width for every argument the dispatch record types
+as a coordinate.  The driver resolves that width at decode time:
+
+     literal count   use it as-is (1, 2 or 4 digits)
+     coordinate      use this command's byte_size
+     colour          use the width from '|M' SET_COLOR_MODE
+
+IMPLEMENTATION LIMIT.  RIPlib's decoders are fixed at 2 digits, so any
+width other than 2 would be mis-read from the first coordinate onward.
+Rather than mis-parse silently, RIPlib records the condition: a width it
+cannot honour sets rip_state_t.coord_size_unsupported, and a host that
+cares can stop instead of rendering garbage.  All 24 uses of '|n' in
+TeleGrafix's shipped content request 2, the default, so no real content
+is affected.  See docs/spec/12-dll-provenance.md D-11.
 
 
 ---------------------------------------------------------------------
@@ -403,15 +526,20 @@ spec. RIP_BAR remains borderless.
 
 
 ---------------------------------------------------------------------
-4.23  RIP_ICON_STYLE — Set Icon Display Style
+4.23  RIP_SKEWED_OVAL — Rotated Ellipse Outline
 ---------------------------------------------------------------------
 
-     Function:     Set Icon Style
+     Function:     Skewed Oval
      Command:      |&
-     Arguments:    x0:2 y0:2 x1:2 y1:2 style:2 align:2 scale:2
-     Format:       !|&<x0><y0><x1><y1><style><align><scale>|
+     Arguments:    cx:2 cy:2 rx:2 ry:2 skew:2
+     Format:       !|&<cx><cy><rx><ry><skew>|
 
-Sets display parameters for subsequent icon rendering.
+CORRECTED from RIP_ICON_STYLE.  NEWCMDS.RIP labels this letter
+"RIP_SKEWED_OVAL", and its handler is identical to '|-' apart from frame
+size -- the outline member of that pair.  Fields are as section 4.6.
+
+The icon display style this section used to describe is not lost: RIPlib
+keeps it on '|3&' as a library extension.
 
 
 ---------------------------------------------------------------------
@@ -428,41 +556,78 @@ with optional scaling and flags.
 
 
 ---------------------------------------------------------------------
-4.25  RIP_SAVE_ICON — Save Screen Region to Icon Slot
+4.25  RIP_SET_BASE_MATH — Select the MegaNum Radix
 ---------------------------------------------------------------------
 
-     Function:     Save Icon
+     Function:     Set Base Math
      Command:      |J
-     Arguments:    slot:2
-     Format:       !|J<slot>|
+     Arguments:    base:2
+     Format:       !|J<base>|
 
-Saves the current clipboard contents to a numbered icon slot
-for later stamping with RIP_STAMP_ICON.
+CORRECTED from RIP_SAVE_ICON.  The handler names itself
+RIP_SetBaseMath() and accepts exactly two values -- 36 and 64 -- forcing
+36 for anything else, then stores the byte in engine state.  It selects
+the MegaNum radix for everything that follows, which is why it appears
+near the top of most real scenes.
 
+This command is itself ALWAYS decoded in base 36, so its argument can
+never be ambiguous.  A consequence: '|J10' is 36 in base 36 and 64 in
+base 64, so it ASSERTS the current radix rather than changing it.  Every
+'|J' in TeleGrafix's shipped content is '|J10'.  See section 1.5.1.
 
----------------------------------------------------------------------
-4.26  RIP_FILL_PATTERN_EXT — Extended Fill Pattern
----------------------------------------------------------------------
-
-     Function:     Extended Fill Pattern (Level 0 context)
-     Command:      |D
-     Arguments:    pat[0]:2 ... pat[7]:2 color:2
-     Format:       !|D<p0><p1><p2><p3><p4><p5><p6><p7><color>|
-
-Same as RIP_FILL_PATTERN (|s) but appears in extended command
-context. Sets an 8×8 user-defined fill pattern.
+The icon-slot save this section used to describe is a RIPlib mechanism
+with no dispatch entry; it moves to '|3J'.
 
 
 ---------------------------------------------------------------------
-4.27  RIP_GET_IMAGE_EXT — Extended Get Image
+4.26  RIP_SET_DRAWING_PALETTE — Write a Block of Palette Entries
 ---------------------------------------------------------------------
 
-     Function:     Extended Get Image
+     Function:     Set Drawing Palette
+     Command:      |D                        (BASE 64 -- see 1.5.1)
+     Arguments:    start:2 count:2 bits:1 then count * rgb:4
+     Format:       !|D<start><count><bits><rgb>...<rgb>|
+
+CORRECTED from RIP_FILL_PATTERN_EXT.  The handler names itself
+RIP_SetDrawingPalette() and its validation chain gives the layout
+outright:
+
+     argc == count + 3   "Invalid number of parameters"
+     count <= 256        "More than 256 entries"
+     start <= 255        "Start is out of range"
+     bits  == 8          "Invalid number of bits"
+
+This is the block form of '|d' RIP_ONE_DRAWING_PALETTE.  Both are always
+base 64: a 4-digit base-64 field spans exactly 0..0xFFFFFF, which is the
+range the handler enforces on each RGB value.
+
+The 8x8 user fill pattern this section used to describe is '|s'
+RIP_FILL_PATTERN, with an identical payload.
+
+
+---------------------------------------------------------------------
+4.27  RIP_POLY_POLYGON — Multi-Contour Polygon
+---------------------------------------------------------------------
+
+     Function:     Poly Polygon
      Command:      |<
-     Arguments:    x0:2 y0:2 x1:2 y1:2
-     Format:       !|<<x0><y0><x1><y1>|
+     Arguments:    count:2 then per contour  nverts:2 (x:2 y:2)*
+     Format:       !|<<count><nverts><x><y>...<nverts><x><y>...|
 
-Extended clipboard copy with simplified parameters.
+CORRECTED from RIP_GET_IMAGE_EXT, a fixed rectangle read, against a
+variable-length entry.  The handler's own diagnostics are "Must have at
+least two vertices to make a polygon" and "Insufficient vertices (2)",
+and it is the only handler in the table that reaches GDI32!PolyPolygon.
+TeleGrafix's ICONS/POLYPOLY.RIP exercises it and prints
+"RIP_POLY_POLYGON" on screen.
+
+THE INTERIOR IS EVEN-ODD ACROSS ALL CONTOURS TOGETHER, so overlapping
+contours cut holes.  That is the point of the command: the demo draws a
+circle behind the shape and comments "so you can see the transparency
+aspect".  Filling each contour independently paints the holes solid and
+loses exactly the effect being demonstrated.
+
+Clipboard capture is unaffected -- that is '|1C' RIP_GET_IMAGE.
 
 
 =====================================================================

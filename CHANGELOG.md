@@ -5,6 +5,178 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] — 2026-08-12
+
+Major release. RIPlib's command set is realigned to the shipping
+RIPSCRIP.DLL, and **thirteen Level-0 commands change meaning**. Content
+authored against RIPlib 1.x that used any of them will render differently.
+Every reassignment below is backed by the driver's own dispatch record,
+its handlers' self-naming error paths, or TeleGrafix's own commented demo
+files — the evidence for each is recorded in
+`docs/spec/12-dll-provenance.md`.
+
+### Changed — commands that now mean something else (breaking)
+
+The skewed-oval family. Six letters were bound to unrelated commands and
+rendered as rectangles and line segments. TeleGrafix's own commented demo
+`ICONS/NEWCMDS.RIP` names each one, and every arity matches the dispatch
+record exactly:
+
+| Cmd | was | is |
+| --- | --- | --- |
+| `\|&` | ICON_STYLE | **RIP_SKEWED_OVAL** (5 args) |
+| `\|-` | TEXT_XY_EXT | **RIP_FILLED_SKEWED_OVAL** (5) |
+| `\|]` | POLYLINE_EXT | **RIP_SKEWED_OVAL_ARC** (7) |
+| `\|[` | FILLED_POLYGON_EXT | **RIP_SKEWED_OVAL_PIE_SLICE** (7) |
+| `\|+` | SCROLL | **RIP_SKEWED_OVAL_CHORD** (7) |
+| `\|_` | DRAW_TO | **RIP_FILLED_OVAL_CHORD** (6) |
+
+The demo strokes a coordinate grid before drawing and places each shape on
+an intersection, which independently confirms the field layout. `skew` is a
+**rotation angle in whole degrees**, not a shear factor: the driver's
+generator walks the outline one point per degree applying a 2-D rotation
+from Q14 sine/cosine tables, then hands the run to `GDI32!Polygon`.
+
+Seven more:
+
+| Cmd | was | is |
+| --- | --- | --- |
+| `\|K` | KILL_MOUSE_EXT | **RIP_FILLED_RECTANGLE** — reaches `GDI32!Rectangle`, same as `\|B` and `\|R`. The mouse-field kill is `\|1k`, which is separate and real. |
+| `\|<` | GET_IMAGE_EXT | **RIP_POLY_POLYGON** — the only handler reaching `GDI32!PolyPolygon`. Interior is even-odd across all contours, so overlaps cut holes. Clipboard capture is `\|1C`. |
+| `\|;` | BUTTON_EXT | **RIP_POLY_MARKER** — the handler names itself and validates marker < 36, rotation < 360, flags <= 3. |
+| `\|J` | SAVE_ICON | **RIP_SET_BASE_MATH** — selects the MegaNum radix. |
+| `\|D` | FILL_PATTERN_EXT | **RIP_SET_DRAWING_PALETTE** — block form of `\|d`. The 8x8 pattern is `\|s`. |
+| `\|d` | EXT_FONT_STYLE | **RIP_ONE_DRAWING_PALETTE** — extended font style is `\|y`. |
+| `\|1S` | IMAGE_STYLE | **removed** — no `S` or `s` exists in the driver's Level 1 band. Image style is `\|1i`. |
+
+`\|;` was the most damaging: RIPlib added a **mouse region on every call**,
+and the shipped corpus issues 361 of them, so a scene of markers
+manufactured hundreds of phantom clickable areas.
+
+Capabilities displaced by the above are not lost — they move to Level-3
+letters the driver does not define: `\|3&` icon display style, `\|3-`
+bounded text box, `\|3J` icon-slot save.
+
+### Added
+
+- **`\|3D` RIP_DELAY**, in sixtieths of a second. Recovered by following
+  call targets rather than strings: its callee busy-waits on
+  `WINMM!timeGetTime`, and the chunking arithmetic (3900 ticks, 65000 ms per
+  chunk) fixes the unit. **RIPlib never blocks** — a rendering library that
+  stalls its caller for up to 65 seconds per chunk is unusable on the
+  cooperative hosts RIPlib targets. The request is recorded and handed over
+  by the new `rip_take_delay()`; ignoring it is safe.
+- **Base-64 MegaNum** (`docs/spec/01-wire-format.md` §1.5.1). RIPscrip has a
+  second radix — `0-9 A-Z a-z # &`, case-sensitive — and four commands
+  (`\|D`, `\|d`, `\|h`, `\|y`) always use it regardless of any global
+  setting. The alphabet was recovered from TeleGrafix's own content, and the
+  binary corroborates: a 4-digit base-64 field spans exactly `0..0xFFFFFF`,
+  which is the bound the palette handler enforces. Previously RIPlib decoded
+  these as case-insensitive base 36, which folded `a-z` onto `10-35` and
+  turned `#`/`&` into 0 — **61 of TUNNEL.RIP's 65 palette entries decoded
+  wrong**, and every `\|y` in 25 files misread its scale fields.
+- `corpus_tests` — replays authentic `.RIP` scenes byte-for-byte, asserting
+  no crash, no wedged FSM and no drawing outside the framebuffer, and
+  reporting foreground pixels, distinct colours and pending asset requests.
+  Scenes are third-party content and are not vendored; `-DRIPLIB_CORPUS_DIR`
+  enables the test and it reports SKIP without one.
+- `fuzz_seeded_tests` — plain-C99 mutation fuzzer with a fixed seed, wired
+  into ctest. Builds long commands with `\` continuations, which is what
+  the previous fuzzer could not reach.
+- `scripts/dll-disasm.py`, `scripts/dll-handler-imports.py`,
+  `scripts/corpus-scan.py` — handler disassembly with import resolution,
+  classification of handlers by the Win32 APIs they reach, and opcode census
+  over a corpus.
+
+### Fixed
+
+- **Long commands were silently dropped.** `cmd_buf` was 256 bytes, but
+  real scenes exceed it — `HAWK.RIP` issues a `\|p` declaring 153 vertices,
+  needing 614 characters across 11 `\` continuations. The accumulator
+  stopped storing at 255, the command then failed its own length check, and
+  the whole thing was discarded. Widened to 1024 (corpus maximum is 674).
+  `HAWK.RIP` went from 9,896 to 78,562 painted pixels; `LGF1.RIP` from
+  67,607 to 107,930; `CURVES.RIP` from 15 to 41 bezier segments.
+- **Stack overflow in the text path (latent).** `rip_render_text()` passed
+  an unbounded length to `unescape_text()` writing into a 256-byte buffer,
+  safe only because `cmd_buf` happened to be 256 as well — the sizes matched
+  by accident, not by design. `unescape_text()` now takes and enforces the
+  destination capacity, and all six callers pass `sizeof(dst)`.
+- **Wrapping arcs drew nothing.** A sweep whose end angle is below its start
+  wraps through 0; the generator returned early instead. TeleGrafix's demo
+  issues `\|_` with start=324 end=216, a 252-degree sweep that rendered as
+  nothing at all.
+- **`\|P`/`\|p`/`\|l` rejected polygons above 64 vertices** outright rather
+  than drawing them. Cap raised to 192 (corpus maximum is 153).
+- `\|1k` now honours its flags field (1/2/4 = contained/intersecting/
+  outside); previously it always deleted the contained set.
+- `\|2R` consumes its `res:4` argument; it was read as zero-argument.
+- `\|n` records a coordinate width it cannot honour in
+  `rip_state_t.coord_size_unsupported` rather than accepting it and
+  mis-parsing everything after (D-11).
+
+### Security
+
+- `\|3G` RIP_GotoURL is **opt-in**. With no handler registered the URL is
+  validated and stored, and nothing else happens; RIPlib never opens a URL
+  or spawns a process. Schemes are restricted to `http://` and `https://` —
+  `javascript:`, `data:`, `file:` and friends are refused outright rather
+  than left to host policy.
+
+
+### Fixed — earlier alignment work in this release
+
+- **Write modes were misnumbered (breaking rendering fix).** `|W` wire values
+  are `0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT`. RIPlib had OR=1, AND=2, XOR=3 and
+  passes the wire byte straight through, so it rendered XOR where content
+  meant OR and vice versa — `|W01` draw-twice-to-erase smeared instead of
+  erasing. Established by disassembling RIPSCRIP.DLL 3.0.7: the handler
+  (RVA 0x02102C) stores the wire byte unmodified and the apply path
+  translates it at RVA 0x00E6B3 into GDI raster ops (`R2_XORPEN` for 1,
+  `R2_MERGEPEN` for 2, `R2_MASKPEN` for 3). Spec §11 `§BUG.7`, the sole
+  basis for the old numbering, is withdrawn — it was never a DLL bug.
+- **SOH/STX command introducers now work.** RIPscrip syntax rule 12 allows
+  `SOH` (0x01) and `STX` (0x02) to replace `!` anywhere in a line. RIPlib
+  discarded SOH outright, so scenes opening with the SOH form — which the
+  shipped 2.x corpus does — never started.
+
+### Changed — earlier alignment work in this release
+
+- `§A2G.1` (AND/NOT write modes) withdrawn as a protocol extension. Both
+  modes have been documented since v2.00 Alpha 1 and the shipping driver
+  rendered them, so this was a completeness fix to RIPlib's renderer, not a
+  language addition. Spec `§DEAD.3` corrected accordingly.
+- `§A2G.4` qualified: RIPlib provides 11 built-in fill bitmaps plus a
+  user slot, not 13, and four BGI styles still resolve to approximations
+  with styles 5 and 6 collapsing onto one bitmap.
+- `|28` gradient re-attributed as RIPlib-original rather than inherited
+  from RIPSCRIP.DLL 3.0.7; no such command exists in that driver.
+- `§DEV.4` corrected: `|1R`, `|!`, `|(`, `|)` and the backtick composite-icon
+  command are all present in the shipping driver and are not RIPlib
+  extensions. Only `|1V` and `|1X` are RIPlib-original. Closes open
+  question U-026.
+
+### Added — earlier alignment work in this release
+
+- `docs/spec/12-dll-provenance.md` — evidence classes, opcode adjudication,
+  the `|W` disassembly, and a register of open defects.
+- `docs/spec/13-dll-command-table.md` — the driver's command dispatch table
+  verbatim (129 entries: letter, handler, arity, argument types, name).
+- `docs/historical/ripscrip-v3-RE-notes.md` — restored; it is the substrate
+  segments 11-13 cite.
+- `scripts/dll-provenance.py`, `scripts/dll-dispatch-table.py`,
+  `scripts/dll-name-handlers.py` — regenerate the binary-derived data.
+- `scripts/check-branding.sh` + CI job enforcing platform independence.
+
+### Notes
+
+- The `[1.3.0]` section below also contains alignment-era entries that were
+  appended there in error; that release is dated 2026-05-31 and predates
+  this work. They are interleaved with genuine 1.3.0 content and have been
+  left in place rather than risk mis-attributing entries by splitting them.
+  Where the two disagree, this section is authoritative.
+
+
 ## [1.3.0] — 2026-05-31
 
 Minor release that completes the reentrant multi-session API surface.
@@ -360,49 +532,3 @@ guards in CI.
 - Tests that create more than one `rip_state_t` should call
   `psram_arena_destroy(&s.psram_arena)` between init calls or track every
   arena base for cleanup; ASan with `detect_leaks=1` will catch leaks.
-
-## [2.0.0] - 2026-08-12
-
-### Fixed
-
-- **Write modes were misnumbered (breaking rendering fix).** `|W` wire values
-  are `0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT`. RIPlib had OR=1, AND=2, XOR=3 and
-  passes the wire byte straight through, so it rendered XOR where content
-  meant OR and vice versa — `|W01` draw-twice-to-erase smeared instead of
-  erasing. Established by disassembling RIPSCRIP.DLL 3.0.7: the handler
-  (RVA 0x02102C) stores the wire byte unmodified and the apply path
-  translates it at RVA 0x00E6B3 into GDI raster ops (`R2_XORPEN` for 1,
-  `R2_MERGEPEN` for 2, `R2_MASKPEN` for 3). Spec §11 `§BUG.7`, the sole
-  basis for the old numbering, is withdrawn — it was never a DLL bug.
-- **SOH/STX command introducers now work.** RIPscrip syntax rule 12 allows
-  `SOH` (0x01) and `STX` (0x02) to replace `!` anywhere in a line. RIPlib
-  discarded SOH outright, so scenes opening with the SOH form — which the
-  shipped 2.x corpus does — never started.
-
-### Changed
-
-- `§A2G.1` (AND/NOT write modes) withdrawn as a protocol extension. Both
-  modes have been documented since v2.00 Alpha 1 and the shipping driver
-  rendered them, so this was a completeness fix to RIPlib's renderer, not a
-  language addition. Spec `§DEAD.3` corrected accordingly.
-- `§A2G.4` qualified: RIPlib provides 11 built-in fill bitmaps plus a
-  user slot, not 13, and four BGI styles still resolve to approximations
-  with styles 5 and 6 collapsing onto one bitmap.
-- `|28` gradient re-attributed as RIPlib-original rather than inherited
-  from RIPSCRIP.DLL 3.0.7; no such command exists in that driver.
-- `§DEV.4` corrected: `|1R`, `|!`, `|(`, `|)` and the backtick composite-icon
-  command are all present in the shipping driver and are not RIPlib
-  extensions. Only `|1V` and `|1X` are RIPlib-original. Closes open
-  question U-026.
-
-### Added
-
-- `docs/spec/12-dll-provenance.md` — evidence classes, opcode adjudication,
-  the `|W` disassembly, and a register of open defects.
-- `docs/spec/13-dll-command-table.md` — the driver's command dispatch table
-  verbatim (129 entries: letter, handler, arity, argument types, name).
-- `docs/historical/ripscrip-v3-RE-notes.md` — restored; it is the substrate
-  segments 11-13 cite.
-- `scripts/dll-provenance.py`, `scripts/dll-dispatch-table.py`,
-  `scripts/dll-name-handlers.py` — regenerate the binary-derived data.
-- `scripts/check-branding.sh` + CI job enforcing platform independence.
