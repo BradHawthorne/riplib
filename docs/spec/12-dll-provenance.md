@@ -710,13 +710,14 @@ D-2  RESOLVED 2026-08-12.  Length-based signature dispatch implemented
      to misreading fields within the one command — wrong picture, right
      stream position.
 
-D-3  '!' TRIGGERS ANYWHERE IN A LINE.
-     Severity: low-medium.  The IDLE handler enters GOT_BANG on any
-     '!', not only at a line boundary, so ordinary prose containing
-     an ANSI sequence followed by '!' parses as a command.  The
-     spec-sanctioned way to start a scene mid-line is the SOH/STX
-     introducer, implemented 2026-08-12; the relaxation can now be
-     withdrawn.  Tracked as X5.
+D-3  RESOLVED 2026-08-12.  '!' TRIGGERED ANYWHERE IN A LINE.
+     The IDLE handler entered GOT_BANG on any '!', not only at a line
+     boundary, so ordinary prose containing an ANSI sequence followed by
+     '!' parsed as a command.  The spec-sanctioned way to start a scene
+     mid-line is the SOH/STX introducer; that is implemented, and the
+     relaxation was withdrawn with it — src/ripscrip.c now admits '!'
+     only at a line boundary (state 0, "'!' introduces a command ONLY at
+     a line boundary").  Tracked as X5.
 
 D-4  '|28' GRADIENT IS RIPlib-ORIGINAL, NOT INHERITED.
      Severity: documentation only — corrected in segment 6A.
@@ -881,23 +882,28 @@ D-8  '|1k' AND '|3D' — HOW FAR THE ANALYSIS ACTUALLY GOT.
      That is a bounded, evidenced gap — not an unknown, and not a claim of
      completeness.
 
-D-5  FOUR DRIVER COMMANDS ARE UNIMPLEMENTED.
-     Measured 2026-08-12 by diffing the dispatch table against RIPlib's
-     handler switch.  Of 73 Level-0 commands in the driver, RIPlib
-     implements 69.  Missing:
+D-5  RESOLVED 2026-08-12.  FOUR DRIVER COMMANDS WERE UNIMPLEMENTED.
+     Measured by diffing the dispatch table against RIPlib's handler
+     switch.  Of 73 Level-0 commands in the driver, RIPlib implemented
+     69.  The four missing were:
 
           |j   2 args (XY, XY)      — unnamed in the string table
           |r   3 args               — RIP_TextMetric
           |x   var                  — FILLED_POLY_BEZIER (the unfilled
-                                      'z' form IS implemented)
+                                      'z' form was already implemented)
           |y   11 args              — RIP_ExtendedFontStyle
 
-     '|y' is the significant one: it is the driver's real extended
-     font-style command, and RIPlib instead implements extended font
-     style on '|d' — which the driver uses for RIP_OneDrawingPalette
-     (see 12.8, B6).  So RIPlib both misses the real command and
-     mis-parses a different one.  The documentation half of B6 is
-     corrected; the CODE half is not.
+     All four are now implemented.  '|y' was the significant one: it is
+     the driver's real extended font-style command, and RIPlib had
+     extended font style on '|d' — which the driver uses for
+     RIP_OneDrawingPalette (see 12.8, B6).  Both halves of B6 are now
+     corrected: '|d' is a palette command and '|y' carries extended font
+     style, in the 26-character layout that independently matches
+     bbs-land's reading.
+
+     The corpus census (scripts/corpus-scan.py) confirms full Level-0
+     coverage: all 70 distinct opcodes across 12,328 command instances
+     in the 35 shipped scenes reach a handler.
 
 D-6  '§A2G.6' BAKES A HOST POLICY INTO THE LIBRARY.
      src/ripscrip.c:212 maps every EGA index to framebuffer value
