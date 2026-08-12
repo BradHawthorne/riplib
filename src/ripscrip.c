@@ -2072,23 +2072,49 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * Kills every mouse field wholly enclosed by the rectangle,
                    * leaving the rest registered — the selective counterpart
                    * to '|1K', which kills all of them. */
-            if (len >= 8) {
+                  /*
+                   * The flags:4 field selects WHICH fields to destroy, and
+                   * the TeleGrafix reference (bbs-land, 2.0 §4.2, evidence
+                   * "2.00a4") documents the bits:
+                   *
+                   *     1  kill only fields completely contained
+                   *     2  kill only fields that intersect the rectangle
+                   *     4  kill fields entirely outside the rectangle
+                   *
+                   * "If 1, 2 and 4 are not present, then NO fields are
+                   * deleted."  That default matters: a first implementation
+                   * here ignored the flags and always killed the enclosed
+                   * set, which destroys fields on a command whose documented
+                   * behaviour with flags=0 is to destroy nothing. */
+            if (len >= 12) {
                 int16_t kx0 = mega2(p),     ky0 = scale_y(mega2(p + 2));
                 int16_t kx1 = mega2(p + 4), ky1 = scale_y1(mega2(p + 6));
+                uint32_t kflags = (uint32_t)mega4(p + 8);
                 if (kx1 < kx0) { int16_t t = kx0; kx0 = kx1; kx1 = t; }
                 if (ky1 < ky0) { int16_t t = ky0; ky0 = ky1; ky1 = t; }
-                uint16_t kept = 0;
-                for (uint16_t i = 0; i < s->num_mouse_regions; i++) {
-                    rip_mouse_region_t *r = &s->mouse_regions[i];
-                    bool enclosed = (r->x0 >= kx0 && r->x1 <= kx1 &&
-                                     r->y0 >= ky0 && r->y1 <= ky1);
-                    if (!enclosed) {
-                        if (kept != i)
-                            s->mouse_regions[kept] = *r;
-                        kept++;
+
+                if (kflags & 0x07u) {          /* none of 1/2/4 -> kill nothing */
+                    uint16_t kept = 0;
+                    for (uint16_t i = 0; i < s->num_mouse_regions; i++) {
+                        rip_mouse_region_t *r = &s->mouse_regions[i];
+                        bool contained = (r->x0 >= kx0 && r->x1 <= kx1 &&
+                                          r->y0 >= ky0 && r->y1 <= ky1);
+                        bool overlaps  = !(r->x1 < kx0 || r->x0 > kx1 ||
+                                           r->y1 < ky0 || r->y0 > ky1);
+                        bool intersects = overlaps && !contained;
+                        bool outside    = !overlaps;
+
+                        bool kill = ((kflags & 1u) && contained)
+                                 || ((kflags & 2u) && intersects)
+                                 || ((kflags & 4u) && outside);
+                        if (!kill) {
+                            if (kept != i)
+                                s->mouse_regions[kept] = *r;
+                            kept++;
+                        }
                     }
+                    s->num_mouse_regions = kept;
                 }
-                s->num_mouse_regions = kept;
             }
             break;
 

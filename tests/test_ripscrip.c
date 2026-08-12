@@ -3434,15 +3434,20 @@ static void test_ext_ext_text_window_b(void) {
  * rectangle — the selective counterpart to |1K, which kills all of them. */
 static void test_level1_kill_enclosed_mouse_fields(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|1k kills only the mouse fields enclosed by the rectangle");
+    TEST("|1k honours its flags field (0 = kill nothing, 1 = contained)");
     init_fixture(&s, &ctx);
     /* two fields: one inside (10,10)-(50,50), one well outside */
     feed_script(&s, &ctx, "!|1M0A0A1414000000inside|\r\n");
     feed_script(&s, &ctx, "!|1M64646E6E000000outside|\r\n");
     if (s.num_mouse_regions != 2) { FAIL("setup: expected two regions"); return; }
-    feed_script(&s, &ctx, "!|1k0A0A32320000|\r\n");   /* enclose (10,10)-(50,50) */
+    /* flags=0 must kill NOTHING — the TeleGrafix reference is explicit that
+     * one of 1/2/4 must be supplied for any field to be deleted. */
+    feed_script(&s, &ctx, "!|1k0A0A32320000|\r\n");
+    if (s.num_mouse_regions != 2) { FAIL("|1k with flags=0 deleted fields"); return; }
+    /* flags=1 kills only the completely-contained field */
+    feed_script(&s, &ctx, "!|1k0A0A32320001|\r\n");
     if (s.num_mouse_regions != 1) {
-        FAIL("|1k did not remove exactly the enclosed field"); return;
+        FAIL("|1k flags=1 did not remove exactly the contained field"); return;
     }
     /* the survivor must be the outside one */
     if (s.mouse_regions[0].x0 >= 100) PASS();

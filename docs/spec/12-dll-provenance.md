@@ -680,14 +680,51 @@ not name, and independently confirmed several earlier identifications
   |3ESC RIP_EnterBlockMode, confirmed by a name-string reference inside
         the handler's tight bounds (0x024B4E..0x0251CB).
 
-Still unbound after this pass: the two '|3D' entries and '|3e'.  The
-remaining unclaimed Level 3 names are BaudEmulation, AudioSupport,
-ProcessFile, CreateDefaultPalette and ResetDefaultPalette.  Evidence so
-far: '|3D' at RVA 0x024AF4 copies its text argument into a 256-byte
-buffer and calls a routine that references the string "ICONS", which is
-consistent with RIP_ProcessFile; '|3D' at 0x038BD2 is a 15-byte thunk.
-Neither is bound tightly enough to assert, and none of the three appears
-in the corpus, so they stay recorded rather than guessed.
+CROSS-CHECKED against bbs-land/remote-imaging-protocol 2026-08-12.  They
+mined the same help resource independently (their
+version/3.0/research/riptel-help-extraction.md), which makes their
+reading a genuine second opinion rather than a restatement.  Results:
+
+  CONFIRMED, with a correction we needed.  Their 2.0 command reference
+  binds RIP_KILL_ENCLOSED_MOUSE_FIELDS to Level 1 letter 'k' with
+  arguments 'x0:XY y0:XY x1:XY y1:XY flags:4' — matching the binding
+  derived here.  Crucially it also documents the flags field, which the
+  binary alone did not reveal:
+
+       1  kill only fields completely contained
+       2  kill only fields that intersect the rectangle
+       4  kill fields entirely outside the rectangle
+       "If 1, 2 and 4 are not present, then NO fields are deleted."
+
+  A first implementation here ignored the flags and always killed the
+  contained set — which destroys fields on a command whose documented
+  behaviour with flags=0 is to destroy nothing.  Now corrected.
+
+  CONFIRMED.  '|1c' RIP_SET_MOUSE_CURSOR, 'cursor_style:2 res:4'.
+  CONFIRMED.  RIP_SwitchStyle is one of the switchable data tables,
+  supporting the '|2Y' binding.
+  CONFIRMED.  RIP_EnterBlockMode is a real wire command (they cite
+  2.00a4 and SyncTERM ripper.c:17069), supporting '|3ESC'.
+
+  INVALIDATED — a speculation recorded here was wrong.  RIP_ProcessFile
+  and RIP_AudioSupport are NOT wire commands: they are entries in the
+  client-side DLL API that RIPTEL.EXE imports.  So the earlier note that
+  '|3D' at 0x024AF4 might be RIP_ProcessFile does not stand, and the
+  premise behind it — that every remaining Level 3 NAME must bind to a
+  remaining Level 3 LETTER — is false.  Several of the 93 names are host
+  API and never appear on the wire at all.
+
+  NOT RESOLVED BY THEM EITHER.  bbs-land lists the same Level 3 names
+  without opcodes, and states outright that RIP_SwitchDirectory's "wire
+  opcode is unknown".  Two independent reconstructions working from the
+  same help resource and the same binary both stop here.
+
+So the two '|3D' entries and '|3e' remain unbound.  Established: '|3D' at
+0x024AF4 copies its text argument into a 256-byte buffer and calls a
+routine referencing "ICONS"; '|3D' at 0x038BD2 is a 15-byte thunk.  None
+appears in the 116-file corpus.  They stay recorded rather than guessed,
+and that is now a position two projects share rather than a gap unique
+to this one.
 
 
 ---------------------------------------------------------------------
