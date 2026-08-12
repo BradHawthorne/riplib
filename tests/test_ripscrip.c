@@ -3590,6 +3590,80 @@ static long marker_pixels(rip_state_t *s, comp_context_t *ctx, const char *scrip
     return n;
 }
 
+static long text_extent_px(rip_state_t *s, comp_context_t *ctx,
+                           const char *setup) {
+    int xx, yy, minx = 9999, maxx = -1;
+
+    init_fixture(s, ctx);
+    feed_script(s, ctx, "!|c0F|Y010003|");   /* font 1 (stroke), dir 0, size 3 */
+    if (setup) feed_script(s, ctx, setup);
+    /* y=2S(100): vertical justification 0 subtracts the text height, so a
+     * near-zero y would place the run off the top of the framebuffer. */
+    feed_script(s, ctx, "!|@0A2SMMMM|");     /* four wide glyphs */
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) {
+                if (xx < minx) minx = xx;
+                if (xx > maxx) maxx = xx;
+            }
+    return (maxx < 0) ? 0 : (maxx - minx + 1);
+}
+
+static void test_char_spacing_changes_text_extent(void) {
+    rip_state_t s; comp_context_t ctx;
+    long normal, wide;
+
+    TEST("|y character spacing widens the rendered run");
+    /* '|y' carries a character-spacing percentage that RIPlib decoded and
+     * then had nowhere to put -- every text path used the glyph's own
+     * width, so condensed or expanded text rendered identically to normal.
+     * Field 8 sits at offset 16; base 64, so "1a" is 100 and "3S" is 250. */
+    normal = text_extent_px(&s, &ctx, NULL);
+    wide   = text_extent_px(&s, &ctx,
+                            "!|y" "1" "0" "0000" "00" "00" "00" "00" "00" "3S" "00" "000000" "|");
+    if (normal == 0 || wide == 0) { FAIL("no text rendered"); return; }
+    if (wide > normal)
+        PASS();
+    else
+        FAIL("character spacing had no effect on the rendered width");
+}
+
+static void test_bezier_honours_stream_step_count(void) {
+    rip_state_t s; comp_context_t ctx;
+    long coarse = 0, fine = 0;
+    int xx, yy;
+
+    TEST("|z honours the nsteps field the stream supplies");
+    /* The 4-char header form is count:2 steps:2.  RIPlib parsed nsteps and
+     * then ignored it -- outlines always used the adaptive estimate -- so a
+     * stream asking for coarse geometry silently got smooth curves. */
+    /* header is 4 chars (count:2 steps:2), move-to 5, curve-to 13. */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|z0102|");            /* nsteps = 2  */
+    feed_script(&s, &ctx, "!|z10A5A|");               /* move-to     */
+    feed_script(&s, &ctx, "!|z10A0A5A0A5A5A|");       /* curve-to    */
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) coarse++;
+
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|z011S|");            /* nsteps = 64 */
+    feed_script(&s, &ctx, "!|z10A5A|");
+    feed_script(&s, &ctx, "!|z10A0A5A0A5A5A|");
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) fine++;
+
+    if (coarse == 0 || fine == 0) { FAIL("curve painted nothing"); return; }
+    /* Two straight chords cannot cover the same pixels as a 64-segment
+     * flattening of the same curve. */
+    if (coarse == fine) {
+        FAIL("nsteps had no effect on the rendered curve");
+        return;
+    }
+    PASS();
+}
+
 static void test_poly_marker_glyphs_differ(void) {
     rip_state_t s; comp_context_t ctx;
     long m0, m1, m6, m20, m34;
@@ -5282,6 +5356,8 @@ int main(void) {
     test_ext_mouse_region_ext_colon();
     test_skewed_oval_family_extents();
     test_ext_poly_marker_semicolon();
+    test_char_spacing_changes_text_extent();
+    test_bezier_honours_stream_step_count();
     test_poly_marker_glyphs_differ();
     test_ext_poly_marker_rejects_bad_fields();
     test_ext_ext_text_window_b();

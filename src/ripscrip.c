@@ -1980,6 +1980,21 @@ uint32_t rip_take_delay(rip_state_t *s) {
  *
  * mode: 0 = line ('|t'), 1 = filled ('|x'), 2 = outline ('|z').
  */
+/* The step count the stream asked for, or 0 to let the renderer estimate.
+ *
+ * '|t', '|x' and '|z' carry `nsteps` in their 4-character header form.
+ * RIPlib recorded it and then ignored it: filled curves always flattened to
+ * 12 segments and outlines always used draw_bezier()'s adaptive estimate,
+ * so a stream asking for coarse geometry got smooth curves regardless.
+ * Clamped to the range the drawing layer accepts. */
+static int rip_bez_steps(const rip_state_t *s) {
+    int n = (int)s->bez_steps;
+    if (n <= 0)  return 0;          /* unset -- keep the adaptive estimate */
+    if (n < 2)   return 2;
+    if (n > 64)  return 64;
+    return n;
+}
+
 static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
                                    int mode) {
     if (len == 4) {                       /* header: count, steps */
@@ -2002,10 +2017,12 @@ static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
         if (mode == 1) {
             /* Filled: flatten the segment and hand the closed outline to the
              * scanline filler, matching how '|x' renders its long form. */
-            int16_t pts[2 * 16];
+            int16_t pts[2 * 65];
+            int steps = rip_bez_steps(s);
             int n = 0;
-            for (int k = 0; k <= 12 && n < 16; k++, n++) {
-                float t = (float)k / 12.0f, mt = 1.0f - t;
+            if (steps == 0) steps = 12;      /* unset: the historical default */
+            for (int k = 0; k <= steps && n < 65; k++, n++) {
+                float t = (float)k / (float)steps, mt = 1.0f - t;
                 float a = mt*mt*mt, b = 3.0f*mt*mt*t, c = 3.0f*mt*t*t, d = t*t*t;
                 pts[n*2]     = (int16_t)(a*sx + b*c1x + c*c2x + d*ex);
                 pts[n*2 + 1] = (int16_t)(a*sy + b*c1y + c*c2y + d*ey);
@@ -2013,7 +2030,13 @@ static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
             if (n >= 3)
                 draw_polygon(pts, n, s->fill_pattern != 0);
         } else {
-            draw_bezier(sx, sy, c1x, c1y, c2x, c2y, ex, ey);
+            {
+                int steps = rip_bez_steps(s);
+                if (steps)
+                    draw_bezier_steps(sx, sy, c1x, c1y, c2x, c2y, ex, ey, steps);
+                else
+                    draw_bezier(sx, sy, c1x, c1y, c2x, c2y, ex, ey);
+            }
         }
         s->bez_x = ex;
         s->bez_y = ey;
@@ -2030,10 +2053,12 @@ static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
             int16_t bx2 = mega2(p + offset + 8),  by2 = scale_y(mega2(p + offset + 10));
             int16_t bx3 = mega2(p + offset + 12), by3 = scale_y(mega2(p + offset + 14));
             if (mode == 1) {
-                int16_t pts[2 * 16];
+                int16_t pts[2 * 65];
+                int steps = rip_bez_steps(s);
                 int n = 0;
-                for (int k = 0; k <= 12 && n < 16; k++, n++) {
-                    float t = (float)k / 12.0f, mt = 1.0f - t;
+                if (steps == 0) steps = 12;
+                for (int k = 0; k <= steps && n < 65; k++, n++) {
+                    float t = (float)k / (float)steps, mt = 1.0f - t;
                     float a = mt*mt*mt, b = 3.0f*mt*mt*t, c = 3.0f*mt*t*t, d = t*t*t;
                     pts[n*2]     = (int16_t)(a*bx0 + b*bx1 + c*bx2 + d*bx3);
                     pts[n*2 + 1] = (int16_t)(a*by0 + b*by1 + c*by2 + d*by3);
@@ -2041,7 +2066,13 @@ static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
                 if (n >= 3)
                     draw_polygon(pts, n, s->fill_pattern != 0);
             } else {
-                draw_bezier(bx0, by0, bx1, by1, bx2, by2, bx3, by3);
+                {
+                    int steps = rip_bez_steps(s);
+                    if (steps)
+                        draw_bezier_steps(bx0, by0, bx1, by1, bx2, by2, bx3, by3, steps);
+                    else
+                        draw_bezier(bx0, by0, bx1, by1, bx2, by2, bx3, by3);
+                }
             }
             s->bez_x = bx3; s->bez_y = by3; s->bez_valid = true;
             offset += 16;
@@ -4607,6 +4638,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     s->font_id = y_font;
                 s->font_ext_id  = y_font;
                 s->char_spacing = y_spacing;
+                /* Percentage of each glyph's natural advance; the driver
+                 * rejects zero, which is why the guard above tests it. */
+                bgi_font_set_char_spacing(y_spacing);
                 /* Same rotation->direction mapping as '|26' SCALABLE_TEXT:
                  * 90 = CW (dir 3), 270 = CCW (dir 2), 180 unsupported by the
                  * stroke renderer so it falls back to horizontal. */

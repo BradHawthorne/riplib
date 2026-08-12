@@ -1126,11 +1126,38 @@ D-13 STATE RECORDED "FOR THE HOST" THAT NO HOST CAN READ.  Recorded
                            real gap, and the declaration made it look
                            solved.
 
-     Two more are gaps in RENDERING rather than API: bez_steps, parsed
-     from the bezier commands and never consulted by the curve
-     generator, and char_spacing, which '|y' now decodes correctly (see
-     D-12) but which no text path reads — so the base-64 fix to '|y'
-     corrects the recorded value without yet changing any output.
+     Two were gaps in RENDERING rather than API, and both are now
+     CLOSED (2026-08-12):
+
+       bez_steps      '|t', '|x' and '|z' carry an nsteps field in their
+                      4-character header form.  It was parsed and never
+                      consulted: filled curves always flattened to 12
+                      segments and outlines always used draw_bezier()'s
+                      adaptive estimate, so a stream asking for coarse
+                      geometry was given smooth curves regardless.
+                      draw_bezier_steps() splits the fixed-count
+                      flattener out of draw_bezier(), which now delegates
+                      to it, and the RIPscrip layer passes the stream's
+                      count when one was set.  Unset still means
+                      adaptive, so default quality is unchanged.  No
+                      shipped scene uses the header form, which is why
+                      the corpus renders identically.
+
+       char_spacing   '|y' carries an inter-character spacing percentage
+                      that the driver enforces non-zero.  Every text path
+                      used the glyph's own advance, so condensed and
+                      expanded text rendered the same as normal.
+                      bgi_font_set_char_spacing() applies it at both
+                      per-glyph advance sites, module-scoped to match
+                      draw_set_color() and the other renderer state
+                      rather than changing a public signature.
+
+                      LIMIT: this reaches the STROKE fonts only.  The
+                      bitmap path renders a whole run through draw_text()
+                      with a fixed 8-pixel cell, so spacing does not
+                      apply there.  Every '|y' in shipped content
+                      requests 100 -- normal -- so nothing real is
+                      affected either way.
 
 D-12 RESOLVED 2026-08-12 — THE BASE-64 ALPHABET, AND WHO USES IT.
      This supersedes D-10 below, which is retained for the record of how

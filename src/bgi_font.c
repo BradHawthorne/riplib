@@ -214,6 +214,34 @@ static int16_t render_char(const bgi_font_t *font,
     return font->widths[idx] * scale;
 }
 
+/* Inter-character spacing, as a percentage of the glyph's natural advance.
+ *
+ * '|y' RIP_EXTENDED_FONT_STYLE carries this field and the driver enforces it
+ * non-zero.  RIPlib decoded it and then had nowhere to put it: every text
+ * path used the glyph's own width, so a stream asking for condensed or
+ * expanded text got neither.
+ *
+ * Module-scoped rather than a parameter, matching draw_set_color() and the
+ * other renderer state, so no public signature changes.  100 is normal. */
+static uint16_t bgi_char_spacing_pct = 100;
+
+void bgi_font_set_char_spacing(uint16_t pct) {
+    if (pct == 0) pct = 100;          /* the driver rejects zero outright */
+    if (pct > 1000) pct = 1000;       /* keep the advance arithmetic sane */
+    bgi_char_spacing_pct = pct;
+}
+
+/* Apply the spacing percentage to one glyph's advance.  Guarded so a
+ * condensed setting can never produce a zero or negative advance, which
+ * would stack every glyph on the same column. */
+static int16_t bgi_space_adv(int16_t w) {
+    int32_t v;
+    if (bgi_char_spacing_pct == 100) return w;
+    v = ((int32_t)w * bgi_char_spacing_pct) / 100;
+    if (w > 0 && v < 1) v = 1;
+    return (int16_t)v;
+}
+
 int16_t bgi_font_draw_string(const bgi_font_t *font,
                               int16_t x, int16_t y,
                               const char *str, int len,
@@ -226,6 +254,7 @@ int16_t bgi_font_draw_string(const bgi_font_t *font,
     for (int i = 0; i < len; i++) {
         int16_t w = render_char(font, x, y, (uint8_t)str[i],
                                  scale, color, direction, 0);
+        w = bgi_space_adv(w);
         if (direction == 0) {
             x += w;
         } else if (direction == 1) {
@@ -285,6 +314,7 @@ int16_t bgi_font_draw_string_ex(const bgi_font_t *font,
             int16_t w = render_char(font, x, y,
                                      (uint8_t)str[i], scale, color, direction,
                                      /* italic shear: dx += dy/4 ≈ 25° slant */ 4);
+            w = bgi_space_adv(w);
             if (direction == 0)      x += w;
             else if (direction == 1) y -= w;   /* BGI VERT_DIR: bottom-to-top */
             else                     y += w;

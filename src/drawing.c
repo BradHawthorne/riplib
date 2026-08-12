@@ -902,22 +902,19 @@ void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
 /* FPU cubic Bezier — parametric evaluation with adaptive step count.
  * Uses single-precision float for exact interpolation (no integer
  * rounding accumulation). Cortex-M33 FMUL is 1 cycle. */
-void draw_bezier(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
-                 int16_t x2, int16_t y2, int16_t x3, int16_t y3) {
-    /* Adaptive step count based on curve length estimate */
-    float dx10 = (float)x1 - (float)x0;
-    float dy10 = (float)y1 - (float)y0;
-    float dx21 = (float)x2 - (float)x1;
-    float dy21 = (float)y2 - (float)y1;
-    float dx32 = (float)x3 - (float)x2;
-    float dy32 = (float)y3 - (float)y2;
-    float ctrl = sqrtf(dx10 * dx10 + dy10 * dy10) +
-                 sqrtf(dx21 * dx21 + dy21 * dy21) +
-                 sqrtf(dx32 * dx32 + dy32 * dy32);
-    int steps = (int)(ctrl * 0.5f);
-    if (steps < 4) steps = 4;
+/* Flatten a cubic into `steps` line segments.
+ *
+ * Split out of draw_bezier() so the RIPscrip layer can honour the step
+ * count the STREAM asks for.  '|t', '|x' and '|z' carry an `nsteps` field
+ * in their header form; RIPlib parsed it and then ignored it, always using
+ * the adaptive estimate below.  A stream that asks for coarse segments was
+ * silently given smooth ones. */
+void draw_bezier_steps(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                       int16_t x2, int16_t y2, int16_t x3, int16_t y3,
+                       int steps) {
+    if (steps < 2) steps = 2;
     if (steps > 64) steps = 64;
-
+    {
     float fx0 = (float)x0, fy0 = (float)y0;
     float fx1 = (float)x1, fy1 = (float)y1;
     float fx2 = (float)x2, fy2 = (float)y2;
@@ -943,6 +940,26 @@ void draw_bezier(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
         px = nx;
         py = ny;
     }
+    }
+}
+
+void draw_bezier(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                 int16_t x2, int16_t y2, int16_t x3, int16_t y3) {
+    /* Adaptive step count based on curve length estimate */
+    float dx10 = (float)x1 - (float)x0;
+    float dy10 = (float)y1 - (float)y0;
+    float dx21 = (float)x2 - (float)x1;
+    float dy21 = (float)y2 - (float)y1;
+    float dx32 = (float)x3 - (float)x2;
+    float dy32 = (float)y3 - (float)y2;
+    float ctrl = sqrtf(dx10 * dx10 + dy10 * dy10) +
+                 sqrtf(dx21 * dx21 + dy21 * dy21) +
+                 sqrtf(dx32 * dx32 + dy32 * dy32);
+    int steps = (int)(ctrl * 0.5f);
+    if (steps < 4) steps = 4;
+    if (steps > 64) steps = 64;
+
+    draw_bezier_steps(x0, y0, x1, y1, x2, y2, x3, y3, steps);
 }
 
 /* ══════════════════════════════════════════════════════════════════
