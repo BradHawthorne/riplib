@@ -227,8 +227,17 @@ static int rip_skewed_oval_points(int16_t cx, int16_t cy,
     int32_t cs, sn, X, Y;
     int span, step, n = 0, t, last = start;
 
-    if (end < start || max_pts < 2)
+    if (max_pts < 2)
         return 0;
+
+    /* A sweep may wrap through 0.  TeleGrafix's own demo does exactly this:
+     * '|_' RIP_FILLED_OVAL_CHORD is issued with start=324 end=216, meaning
+     * 324 deg -> 360/0 -> 216 deg, a 252 degree arc.  Bailing out when
+     * end < start drew nothing at all for that command.  The driver handles
+     * it by normalising against 360 (RVA 0x100125C0); adding a turn here is
+     * the same thing, and rip_sin14()/rip_cos14() already reduce mod 360. */
+    if (end < start)
+        end += 360;
 
     cs   = rip_cos14(skew);
     sn   = rip_sin14(skew);
@@ -269,11 +278,17 @@ static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode);
  *
  * Contours are stored back-to-back in `pts` with `starts[i]`/`counts[i]`
  * delimiting each one. */
+/* Sized for the stack, not for generosity.  RIPlib runs on Cortex-M parts
+ * whose whole stack is 4-8 KB, and this command needs two buffers live at
+ * once: the point array plus the scanline intersection list.  128 points
+ * across 32 contours is comfortably more than real content uses --
+ * TeleGrafix's ICONS/POLYPOLY.RIP, the only shipped scene exercising '|<',
+ * submits 5 contours totalling 18 points. */
 #define RIP_POLYPOLY_MAX_CONTOURS  32
-#define RIP_POLYPOLY_MAX_PTS      512
+#define RIP_POLYPOLY_MAX_PTS      128
 
 static void rip_fill_poly_polygon(const int16_t *pts,
-                                  const int *starts, const int *counts,
+                                  const int16_t *starts, const int16_t *counts,
                                   int ncontours)
 {
     int16_t xs[RIP_POLYPOLY_MAX_PTS];
@@ -317,6 +332,80 @@ static void rip_fill_poly_polygon(const int16_t *pts,
         }
         for (a = 0; a + 1 < n; a += 2)
             draw_line(xs[a], (int16_t)y, xs[a + 1], (int16_t)y);
+    }
+}
+
+/* '|<' RIP_POLY_POLYGON, kept out of the command switch purely for STACK.
+ *
+ * Its point array and contour index tables total several hundred bytes, and
+ * inside the switch those bytes sit in execute_rip_command's frame — so
+ * every command in the protocol pays for them on every call.  Measured with
+ * arm-none-eabi-gcc -fstack-usage for cortex-m4, leaving them there pushed
+ * the dispatcher from 648 to 1024 bytes.  Here they are live only while
+ * this one command runs.
+ *
+ * Dispatch slot 13 (RVA 0x01e80a), VARIABLE length.  The handler reads
+ * arg[0] as a count and walks the rest; its own diagnostics are "Must have
+ * at least two vertices to make a polygon" and "Insufficient vertices (2)".
+ * Wire layout read off TeleGrafix's ICONS/POLYPOLY.RIP, which labels itself
+ * RIP_POLY_POLYGON on screen:
+ *
+ *     count:2  then per contour  nverts:2  followed by nverts * (x:2 y:2)
+ */
+static void rip_exec_poly_polygon(rip_state_t *s, const char *p, int len)
+{
+    int16_t pts[2 * RIP_POLYPOLY_MAX_PTS];
+    /* int16_t, not int: 32 contours x two tables costs 256 bytes as int
+     * and 128 as int16_t, and neither index can exceed
+     * RIP_POLYPOLY_MAX_PTS. */
+    int16_t starts[RIP_POLYPOLY_MAX_CONTOURS];
+    int16_t counts[RIP_POLYPOLY_MAX_CONTOURS];
+    int npolys, off = 2, ncontours = 0, total = 0, c, i;
+    uint8_t border_mode;
+
+    if (len < 2)
+        return;
+    npolys = mega2(p);
+    if (npolys > RIP_POLYPOLY_MAX_CONTOURS)
+        npolys = RIP_POLYPOLY_MAX_CONTOURS;
+
+    for (c = 0; c < npolys; c++) {
+        int nv;
+
+        if (off + 2 > len)
+            break;
+        nv = mega2(p + off);
+        off += 2;
+        /* The driver rejects a contour with fewer than two vertices by
+         * name; do the same rather than emitting a degenerate edge list. */
+        if (nv < 2 || off + 4 * nv > len ||
+            total + nv > RIP_POLYPOLY_MAX_PTS)
+            break;
+
+        starts[ncontours] = (int16_t)total;
+        counts[ncontours] = (int16_t)nv;
+        for (i = 0; i < nv; i++) {
+            pts[2 * (total + i)]     = mega2(p + off + 4 * i);
+            pts[2 * (total + i) + 1] = scale_y(mega2(p + off + 4 * i + 2));
+        }
+        total += nv;
+        off   += 4 * nv;
+        ncontours++;
+    }
+
+    if (ncontours == 0)
+        return;
+
+    if (s->fill_pattern != 0) {
+        draw_set_color(s->palette[s->fill_color & 0x0F]);
+        rip_fill_poly_polygon(pts, starts, counts, ncontours);
+    }
+    if (rip_begin_filled_border(s, &border_mode)) {
+        for (c = 0; c < ncontours; c++)
+            draw_polygon(&pts[2 * starts[c]], counts[c], false);
+        rip_end_filled_border(s, border_mode);
+    } else {
+        draw_set_color(s->palette[s->draw_color & 0x0F]);
     }
 }
 
@@ -4035,54 +4124,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * rip_clipboard_capture(). */
     case '<': /* RIP_POLY_POLYGON — count:2 { nverts:2 (x:2 y:2)* }* */
         if (len >= 2) {
-            int16_t pts[2 * RIP_POLYPOLY_MAX_PTS];
-            int starts[RIP_POLYPOLY_MAX_CONTOURS];
-            int counts[RIP_POLYPOLY_MAX_CONTOURS];
-            int npolys = mega2(p);
-            int off = 2, ncontours = 0, total = 0, c, i;
-            uint8_t border_mode;
-
-            if (npolys > RIP_POLYPOLY_MAX_CONTOURS)
-                npolys = RIP_POLYPOLY_MAX_CONTOURS;
-
-            for (c = 0; c < npolys; c++) {
-                int nv;
-
-                if (off + 2 > len)
-                    break;
-                nv = mega2(p + off);
-                off += 2;
-                /* The driver rejects a contour with fewer than two vertices
-                 * by name; do the same rather than emitting a degenerate
-                 * edge list. */
-                if (nv < 2 || off + 4 * nv > len ||
-                    total + nv > RIP_POLYPOLY_MAX_PTS)
-                    break;
-
-                starts[ncontours] = total;
-                counts[ncontours] = nv;
-                for (i = 0; i < nv; i++) {
-                    pts[2 * (total + i)]     = mega2(p + off + 4 * i);
-                    pts[2 * (total + i) + 1] = scale_y(mega2(p + off + 4 * i + 2));
-                }
-                total += nv;
-                off   += 4 * nv;
-                ncontours++;
-            }
-
-            if (ncontours > 0) {
-                if (s->fill_pattern != 0) {
-                    draw_set_color(s->palette[s->fill_color & 0x0F]);
-                    rip_fill_poly_polygon(pts, starts, counts, ncontours);
-                }
-                if (rip_begin_filled_border(s, &border_mode)) {
-                    for (c = 0; c < ncontours; c++)
-                        draw_polygon(&pts[2 * starts[c]], counts[c], false);
-                    rip_end_filled_border(s, border_mode);
-                } else {
-                    draw_set_color(s->palette[s->draw_color & 0x0F]);
-                }
-            }
+            rip_exec_poly_polygon(s, p, len);
         }
         break;
 

@@ -3458,6 +3458,95 @@ static void test_ext_mouse_region_ext_colon(void) {
     else FAIL("|: did not add region");
 }
 
+/* The skewed-oval family, checked against TeleGrafix's own demo.
+ *
+ * ICONS/NEWCMDS.RIP strokes a coordinate grid and places one shape on each
+ * intersection, so the payloads below (copied verbatim from that file) say
+ * where each shape must land.  The assertion is BOUNDING BOX containment,
+ * not centroid: an arc, pie slice or chord covers only part of its ellipse,
+ * so its centroid is legitimately off-centre and only its extent is
+ * predictable.  Get a field slot wrong and the box moves or changes size.
+ *
+ * A centroid check was tried first and had to be abandoned -- against the
+ * real file it "passed" for every shape because NEWCMDS.RIP opens with '|*',
+ * which fills the screen, so a window centred on the expected point is
+ * uniformly painted and its centroid is trivially the window centre.  It
+ * was measuring the background. */
+static void check_shape_extent(rip_state_t *s, comp_context_t *ctx,
+                               const char *script, const char *what,
+                               int cx, int cy, int rx, int ry) {
+    int minx = 9999, maxx = -1, miny = 9999, maxy = -1;
+    int xx, yy;
+    long painted = 0;
+
+    TEST(what);
+    init_fixture(s, ctx);
+    feed_script(s, ctx, "!|c0F|S0104|");
+    feed_script(s, ctx, script);
+
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) {
+                painted++;
+                if (xx < minx) minx = xx;
+                if (xx > maxx) maxx = xx;
+                if (yy < miny) miny = yy;
+                if (yy > maxy) maxy = yy;
+            }
+
+    if (maxx < 0) { FAIL("nothing painted"); return; }
+    /* These shapes carry skew=58, so their axis-aligned box is NOT rx by ry:
+     * a rotated ellipse spans hypot(rx*sin, ry*cos) vertically, which here is
+     * 46 against an ry of 25.  The bound that holds under any rotation is the
+     * enclosing circle, radius max(rx,ry), plus a little for line width.
+     * (A per-axis rx/ry bound was tried and failed on exactly this, which is
+     * itself evidence the rotation is being applied.) */
+    {
+        int r = (rx > ry ? rx : ry) + 3;
+        if (minx < cx - r || maxx > cx + r ||
+            miny < cy - r || maxy > cy + r) {
+            FAIL("painted outside the enclosing circle of the declared radii");
+            return;
+        }
+    }
+    /* ...and must be a real shape rather than a stray pixel.  Count, not
+     * span: how far a partial sweep reaches depends on its start and end
+     * angles -- the 72..216 degree arc here spans only about 25 px in x
+     * against an rx of 52 -- so any span floor ends up encoding the sweep
+     * geometry instead of testing it.  A pixel count is sweep-independent. */
+    if (painted < 20) {
+        FAIL("too few pixels painted to be the declared shape");
+        return;
+    }
+    PASS();
+}
+
+static void test_skewed_oval_family_extents(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    /* Centres and radii as decoded, y and ry through scale_y (y*8/7). */
+    check_shape_extent(&s, &ctx, "!|&20151G0M1M|",
+                       "|& SKEWED_OVAL lands on its declared ellipse",
+                       72, 46, 52, 25);
+    check_shape_extent(&s, &ctx, "!|-203F1G0M1M|",
+                       "|- FILLED_SKEWED_OVAL lands on its declared ellipse",
+                       72, 140, 52, 25);
+    check_shape_extent(&s, &ctx, "!|]50151G0M20601M|",
+                       "|] SKEWED_OVAL_ARC lands on its declared ellipse",
+                       180, 46, 52, 25);
+    check_shape_extent(&s, &ctx, "!|[503F1G0M20601M|",
+                       "|[ SKEWED_OVAL_PIE_SLICE lands on its declared ellipse",
+                       180, 140, 52, 25);
+    check_shape_extent(&s, &ctx, "!|+803F1G0M20601M|",
+                       "|+ SKEWED_OVAL_CHORD lands on its declared ellipse",
+                       288, 140, 52, 25);
+    /* start=324 end=216 wraps through 0 -- a 252 degree sweep.  This one
+     * drew nothing until rip_skewed_oval_points() learned to wrap. */
+    check_shape_extent(&s, &ctx, "!|_B03F90601G0M|",
+                       "|_ FILLED_OVAL_CHORD draws its wrapping sweep",
+                       396, 140, 52, 25);
+}
+
 static void test_ext_poly_marker_semicolon(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|; draws a marker and adds no mouse region");
@@ -5091,6 +5180,7 @@ int main(void) {
     test_ext_animation_frame_brace();
     test_ext_kill_mouse_in_region_K();
     test_ext_mouse_region_ext_colon();
+    test_skewed_oval_family_extents();
     test_ext_poly_marker_semicolon();
     test_ext_poly_marker_rejects_bad_fields();
     test_ext_ext_text_window_b();
