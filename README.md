@@ -31,7 +31,7 @@ RIPlib is a portable rendering/parser core, not a complete terminal application.
 | Stroke Fonts | 10 CHR (buggy parsers) | Partial | No | **10 CHR (correct parser)** |
 | Font Scaling | 1-10 integer | 1-10 | N/A | **1-10 + attributes** |
 | Font Attributes | No | No | No | **Bold/Italic/Underline/Shadow** |
-| Vertical Text | Bottom-to-top (backwards) | Same | N/A | **Top-to-bottom (corrected)** |
+| Vertical Text | Bottom-to-top only | Same | N/A | **3 directions, spec-correct** |
 | Alpha/Transparency | No | Yes (SDL) | No | **Per-port (v3.1)** |
 | Multiple Windows | No | Yes (SDL) | No | **36 Drawing Ports** |
 | Mouse Regions | No | Yes (SDL) | Yes | **Yes + hit testing** |
@@ -47,7 +47,7 @@ RIPlib is a portable rendering/parser core, not a complete terminal application.
 | **v1.54** | 1993 | Portable core implemented | Level 0 drawing plus Level 1 interactive commands, icon cache lookup, clipboard capture/paste, file query, variables, and host callback fallbacks |
 | **v2.0** | 1995 | Portable core implemented with embedded fallbacks | Extended drawing commands, header/mode metadata, filled-object border control, icon slots/style, scaled region copy, and Level 2 Drawing Ports with state save/restore |
 | **v3.0** | 1997 | Portable core implemented with approximations | Font justification, extended text windows, gradient fill, scalable text state, menu/dialog/scrollbar widgets, palette query, and indexed-color alpha approximation |
-| **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
+| **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | vertical text CW+CCW, font attributes (bold/italic/underline/shadow), spec-correct vertical text directions, 11 native fill patterns, FPU curves |
 | **v3.2** | 2026 | Implemented extensions (§A2G.8-13) | State push/pop stack, layout/introspection variables, time component variables, EGA color-name aliases, `<<DEBUG>>` directive, radial gradient |
 
 Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, OS clipboard integration, URL launch/delete callbacks, true direct-RGB framebuffers, and monitor overscan remain outside the portable core. The parser accepts those protocol surfaces where possible and exposes embedded-friendly fallbacks instead of claiming host behavior the library cannot provide by itself.
@@ -64,7 +64,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 - Flood Fill (border-color semantics, patterned fill)
 - Text rendering (bitmap 8x8/8x16 + BGI stroke fonts)
 - Copy/Save/Restore region, Get Pixel
-- 5 write modes: COPY(0), XOR(1), OR(2), AND(3), NOT(4) — wire order per RIPSCRIP.DLL 3.0.7
+- 5 write modes: COPY(0), XOR(1), OR(2), AND(3), NOT(4) — wire order per the shipping RIPSCRIP.DLL (MD5 `bade8b1f…`, self-reported version 3.00.04)
 - 11 built-in fill patterns + user-defined slot (4 BGI styles are approximated)
 - Clip region (set, save, restore)
 - Dirty-rectangle callback for efficient screen refresh
@@ -75,6 +75,35 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 - Scale 1-10, three text directions (horizontal, vertical CW, vertical CCW)
 - Font attributes: bold, italic, underline, shadow
 - String width measurement for layout
+
+### Aligned to the shipping driver (v2.0.0)
+
+RIPlib's command set is checked against the RIPscrip driver TeleGrafix
+shipped, rather than against the published specifications alone. In v2.0.0
+that moved **thirteen Level-0 commands** to different meanings — see
+[CHANGELOG.md](CHANGELOG.md) for the list and
+[`docs/spec/12-dll-provenance.md`](docs/spec/12-dll-provenance.md) for the
+evidence behind each one.
+
+- The driver's own dispatch table is transcribed verbatim in
+  [`docs/spec/13-dll-command-table.md`](docs/spec/13-dll-command-table.md);
+  the scripts under `scripts/` regenerate every binary-derived table and
+  verify the image fingerprint before reporting.
+- **Base-64 MegaNum** is implemented. RIPscrip has a second radix
+  (`0-9 A-Z a-z # &`, case-sensitive) that four commands always use
+  regardless of any global setting — see
+  [§1.5.1](docs/spec/01-wire-format.md).
+- All 36 `RIP_PolyMarker` glyph outlines are carried, and negotiated
+  coordinate/colour widths (`|n`, `|M`) are honoured.
+- Authentic `.RIP` scenes are replayed byte-for-byte as a regression net.
+  Those scenes are third-party content and are **not** vendored, so this
+  suite reports SKIP in CI and on a plain checkout; point
+  `-DRIPLIB_CORPUS_DIR` at a RIPterm/RIPtel install to run it.
+
+Known limitations are recorded rather than implied: character spacing
+reaches the stroke fonts only, the coordinate-width conversion saturates at
+1295 (sound for a fixed 640×400 device space, revisit for a world
+transform), and two Level-3 handlers remain unidentified.
 
 ### RIPscrip Protocol Parser
 - 100+ recognized command surfaces across Level 0, Level 1, Extended, and Level 2, with host-only operations bridged to callbacks/fallbacks
@@ -87,8 +116,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 
 ### v3.1 Extensions (§A2G.1-7, unique to RIPlib)
 - AND and NOT write modes (beyond standard COPY/XOR/OR)
-- Vertical text: dir 1 bottom-to-top (BGI VERT_DIR), dir 2 CCW and dir 3 CW top-to-bottom
-- Corrected vertical text direction (top-to-bottom, readable)
+- Vertical text: dir 1 bottom-to-top (BGI VERT_DIR, as the 1.54 specification states), dir 2 CCW, dir 3 CW top-to-bottom
 - Font attributes (bold/italic/underline/shadow) on `|q`
 - 11 native fill bitmaps + user slot (most implementations have 8; 4 BGI styles remain approximated — see §A2G.4)
 - FPU Bezier curves (no integer rounding artifacts)
@@ -99,7 +127,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 ### v3.2 Extensions (§A2G.8-13, RIPlib quality-of-life refinements)
 - **State push/pop stack** — `|^` / `|~` save/restore the drawing prelude (colors, fill/line/write state including custom 16-bit line patterns, font and extended font state, cursor, viewport, filled-border mode). Bounded LIFO, 8 frames.
 - **Layout / introspection variables** — `$CX$` `$CY$` `$VPW$` `$VPH$` `$VPCX$` `$VPCY$` `$CCOL$` `$CFCOL$` `$CBCOL$` for "center this text" without hardcoded 320,200.
-- **Time component variables** — `$HOUR$` (12-hour) `$MHOUR$` (24-hour) `$MIN$` `$SEC$` `$WDAY$` (0=Sunday) `$DOW$` (day name) `$DAY$` `$MONTHNUM$` `$MONTH$` (month name) for greeting/banner variations. Names and semantics match RIPSCRIP.DLL 3.0.7.
+- **Time component variables** — `$HOUR$` (12-hour) `$MHOUR$` (24-hour) `$MIN$` `$SEC$` `$WDAY$` (0=Sunday) `$DOW$` (day name) `$DAY$` `$MONTHNUM$` `$MONTH$` (month name) for greeting/banner variations. Names and semantics match the shipping RIPSCRIP.DLL.
 - **EGA color-name aliases** — `$BLACK$` `$BLUE$` `$GREEN$` `$CYAN$` `$RED$` `$MAGENTA$` `$BROWN$` `$LIGHTGRAY$` `$DARKGRAY$` `$LIGHTBLUE$` `$LIGHTGREEN$` `$LIGHTCYAN$` `$LIGHTRED$` `$LIGHTMAGENTA$` `$YELLOW$` `$WHITE$`.
 - **`<<DEBUG msg>>` preprocessor directive** — **off by default.** Enable with `-DRIPLIB_ENABLE_DEBUG_DIRECTIVE=ON` to push `>DEBUG: <msg>\r` to TX for development instrumentation. It is *not* safe to leave enabled in production: unsolicited terminal-to-host traffic has no precedent in the protocol, and a BBS sitting at a prompt reads those bytes as keystrokes. The directive is parsed and consumed either way, so rendering is identical.
 - **Radial gradient** — `|28` gains mode 2 for FPU per-pixel radial fill alongside the existing horizontal (0) and vertical (1) modes.
@@ -236,6 +264,18 @@ riplib/
 ├── icons/            Icon data (optional)
 │   ├── rip_icons_data.*   95 BMP icons (~1.6MB)
 │   └── rip_icns_data.*    3 ICN icons (~90KB)
+├── tests/            Test suites
+│   ├── test_drawing.c    Rendering primitives
+│   ├── test_ripscrip.c   Parser FSM, commands, variables
+│   ├── test_compat.c     Fixture replay with frame-hash lockdown
+│   ├── test_corpus.c     Authentic .RIP scene replay (opt-in)
+│   ├── test_fuzz_seeded.c Seeded mutation fuzzer
+│   └── fuzz_parser.c     libFuzzer target (optional, needs clang)
+├── scripts/          Tooling
+│   ├── dll-*.py          Regenerate binary-derived tables from the driver
+│   ├── corpus-scan.py    Opcode census over a corpus
+│   ├── check-branding.sh Platform-independence lint (CI)
+│   └── check-command-docs.py Parser/spec agreement lint (CI)
 ├── examples/         Demo programs
 └── docs/             Documentation
 ```
@@ -278,16 +318,24 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The suite currently ships 287 individual checks across three binaries:
+The suite ships 330 individual checks plus two behavioural suites:
 - `test_drawing` — 41 rendering primitives, fonts, and edge-case checks.
-- `test_ripscrip` — 240 FSM transitions, dispatched commands, mouse
+- `test_ripscrip` — 283 FSM transitions, dispatched commands, mouse
   hit-testing, variable expansion, host callbacks, port system.
 - `test_compat` — 6 fixture replays with FNV-1a frame-hash lockdown so
   pixel-level regressions show up immediately.
+- `test_corpus` — replays authentic TeleGrafix `.RIP` scenes byte-for-byte,
+  asserting no crash, no wedged FSM and no drawing outside the framebuffer,
+  and reporting painted pixels, distinct colours and pending asset requests.
+  Reports SKIP unless `-DRIPLIB_CORPUS_DIR` points at an installation.
+- `test_fuzz_seeded` — fixed-seed mutation fuzzer over the command layer,
+  including long payloads with `\` continuations, against a guard-banded
+  framebuffer. Takes an iteration count; ctest runs 20,000.
 
 CI runs the matrix on Linux, macOS, and Windows in both Debug and
 Release, plus dedicated UBSan/ASan, coverage-floor, embedded ARM archive,
-and `-fanalyzer` jobs.
+`-fanalyzer`, and two lints — platform-independence and parser/spec
+agreement — for 12 jobs in total.
 
 ## Origins
 
