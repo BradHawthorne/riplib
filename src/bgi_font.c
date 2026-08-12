@@ -175,14 +175,15 @@ static int16_t render_char(const bgi_font_t *font,
             if (direction == 0) {
                 px = ox + dx;
                 py = oy - dy;  /* BGI Y is inverted */
-            } else if (direction == 1) {
-                /* v3.1 dir=1: CW rotation, top-to-bottom.
-                 * Readable when tilting head right. */
+            } else if (direction == 3) {
+                /* dir=3: CW glyph rotation.  Readable tilting head right. */
                 px = ox + dy;
                 py = oy + dx;
             } else {
-                /* v3.1 dir=2: CCW rotation, top-to-bottom.
-                 * Readable when tilting head left. §A2G.7 */
+                /* dir=1 (BGI VERT_DIR) and dir=2 both use the CCW glyph
+                 * rotation; they differ only in which way the string
+                 * advances (see bgi_font_draw_string).  Readable tilting
+                 * head left. */
                 px = ox - dy;
                 py = oy - dx;
             }
@@ -194,7 +195,7 @@ static int16_t render_char(const bgi_font_t *font,
             if (direction == 0) {
                 nx = ox + dx;
                 ny = oy - dy;
-            } else if (direction == 1) {
+            } else if (direction == 3) {
                 nx = ox + dy;
                 ny = oy + dx;
             } else {
@@ -227,11 +228,18 @@ int16_t bgi_font_draw_string(const bgi_font_t *font,
                                  scale, color, direction, 0);
         if (direction == 0) {
             x += w;
+        } else if (direction == 1) {
+            /* dir=1 is BGI VERT_DIR, restored 2026-08-12 (X3).  The 1.54
+             * specification states it explicitly: "Vertical text is drawn
+             * with the base-line to the right, and is read from bottom to
+             * the top."  RIPlib had redefined 1 as top-to-bottom, so
+             * content authored against either side read upside-down on the
+             * other.  The corrected top-to-bottom rendering did not go
+             * away -- it moved to dir=3. */
+            y -= w;
         } else {
-            y += w;  /* v3.1 FIX: top-to-bottom (readable English).
-                      * Borland v1.54 spec says bottom-to-top, which
-                      * renders text backwards on screen. Corrected
-                      * in RIPlib v3.1 — no known BBS uses dir=1. */
+            /* dir=2 (CCW) and dir=3 (CW) both advance downward. */
+            y += w;
         }
         advance += w;
     }
@@ -277,15 +285,17 @@ int16_t bgi_font_draw_string_ex(const bgi_font_t *font,
             int16_t w = render_char(font, x, y,
                                      (uint8_t)str[i], scale, color, direction,
                                      /* italic shear: dx += dy/4 ≈ 25° slant */ 4);
-            if (direction == 0) x += w;
-            else y += w;
+            if (direction == 0)      x += w;
+            else if (direction == 1) y -= w;   /* BGI VERT_DIR: bottom-to-top */
+            else                     y += w;
             advance += w;
         }
     } else {
         advance = bgi_font_draw_string(font, x, y, str, len,
                                         scale, color, direction);
-        if (direction == 0) x = start_x + advance;
-        else y = start_y + advance;
+        if (direction == 0)      x = start_x + advance;
+        else if (direction == 1) y = start_y - advance;  /* bottom-to-top */
+        else                     y = start_y + advance;
     }
 
     /* Underline: horizontal line at baseline */
@@ -294,8 +304,14 @@ int16_t bgi_font_draw_string_ex(const bgi_font_t *font,
         draw_set_color(color);
         if (direction == 0) {
             draw_line(start_x, ul_y, start_x + advance, ul_y);
+        } else if (direction == 1) {
+            /* dir=1 runs BOTTOM-TO-TOP, so the bar extends upward from the
+             * origin.  Using start_y + advance here (as every vertical
+             * direction did before the 2026-08-12 X3 change) would draw the
+             * underline on the opposite side of the string from the glyphs. */
+            draw_line(start_x - 2, start_y, start_x - 2, start_y - advance);
         } else {
-            /* Vertical: draw vertical underline bar */
+            /* dir=2 / dir=3 run top-to-bottom. */
             draw_line(start_x - 2, start_y, start_x - 2, start_y + advance);
         }
     }

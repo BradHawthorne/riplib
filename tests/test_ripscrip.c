@@ -14,6 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Non-static library internals used directly by tests (declared here rather
+ * than including src/ headers, which are not on the test include path). */
+int rip_expand_variables(rip_state_t *s, const char *in, int in_len,
+                         char *out, int max_out);
+
 #define W 640
 #define H 400
 
@@ -34,10 +39,11 @@ static size_t tx_len = 0;
 #define PASS() do { tests_passed++; printf("PASS\n"); } while (0)
 #define FAIL(msg) do { printf("FAIL: %s\n", msg); } while (0)
 
-void palette_write_rgb565(uint8_t i, uint16_t v) { palette[i] = v; }
+static int pal_writes = 0;
+void palette_write_rgb565(uint8_t i, uint16_t v) { palette[i] = v; pal_writes++; }
 uint16_t palette_read_rgb565(uint8_t i) { return palette[i]; }
 
-void card_tx_push(const char *buf, int len) {
+void riplib_host_tx(const char *buf, int len) {
     if (!buf || len <= 0 || tx_len >= TX_CAPTURE_MAX) return;
     size_t n = (size_t)len;
     if (n > TX_CAPTURE_MAX - tx_len) n = TX_CAPTURE_MAX - tx_len;
@@ -569,13 +575,21 @@ static void test_soh_swallowed(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("SOH (0x01) swallowed without breaking parsing");
+    /* Renamed 2026-08-12.  This previously read "SOH swallowed without
+     * breaking parsing" and documented the old behaviour, where 0x01 was
+     * discarded outright.  Under syntax rule 12 SOH is an INTRODUCER (see
+     * test_soh_introducer_starts_command), so what this case now covers is
+     * recovery: stray or repeated SOH that is not followed by '|' must fall
+     * back cleanly and leave a following well-formed command intact.
+     * Note the fallback emits a literal '!' to the passthrough, matching the
+     * existing false-alarm path for '!' itself. */
+    TEST("stray/repeated SOH recovers and does not break a following command");
     init_fixture(&s, &ctx);
     feed_script(&s, &ctx, "\x01\x01!|X0505|\x01");
     if (draw_get_pixel(5, 5) != 0)
         PASS();
     else
-        FAIL("SOH disrupted parser");
+        FAIL("stray SOH disrupted parser");
 }
 
 static void test_var_refresh_clears_suppress(void) {
@@ -2312,11 +2326,11 @@ static void test_l2_scale_text_applies_rotation(void) {
     comp_context_t ctx;
     int hits;
 
-    TEST("26 rotation 90 sets font_dir=1, scale sets font_size");
+    TEST("26 rotation 90 sets font_dir=3 (CW), scale sets font_size");
     init_fixture(&s, &ctx);
     /* scale=05 (font_size=5), rotation=2I (90): mega2("2I") = 2*36+18 = 90. */
     feed_script(&s, &ctx, "!|26052I|");
-    if (s.font_size != 5 || s.font_dir != 1) {
+    if (s.font_size != 5 || s.font_dir != 3) {
         FAIL("scale or rotation not applied to BGI render state");
         return;
     }
@@ -3267,6 +3281,41 @@ static void test_l0_fill_style_S_pattern_clamped(void) {
     else FAIL("|S did not store valid pattern");
 }
 
+/* Syntax rule 12: SOH (0x01) and STX (0x02) are alternate command
+ * introducers, accepted anywhere in a line.  Before 2026-08-12 SOH was
+ * silently swallowed, so a scene opening with the SOH form never started —
+ * and the shipped 2.x corpus opens exactly that way.  See B12 in
+ * design/bbs-land-alignment.md. */
+static void test_soh_introducer_starts_command(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("SOH (0x01) introduces a command like '!'");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "\x01|S0500|");
+    if (s.fill_pattern == 5) PASS();
+    else FAIL("SOH did not introduce the command (fill pattern not set)");
+}
+
+static void test_stx_introducer_starts_command(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("STX (0x02) introduces a command like '!'");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "\x02|S0700|");
+    if (s.fill_pattern == 7) PASS();
+    else FAIL("STX did not introduce the command (fill pattern not set)");
+}
+
+static void test_soh_introducer_mid_line(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("SOH introduces a command mid-line, after ordinary text");
+    init_fixture(&s, &ctx);
+    /* Rule 12 is explicit that the control-byte form is accepted anywhere in
+     * a line, which is what lets a host start a scene without a preceding
+     * CR/LF.  This is the portable alternative to the relaxed '!' trigger. */
+    feed_script(&s, &ctx, "some text\x01|S0300|");
+    if (s.fill_pattern == 3) PASS();
+    else FAIL("SOH mid-line did not introduce the command");
+}
+
 /* ── Extended single-char ─────────────────────────────────────────── */
 
 static void test_ext_rounded_rect_U(void) {
@@ -3353,24 +3402,218 @@ static void test_ext_ext_text_window_b(void) {
     else FAIL("|b did not activate ext text window");
 }
 
-static void test_ext_ext_font_style_d(void) {
+/* D-5: the four commands present in the driver's dispatch table but missing
+ * from RIPlib until 2026-08-12.  Argument widths come from the dispatch
+ * entry's own type bytes; ranges from each handler's validation branches. */
+static void test_cmd_j_point(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|d sets extended font style fields");
+    TEST("|j RIP_POINT plots a pixel (fill colour)");
     init_fixture(&s, &ctx);
-    /* font_id:2 attr:1 size:4 = 7 chars.  font=01 attr=3 size=0001 */
-    feed_script(&s, &ctx, "!|d0130001|");
-    if (s.font_ext_id == 1 && s.font_ext_attr == 3) PASS();
-    else FAIL("|d did not set ext font fields");
+    feed_script(&s, &ctx, "!|S0104|j1414|");
+    /* "14" base-36 = 40; y goes through scale_y (x8/7) -> 45 */
+    if (draw_get_pixel(40, 45) != 0) PASS();
+    else FAIL("|j did not plot a point");
 }
 
-static void test_ext_font_attrib_f(void) {
+static void test_cmd_r_text_metric(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|f sets font attribute flags");
+    TEST("|r RIP_TEXT_METRIC validates mode<4 and domain<2");
     init_fixture(&s, &ctx);
-    /* attrib:2 reserved:2.  attrib=03 (bold+italic) */
-    feed_script(&s, &ctx, "!|f0300|");
+    feed_script(&s, &ctx, "!|r210000|\r\n");         /* mode=2 domain=1 */
+    if (s.text_metric_mode != 2 || s.text_metric_domain != 1) {
+        FAIL("|r did not record a valid mode/domain"); return;
+    }
+    feed_script(&s, &ctx, "!|r510000|\r\n");         /* mode=5 -> invalid */
+    if (s.text_metric_mode == 2) PASS();
+    else FAIL("|r accepted an out-of-range mode");
+}
+
+static void test_cmd_x_filled_poly_bezier(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|x RIP_FILLED_POLY_BEZIER renders a filled curve");
+    init_fixture(&s, &ctx);
+    /* nsegs=01 nsteps=08, one segment: 4 XY pairs spanning a wide arc */
+    feed_script(&s, &ctx, "!|S0104|x0108" "0A0A" "1E02" "3202" "460A" "|");
+    int lit = 0;
+    for (int x = 10; x <= 70; x++)
+        for (int y = 2; y <= 12; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) lit++;
+    if (lit > 20) PASS();
+    else FAIL("|x produced no filled region");
+}
+
+static void test_cmd_y_extended_font_style(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|y RIP_EXTENDED_FONT_STYLE parses the 26-char layout");
+    init_fixture(&s, &ctx);
+    /* widths 1,1,4,2,2,2,2,2,2,2,6 = 26 chars.
+     * font=1 .. arg5 rotation=90 (offset 10), arg8 spacing=64 (offset 16) */
+    feed_script(&s, &ctx, "!|y" "1" "0" "0000" "00" "00" "2I" "00" "00" "1S" "00" "000000" "|");
+    if (s.char_spacing != 64) { FAIL("|y did not record character spacing"); return; }
+    if (s.font_dir != 3)      { FAIL("|y rotation 90 did not map to dir 3"); return; }
+    PASS();
+}
+
+static void test_cmd_y_rejects_zero_spacing(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|y rejects zero character spacing (driver enforces non-zero)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|y" "1" "0" "0000" "00" "00" "00" "00" "00" "00" "00" "000000" "|");
+    if (s.char_spacing == 0) PASS();
+    else FAIL("|y accepted zero spacing");
+}
+
+/* B6, settled by disassembly 2026-08-12: '|d' is RIP_OneDrawingPalette, not
+ * extended font style.  The handler (RVA 0x01CF95) validates index <= 0xFF,
+ * bits == 8, rgb <= 0xFFFFFF, each with its own error string.  This test
+ * previously asserted the font-style reading. */
+static void test_ext_one_drawing_palette_d(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|d writes one drawing-palette entry (index, bits=8, rgb)");
+    init_fixture(&s, &ctx);
+    pal_writes = 0;
+    /* index:2 bits:1 rgb:4 = 7 chars.  index=05, bits=8, rgb=0001 */
+    feed_script(&s, &ctx, "!|d0580001|");
+    if (pal_writes == 0) { FAIL("|d wrote no palette entry"); return; }
+    /* font state must be untouched — the old behaviour corrupted it */
+    if (s.font_ext_id != 0 || s.font_ext_attr != 0) {
+        FAIL("|d still writes font state");
+        return;
+    }
+    PASS();
+}
+
+static void test_ext_one_drawing_palette_d_rejects_bad_bits(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|d rejects bits != 8 (driver: \"Bits value out of range\")");
+    init_fixture(&s, &ctx);
+    pal_writes = 0;
+    feed_script(&s, &ctx, "!|d0540001|");   /* bits=4, invalid */
+    if (pal_writes == 0) PASS();
+    else FAIL("|d accepted an invalid bits value");
+}
+
+/* Font attributes moved from 'f' to 'q' on 2026-08-12: the driver's slot-55
+ * handler names itself RIP_FontAttrib and range-checks the value <= 0x0F,
+ * while slot 28 'f' is RIP_SetWorldFrame.  See docs/spec/12-dll-provenance.md
+ * D-1.  This test previously asserted the pre-correction behaviour. */
+static void test_ext_font_attrib_q(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|q sets font attribute flags");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|q03|");        /* attrib=03 (bold+italic) */
     if (s.font_attrib == 3) PASS();
-    else FAIL("|f did not set font_attrib");
+    else FAIL("|q did not set font_attrib");
+}
+
+static void test_ext_font_attrib_q_range(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|q ignores out-of-range attribute (driver rejects > 0x0F)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|q05|\r\n");
+    feed_script(&s, &ctx, "!|q0Z|\r\n");    /* 35 > 15 -> invalid, ignored */
+    if (s.font_attrib == 5) PASS();
+    else FAIL("|q accepted an out-of-range attribute");
+}
+
+static void test_world_frame_f(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|f sets the world coordinate frame (corpus standard 1280x960)");
+    init_fixture(&s, &ctx);
+    /* '|fZKQO' is the prologue standard in the shipped RIPtel 3.1 corpus:
+     * base-36 "ZK" = 35*36+20 = 1280, "QO" = 26*36+24 = 960. */
+    feed_script(&s, &ctx, "!|fZKQO|");
+    if (s.world_w == 1280 && s.world_h == 960) PASS();
+    else FAIL("|f did not store the world frame");
+}
+
+/* X5, withdrawn 2026-08-12: '!' introduces a command only at a line
+ * boundary.  RIPlib previously fired on any '!', so ordinary prose with an
+ * ANSI sequence followed by an exclamation mark parsed as a command. */
+/* B9: the 1.54 spec is explicit -- "Fill pattern 00 will set the entire
+ * fill area to the background color."  RIPlib skipped the fill entirely,
+ * so a scene blanking a region with !|S0000| + a bar was a no-op. */
+/* Guards the X5 line-boundary rule against the obvious way to get it wrong:
+ * if last_char were not updated when a command frame ends at CR/LF, the NEXT
+ * '!' at a genuine line start would be rejected and every command after the
+ * first in a multi-line scene would be silently dropped. */
+/* X3: direction 1 must advance UPWARD (BGI VERT_DIR, bottom-to-top) while
+ * directions 2 and 3 advance downward.  Regression guard for the underline
+ * bar, which drew on the wrong side of dir-1 text before it was fixed. */
+static void test_vertical_direction_advance_signs(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|Y dir 1 accepted as bottom-to-top; dir 3 accepted as CW");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|Y010101|\r\n");
+    if (s.font_dir != 1) { FAIL("dir 1 rejected"); return; }
+    feed_script(&s, &ctx, "!|Y010301|\r\n");
+    if (s.font_dir != 3) { FAIL("dir 3 (new in X3) rejected"); return; }
+    feed_script(&s, &ctx, "!|Y010401|\r\n");   /* out of range, must be ignored */
+    if (s.font_dir == 3) PASS();
+    else FAIL("dir 4 was accepted");
+}
+
+static void test_multiline_scene_all_commands_execute(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("every command in a multi-line scene executes (X5 boundary tracking)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|k4|\r\n!|S0900|\r\n!|c0A|\r\n");
+    if (s.back_color != 4)    { FAIL("1st command (|k) did not execute"); return; }
+    if (s.fill_pattern != 9)  { FAIL("2nd command (|S) did not execute"); return; }
+    if (s.draw_color != 10)   { FAIL("3rd command (|c) did not execute"); return; }
+    PASS();
+}
+
+/* Same, but with bare LF line endings — a host may send either. */
+static void test_multiline_scene_lf_only(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("multi-line scene works with bare LF line endings");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|k3|\n!|S0700|\n");
+    if (s.back_color == 3 && s.fill_pattern == 7) PASS();
+    else FAIL("bare-LF separated commands did not all execute");
+}
+
+static void test_fill_pattern_00_paints_background(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("fill pattern 00 paints the background color (bar)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|k4|S0000|B0A0A2828|");
+    if (draw_get_pixel(20, 20) != 0) PASS();
+    else FAIL("pattern 00 + bar left the region unfilled");
+}
+
+static void test_bang_requires_line_boundary(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("'!' mid-line after an ANSI sequence is text, not a command");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "Hi\x1b[32m!|S0900|");
+    if (s.fill_pattern == 9) { FAIL("mid-line '!' was parsed as a command"); return; }
+    /* positive control: the same command at a line boundary must work */
+    feed_script(&s, &ctx, "\r\n!|S0900|");
+    if (s.fill_pattern == 9) PASS();
+    else FAIL("'!' at a line boundary failed to introduce the command");
+}
+
+static void test_world_frame_cleared_on_session_reset(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("world frame is cleared by rip_session_reset");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|fZKQO|");
+    if (s.world_w != 1280) { FAIL("world frame was not set"); return; }
+    rip_session_reset(&s);
+    if (s.world_w == 0 && s.world_h == 0) PASS();
+    else FAIL("world frame survived session reset");
+}
+
+static void test_world_frame_f_not_font_attrib(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|f no longer corrupts font_attrib (regression: D-1)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|q0A|\r\n");    /* set a known attribute */
+    feed_script(&s, &ctx, "!|fZKQO|\r\n");  /* a real corpus prologue */
+    if (s.font_attrib == 0x0A) PASS();
+    else FAIL("|f overwrote font_attrib");
 }
 
 static void test_ext_fill_pattern_ext_D(void) {
@@ -3522,14 +3765,19 @@ static void test_var_music_pushes_marker(void) {
     else FAIL("$MUSIC$ did not push marker");
 }
 
-static void test_var_year_with_host_date(void) {
+/* $YEAR$ is the 2-digit year and $FYEAR$ the 4-digit one; both names exist
+ * as distinct strings in RIPSCRIP.DLL 3.0.7.  RIPlib returned 4 digits from
+ * $YEAR$ until 2026-08-12, so <<IF $YEAR$=26>> silently failed against a
+ * conforming terminal.  This test previously asserted that behaviour. */
+static void test_var_year_and_fyear_with_host_date(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$YEAR$ expands to host_date YY+2000");
+    TEST("$YEAR$ is 2-digit, $FYEAR$ is 4-digit");
     init_fixture(&s, &ctx);
     strcpy(s.host_date, "07/04/26");
-    feed_script(&s, &ctx, "<<IF $YEAR$=2026>>!|X1000|<<ENDIF>>");
-    if (draw_get_pixel(36, 0) != 0) PASS();
-    else FAIL("$YEAR$ did not expand to 2026");
+    feed_script(&s, &ctx, "<<IF $YEAR$=26>>!|X1000|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $FYEAR$=2026>>!|X1100|<<ENDIF>>");
+    if (draw_get_pixel(36, 0) != 0 && draw_get_pixel(37, 0) != 0) PASS();
+    else FAIL("$YEAR$/$FYEAR$ did not expand correctly");
 }
 
 static void test_var_ripver_returns_a2gspu(void) {
@@ -4049,40 +4297,63 @@ static void test_var_color_name_lightmagenta(void) {
     else FAIL("$LIGHTMAGENTA$ did not expand to 0D");
 }
 
-static void test_var_hour_min_from_host_time(void) {
+/* Time-variable names realigned to the driver's own inventory 2026-08-12
+ * (X2).  RIPSCRIP.DLL 3.0.7 carries BOTH names of each pair as distinct
+ * strings -- HOUR/MHOUR, DOW/WDAY, MONTH/MONTHNUM, YEAR/FYEAR -- and has no
+ * "DOM" string at all, so RIPlib's previous meanings were the right values
+ * under the wrong names.  These tests previously asserted that. */
+static void test_var_hour_mhour_from_host_time(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$HOUR$ / $MIN$ parse host_time");
+    TEST("$HOUR$ is 12-hour, $MHOUR$ is 24-hour, $MIN$ parses host_time");
     init_fixture(&s, &ctx);
     strcpy(s.host_time, "14:35");
-    feed_script(&s, &ctx, "<<IF $HOUR$=14>>!|X1D00|<<ENDIF>>");
-    feed_script(&s, &ctx, "<<IF $MIN$=35>>!|X1E00|<<ENDIF>>");
-    if (draw_get_pixel(49, 0) != 0 && draw_get_pixel(50, 0) != 0) PASS();
-    else FAIL("$HOUR$/$MIN$ did not parse host_time");
+    feed_script(&s, &ctx, "<<IF $HOUR$=02>>!|X1D00|<<ENDIF>>");   /* 14 -> 02 */
+    feed_script(&s, &ctx, "<<IF $MHOUR$=14>>!|X1E00|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $MIN$=35>>!|X1F00|<<ENDIF>>");
+    if (draw_get_pixel(49, 0) != 0 && draw_get_pixel(50, 0) != 0 &&
+        draw_get_pixel(51, 0) != 0) PASS();
+    else FAIL("$HOUR$/$MHOUR$/$MIN$ did not match host_time");
 }
 
-static void test_var_dow_dom_month_from_host_date(void) {
+static void test_var_weekday_names_from_host_date(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$DOW$ / $DOM$ / $MONTH$ parse host_date");
+    TEST("$DOW$/$MONTH$ spell out, $WDAY$/$MONTHNUM$/$DAY$ are numeric");
     init_fixture(&s, &ctx);
-    strcpy(s.host_date, "01/15/26");  /* Thu = 3 (Mon=0) */
-    feed_script(&s, &ctx, "<<IF $DOW$=3>>!|X1F00|<<ENDIF>>");
-    feed_script(&s, &ctx, "<<IF $DOM$=15>>!|X2000|<<ENDIF>>");
-    feed_script(&s, &ctx, "<<IF $MONTH$=01>>!|X2100|<<ENDIF>>");
-    if (draw_get_pixel(51, 0) != 0 &&
-        draw_get_pixel(72, 0) != 0 &&
-        draw_get_pixel(73, 0) != 0) PASS();
-    else FAIL("$DOW$/$DOM$/$MONTH$ did not match host_date");
+    strcpy(s.host_date, "01/15/26");   /* Thursday */
+    feed_script(&s, &ctx, "<<IF $DOW$=Thursday>>!|X2000|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $WDAY$=4>>!|X2100|<<ENDIF>>");   /* Sun=0 */
+    feed_script(&s, &ctx, "<<IF $DAY$=15>>!|X2200|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $MONTH$=January>>!|X2300|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $MONTHNUM$=01>>!|X2400|<<ENDIF>>");
+    if (draw_get_pixel(72, 0) != 0 && draw_get_pixel(73, 0) != 0 &&
+        draw_get_pixel(74, 0) != 0 && draw_get_pixel(75, 0) != 0 &&
+        draw_get_pixel(76, 0) != 0) PASS();
+    else FAIL("weekday/month variables did not match host_date");
 }
 
+/* <<DEBUG>> is OFF BY DEFAULT from v2.0.0 (X7): unsolicited terminal-to-host
+ * traffic has no precedent in the protocol, and a BBS at a prompt reads it as
+ * keystrokes.  The directive is still parsed and consumed either way, so the
+ * rendered output is identical; only the TX side differs.  Both builds are
+ * covered — configure with -DRIPLIB_ENABLE_DEBUG_DIRECTIVE=ON for the other. */
 static void test_preproc_debug_directive_emits_to_tx(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("<<DEBUG msg>> pushes marker to TX");
+#if defined(RIPLIB_ENABLE_DEBUG_DIRECTIVE) && RIPLIB_ENABLE_DEBUG_DIRECTIVE
+    TEST("<<DEBUG msg>> pushes marker to TX (directive enabled)");
     init_fixture(&s, &ctx);
     tx_reset();
     feed_script(&s, &ctx, "<<DEBUG hello>>");
     if (tx_len >= 8 && tx_capture[0] == 0x3E &&
         memcmp(tx_capture + 1, "DEBUG: hello", 12) == 0) PASS();
     else FAIL("<<DEBUG>> did not emit marker");
+#else
+    TEST("<<DEBUG msg>> is silent by default (X7)");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    feed_script(&s, &ctx, "<<DEBUG hello>>");
+    if (tx_len == 0) PASS();
+    else FAIL("<<DEBUG>> sent unsolicited traffic in the default build");
+#endif
 }
 
 static void test_preproc_debug_suppressed_by_false_if(void) {
@@ -4293,27 +4564,32 @@ static void test_rand_reproducibility(void) {
     uint8_t first[64];
     size_t first_len;
 
+    /* Exercises the expander directly rather than routing through
+     * <<DEBUG>>, which is off by default from v2.0.0 (X7).  This is also a
+     * more direct test of what it claims to test. */
     TEST("$RAND$ is reproducible from a fixed seed");
 
     init_fixture(&s, &ctx);
     s.rand_state = 0x12345678u;
-    tx_reset();
-    feed_script(&s, &ctx, "<<DEBUG $RAND$ $RAND$ $RAND$>>");
-    first_len = tx_len;
+    first_len = (size_t)rip_expand_variables(&s, "$RAND$ $RAND$ $RAND$", 20,
+                                             (char *)first, (int)sizeof(first));
     if (first_len == 0 || first_len > sizeof(first)) {
-        FAIL("DEBUG emitted no/too-much TX output");
+        FAIL("$RAND$ expansion produced no/too-much output");
         return;
     }
-    memcpy(first, tx_capture, first_len);
 
     init_fixture(&s, &ctx);
     s.rand_state = 0x12345678u;
-    tx_reset();
-    feed_script(&s, &ctx, "<<DEBUG $RAND$ $RAND$ $RAND$>>");
-    if (tx_len == first_len && memcmp(tx_capture, first, first_len) == 0)
-        PASS();
-    else
-        FAIL("$RAND$ output differs between runs with identical seed");
+    {
+        char second[128];
+        int second_len = rip_expand_variables(&s, "$RAND$ $RAND$ $RAND$", 20,
+                                              second, (int)sizeof(second));
+        if ((size_t)second_len == first_len &&
+            memcmp(second, first, first_len) == 0)
+            PASS();
+        else
+            FAIL("$RAND$ output differs between runs with identical seed");
+    }
 }
 
 /* rip_file_upload_begin_state with name_len=0 must not crash and must
@@ -4550,6 +4826,9 @@ int main(void) {
     test_l0_region_text_t();
     test_l0_custom_fill_pattern_s();
     test_l0_fill_style_S_pattern_clamped();
+    test_soh_introducer_starts_command();
+    test_stx_introducer_starts_command();
+    test_soh_introducer_mid_line();
     test_ext_rounded_rect_U();
     test_ext_filled_rounded_rect_u();
     test_ext_polyline_ext();
@@ -4558,8 +4837,23 @@ int main(void) {
     test_ext_mouse_region_ext_colon();
     test_ext_button_ext_semicolon();
     test_ext_ext_text_window_b();
-    test_ext_ext_font_style_d();
-    test_ext_font_attrib_f();
+    test_cmd_j_point();
+    test_cmd_r_text_metric();
+    test_cmd_x_filled_poly_bezier();
+    test_cmd_y_extended_font_style();
+    test_cmd_y_rejects_zero_spacing();
+    test_ext_one_drawing_palette_d();
+    test_ext_one_drawing_palette_d_rejects_bad_bits();
+    test_ext_font_attrib_q();
+    test_ext_font_attrib_q_range();
+    test_world_frame_f();
+    test_vertical_direction_advance_signs();
+    test_multiline_scene_all_commands_execute();
+    test_multiline_scene_lf_only();
+    test_fill_pattern_00_paints_background();
+    test_bang_requires_line_boundary();
+    test_world_frame_cleared_on_session_reset();
+    test_world_frame_f_not_font_attrib();
     test_ext_fill_pattern_ext_D();
     test_l1_button_style_B();
     test_l1_set_icon_dir_N();
@@ -4573,7 +4867,7 @@ int main(void) {
     test_var_alarm_pushes_marker();
     test_var_phaser_pushes_marker();
     test_var_music_pushes_marker();
-    test_var_year_with_host_date();
+    test_var_year_and_fyear_with_host_date();
     test_var_ripver_returns_a2gspu();
     test_var_compat_returns_one();
     test_var_ispalette_returns_one();
@@ -4610,8 +4904,8 @@ int main(void) {
     test_var_ccol_cfcol_reflect_colors();
     test_var_color_name_red();
     test_var_color_name_lightmagenta();
-    test_var_hour_min_from_host_time();
-    test_var_dow_dom_month_from_host_date();
+    test_var_hour_mhour_from_host_time();
+    test_var_weekday_names_from_host_date();
     test_preproc_debug_directive_emits_to_tx();
     test_preproc_debug_suppressed_by_false_if();
     test_l2_gradient_radial_mode();

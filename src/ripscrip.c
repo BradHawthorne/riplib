@@ -124,7 +124,7 @@ void rip_reset_windows_state(rip_state_t *s, comp_context_t *c);
 
 /* Library->host TX FIFO helper (implemented by the consumer's
  * platform-stubs translation unit — see examples/platform_stubs.c). */
-extern void card_tx_push(const char *buf, int len);
+extern void riplib_host_tx(const char *buf, int len);
 
 /* FILE UPLOAD — receive BMP/ICN data from host for PSRAM caching */
 #define FILE_UPLOAD_MAX  (128 * 1024)  /* 128KB max per file */
@@ -208,8 +208,12 @@ static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_le
                                          pixels, icn_w, icn_h);
 }
 
+/* Map an EGA colour index (0-15) to its framebuffer slot.
+ * The base is a port decision, not a protocol one — see RIPLIB_PALETTE_BASE
+ * in riplib_platform.h and docs/spec/12-dll-provenance.md D-6.  The default
+ * (240) preserves v1.x behaviour. */
 static uint8_t palette_slot(int idx) {
-    return (uint8_t)(240 + idx);
+    return (uint8_t)(RIPLIB_PALETTE_BASE + idx);
 }
 
 
@@ -403,10 +407,12 @@ void rip_init_first(rip_state_t *s) {
     s->vp_x0 = 0; s->vp_y0 = 0;
     s->vp_x1 = 639; s->vp_y1 = 399;
 
-    /* Default palette: map EGA indices 0-15 to framebuffer values 240-255.
-     * This avoids conflicting with xterm-256 colors at indices 0-239.
-     * RIP draw commands write framebuffer value s->palette[color], and the
-     * display converts via emu->palette[240+i] → EGA RGB565. */
+    /* Default palette: map EGA indices 0-15 to framebuffer slots starting at
+     * RIPLIB_PALETTE_BASE (240 by default, so the EGA block sits above an
+     * xterm-256 text palette occupying 0-239).  A port that owns the whole
+     * framebuffer can define RIPLIB_PALETTE_BASE=0 — see riplib_platform.h.
+     * RIP draw commands write framebuffer value s->palette[color]; the host
+     * converts via its own palette[] → RGB565. */
     for (int i = 0; i < 16; i++) {
         s->palette[i] = palette_slot(i);
         palette_write_rgb565(palette_slot(i), ega_default_rgb565[i]);
@@ -617,6 +623,13 @@ void rip_session_reset(rip_state_t *s) {
     s->font_ext_id = 0;
     s->font_ext_attr = 0;
     s->font_ext_size = 0;
+    /* World coordinate frame ('f' RIP_SET_WORLD_FRAME).  Cleared on session
+     * reset so a new connection does not inherit the previous scene's frame.
+     * NOTE: deliberately NOT cleared by '*' RIP_RESET_WINDOWS — whether the
+     * driver drops the world frame there is unverified, and guessing would
+     * enshrine an unknown.  Tracked with D-1 in docs/spec/12-dll-provenance.md. */
+    s->world_w = 0;
+    s->world_h = 0;
     s->tw_x0 = 0;
     s->tw_y0 = 0;
     s->tw_x1 = 639;
@@ -687,7 +700,7 @@ void rip_session_reset(rip_state_t *s) {
  *
  * Previous mapping (bgi_style-1) was incorrect — BGI 2 LINE is supposed
  * to be horizontal lines but mapped to the 50% checker.  This table maps
- * each BGI style to the closest visually-matching card pattern.
+ * each BGI style to the closest visually-matching built-in pattern.
  *
  * Exposed via include/ripscrip.h so tests and ripscrip2.c can share it. */
 int8_t rip_bgi_fill_to_card(uint8_t bgi_style) {
@@ -909,15 +922,15 @@ void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked) {
              * DLL: ripCmd_MouseRegion flags&1 → MF_SEND_CHAR; hotkey stored at +0x2B */
             if ((r->flags & RIP_MF_SEND_CHAR) && r->hotkey != 0) {
                 char hk = (char)r->hotkey;
-                card_tx_push(&hk, 1);
-                card_tx_push("\r", 1);
+                riplib_host_tx(&hk, 1);
+                riplib_host_tx("\r", 1);
                 return;
             }
 
             /* Default: send the host command string */
             if (r->text_len > 0) {
-                card_tx_push(r->text, r->text_len);
-                card_tx_push("\r", 1);
+                riplib_host_tx(r->text, r->text_len);
+                riplib_host_tx("\r", 1);
             }
 
             /* Deactivate region after click (one-shot button behavior) */
@@ -1108,7 +1121,26 @@ static void preproc_finalize_directive(rip_state_t *s) {
     } else if (strncmp(dir, "DEBUG ", 6) == 0 || strcmp(dir, "DEBUG") == 0) {
         /* §A2G (v3.2): <<DEBUG msg>> — push "0x3E DEBUG: <msg>\r" to TX so the
          * host can log it.  Suppressed by parent IF/ELSE branches so that
-         * <<IF false>>...<<DEBUG ...>>...<<ENDIF>> stays quiet. */
+         * <<IF false>>...<<DEBUG ...>>...<<ENDIF>> stays quiet.
+         *
+         * OFF BY DEFAULT since v2.0.0 (X7).  Two problems make unconditional
+         * emission unsafe, and the README used to call it "safe to leave in
+         * production", which was wrong:
+         *
+         *   1. It can shadow a macro.  In the 3.x layer <<NAME>> expands to
+         *      the text variable NAME anywhere in a command's argument text,
+         *      so <<DEBUG msg>> is syntactically indistinguishable from a
+         *      reference to a variable named DEBUG.
+         *   2. Unsolicited terminal-to-host traffic has no precedent.  Every
+         *      other thing a 2.x/3.x terminal sends is a RESPONSE.  A BBS
+         *      sitting at a prompt reads inbound bytes as keystrokes, so
+         *      ">DEBUG: entering menu render" + CR is a menu selection.
+         *
+         * Enable deliberately, for a host written to expect it:
+         *     cmake -DCMAKE_C_FLAGS=-DRIPLIB_ENABLE_DEBUG_DIRECTIVE=1
+         * When disabled the directive is still PARSED and consumed, so a
+         * stream containing it renders identically — it just stays silent. */
+#if defined(RIPLIB_ENABLE_DEBUG_DIRECTIVE) && RIPLIB_ENABLE_DEBUG_DIRECTIVE
         if (!s->preproc_suppress) {
             const char *msg = (dir[5] == ' ') ? dir + 6 : "";
             int msg_len = (int)strlen(msg);
@@ -1117,8 +1149,9 @@ static void preproc_finalize_directive(rip_state_t *s) {
                              (char)0x3E, msg);
             (void)msg_len;
             if (n > 0 && n < (int)sizeof(buf))
-                card_tx_push(buf, n);
+                riplib_host_tx(buf, n);
         }
+#endif
     }
 
     s->preproc_len = 0;
@@ -1599,7 +1632,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * x:2 y:2 mode:2 res:1 */
             if (len >= 5 && s->clipboard.valid && s->clipboard.data) {
                 int16_t px = mega2(p), py = scale_y(mega2(p + 2));
-                /* mode at p+4: 0=COPY, 1=OR, 2=AND, 3=XOR, 4=NOT (matches drawing.h DRAW_MODE_* and the RIPscrip wire encoding per docs/spec §2.3) */
+                /* mode at p+4: 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT — the
+                 * RIPscrip wire encoding, confirmed against RIPSCRIP.DLL
+                 * 3.0.7 (see docs/spec/12-dll-provenance.md §12.10).
+                 * NOTE: trace item T-004 changed this comment the WRONG
+                 * way in 2026-05, to match an incorrect drawing.h; both
+                 * were corrected 2026-08-12. */
                 uint8_t mode = (len >= 6) ? mega2(p + 4) : 0;
                 if (mode > 4) mode = 0;
                 rip_blit_pixels(s, px, py, s->clipboard.data,
@@ -1724,7 +1762,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     int copy = fname_len < 68 ? fname_len : 68;
                     memcpy(snd_buf + 1, fname, (size_t)copy);
                     snd_buf[1 + copy] = '\0';
-                    card_tx_push(snd_buf, 2 + copy);
+                    riplib_host_tx(snd_buf, 2 + copy);
                 }
             }
             break;
@@ -1742,7 +1780,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     int copy = fname_len < 68 ? fname_len : 68;
                     memcpy(snd_buf + 1, fname, (size_t)copy);
                     snd_buf[1 + copy] = '\0';
-                    card_tx_push(snd_buf, 2 + copy);
+                    riplib_host_tx(snd_buf, 2 + copy);
                 }
             }
             break;
@@ -1817,7 +1855,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     int idx = vname[4] - '0';
                     rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
                     if (rlen > 0)
-                        card_tx_push(s->app_vars[idx], rlen);
+                        riplib_host_tx(s->app_vars[idx], rlen);
                     else
                         (void)rip_query_prompt_begin(s, vname, vlen);
                 } else {
@@ -1828,13 +1866,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                             rlen = (int)rip_strnlen(s->user_var_values[uidx],
                                                     sizeof(s->user_var_values[uidx]));
                             if (rlen > 0)
-                                card_tx_push(s->user_var_values[uidx], rlen);
+                                riplib_host_tx(s->user_var_values[uidx], rlen);
                         } else {
                             (void)rip_query_prompt_begin(s, vname, vlen);
                         }
                     } else {
                         (void)resp; (void)rlen;
-                        card_tx_push("\r", 1);
+                        riplib_host_tx("\r", 1);
                     }
                 }
             }
@@ -1945,7 +1983,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int flen = len - 6;
                 if (flen <= 0) break;
                 if (!rip_filename_is_safe(fname, flen)) {
-                    card_tx_push("0\r", 2);
+                    riplib_host_tx("0\r", 2);
                     break;
                 }
                 if (flen > (int)sizeof(fname_buf) - 1)
@@ -1963,13 +2001,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                         unsigned long file_size = (unsigned long)icon.width * icon.height;
                         snprintf(resp, sizeof(resp), "1 %s %lu 0\r",
                                  fname_buf, file_size);
-                        card_tx_push(resp, (int)strlen(resp));
+                        riplib_host_tx(resp, (int)strlen(resp));
                     } else {
                         /* Icon present but no dimension metadata — abbreviated form */
-                        card_tx_push("1\r", 2);
+                        riplib_host_tx("1\r", 2);
                     }
                 } else {
-                    card_tx_push("0\r", 2);
+                    riplib_host_tx("0\r", 2);
                     rip_icon_request_file(&s->icon_state, fname, flen);
                 }
                 (void)mode; /* mode byte reserved for future size/date filtering */
@@ -2097,7 +2135,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
                     if (rlen == 0 && rip_query_prompt_begin(s, vname, vlen)) {
                         /* Do not push a response to the BBS yet */
-                        rlen = -1;  /* sentinel: skip card_tx_push below */
+                        rlen = -1;  /* sentinel: skip riplib_host_tx below */
                     } else {
                         memcpy(resp, s->app_vars[idx], (size_t)rlen);
                     }
@@ -2167,7 +2205,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
                 /* rlen == -1 means query_pending was set; don't respond to BBS yet. */
                 if (rlen > 0)
-                    card_tx_push(resp, rlen);
+                    riplib_host_tx(resp, rlen);
             }
             break;
 
@@ -2224,8 +2262,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             uint8_t fid = (uint8_t)mega2(p);
             uint8_t fdir = (uint8_t)mega2(p + 2);
             uint8_t fsize = (uint8_t)mega2(p + 4);
-            /* Validate: dir 0-2 (v3.1 adds dir=2 CCW), size 1-10 */
-            if (fdir > 2) break;
+            /* Validate: dir 0-3, size 1-10.
+             * 0 = horizontal
+             * 1 = BGI VERT_DIR, bottom-to-top (the 1.54 documented value)
+             * 2 = vertical CCW glyphs, top-to-bottom  (RIPlib)
+             * 3 = vertical CW  glyphs, top-to-bottom  (RIPlib; this is what
+             *     dir=1 did before the 2026-08-12 X3 correction) */
+            if (fdir > 3) break;
             if (fsize < 1 || fsize > 10) break;
             s->font_id = fid;
             s->font_dir = fdir;
@@ -2380,14 +2423,32 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
     case 'B': /* RIP_BAR (filled rectangle, no border) — uses fill style */
-        if (len >= 8 && s->fill_pattern != 0) {
+        if (len >= 8) {
             int16_t x0 = mega2(p), y0 = scale_y(mega2(p + 2));
             int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
-            draw_set_color(s->palette[s->fill_color & 0x0F]);
+            /* Fill pattern 00 is NOT "no fill".  The 1.54 specification is
+             * explicit: "Fill pattern 00 will set the entire fill area to the
+             * background color."  RIPlib skipped the fill entirely until
+             * 2026-08-12 (B9), so `!|S0000|` + a bar — the idiom a scene uses
+             * to blank a region — did nothing.
+             *
+             * Scope note: this is corrected for the BAR, which is the
+             * corpus's blanking primitive.  The polygon case is deliberately
+             * left as-is: implementations genuinely disagree there (SyncTERM's
+             * scanline polygon filler also skips style 0 while its bars and
+             * floods paint colour 0), so changing it would be a guess. */
+            if (s->fill_pattern == 0) {
+                draw_set_fill_style(0, s->palette[s->back_color & 0x0F]);
+                draw_set_color(s->palette[s->back_color & 0x0F]);
+            } else {
+                draw_set_color(s->palette[s->fill_color & 0x0F]);
+            }
             draw_rect(x0, y0,
                       (int16_t)(x1 - x0 + 1),
                       (int16_t)(y1 - y0 + 1), true);
             draw_set_color(s->palette[s->draw_color & 0x0F]);
+            if (s->fill_pattern == 0)
+                apply_session_draw_state(s);   /* restore the session fill style */
         }
         break;
 
@@ -2909,6 +2970,46 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Poly-Bezier (v2.0+) --------------------------------------------- */
     /* DLL command table entry 77: 'z' = RIP_POLY_BEZIER (nsegs:2 nsteps:2, then XY pairs) */
+    case 'x': /* RIP_FILLED_POLY_BEZIER -- nsegs:2 nsteps:2 [XY x 4 per seg]
+               *
+               * Added 2026-08-12 (D-5).  The driver has this at slot 71
+               * (RVA 0x01BC1D), immediately adjacent to RIP_FilledPolygon
+               * at 0x01BC78 — the filled counterpart of 'z'.  spec §11.2
+               * Erratum 2 already had the letters right ('x' filled,
+               * 'z' unfilled); only the implementation was missing.
+               *
+               * Flatten every segment to line vertices, then hand the whole
+               * outline to the scanline polygon filler so the fill spans the
+               * complete curve rather than each segment separately. */
+        if (len >= 4) {
+            int nsegs  = mega2(p);
+            int offset = 4;
+            int16_t pts[128];   /* 64 vertices x 2 coords, matching '|P' */
+            int npts = 0;
+            for (int seg = 0; seg < nsegs && offset + 16 <= len; seg++) {
+                int16_t bx0 = mega2(p + offset),       by0 = scale_y(mega2(p + offset + 2));
+                int16_t bx1 = mega2(p + offset + 4),   by1 = scale_y(mega2(p + offset + 6));
+                int16_t bx2 = mega2(p + offset + 8),   by2 = scale_y(mega2(p + offset + 10));
+                int16_t bx3 = mega2(p + offset + 12),  by3 = scale_y(mega2(p + offset + 14));
+                /* Fixed 12-step flattening: enough for the curve sizes this
+                 * protocol carries, and keeps the vertex budget bounded. */
+                for (int k = (seg == 0 ? 0 : 1); k <= 12; k++) {
+                    float t  = (float)k / 12.0f;
+                    float mt = 1.0f - t;
+                    float a = mt * mt * mt, b = 3.0f * mt * mt * t;
+                    float c = 3.0f * mt * t * t, dd = t * t * t;
+                    if (npts >= 64) break;
+                    pts[npts * 2]     = (int16_t)(a * bx0 + b * bx1 + c * bx2 + dd * bx3);
+                    pts[npts * 2 + 1] = (int16_t)(a * by0 + b * by1 + c * by2 + dd * by3);
+                    npts++;
+                }
+                offset += 16;
+            }
+            if (npts >= 3)
+                draw_polygon(pts, npts, s->fill_pattern != 0);
+        }
+        break;
+
     case 'z': /* RIP_POLY_BEZIER -- nsegs:2 nsteps:2 [XY x 4 per segment] */
         /* Multi-segment cubic Bezier.  nsteps = subdivision hint (ignored).
          * Each segment is 4 XY pairs = 16 MegaNum chars. */
@@ -3298,25 +3399,179 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* ── Extended font style (v2.0+) ────────────────────────── */
     /* DLL command table entry 24: 'd' = RIP_EXT_FONT_STYLE (3 args: 2,1,4). */
-    case 'd': /* RIP_EXT_FONT_STYLE — font_id:2 attr:1 size:4 */
+    case 'd': /* RIP_ONE_DRAWING_PALETTE — index:2 bits:1 rgb:4
+               *
+               * CORRECTED 2026-08-12 (B6).  This letter implemented
+               * RIP_EXT_FONT_STYLE until the driver's handler was
+               * disassembled.  It is a palette command, and the handler
+               * (RVA 0x01CF95, which names itself RIP_OneDrawingPalette)
+               * validates all three fields with distinct error strings:
+               *
+               *   arg0  index  <= 0xFF        "Color palette index out of range"
+               *   arg1  bits   == 8 exactly   "Bits value out of range"
+               *   arg2  rgb    <= 0xFFFFFF    "RGB Color value is out of range!"
+               *
+               * Extended font style is command '|y' (RIP_ExtendedFontStyle,
+               * slot 75, 11 arguments) — see docs/spec/12-dll-provenance.md
+               * D-5.  '|y' is not implemented yet; its full field layout has
+               * not been recovered, and guessing it would be worse than the
+               * gap.  Parsing '|d' as font style, however, actively corrupted
+               * font state on any stream that set a palette entry, so that
+               * behaviour is removed rather than kept pending '|y'. */
         if (len >= 7) {
-            s->font_ext_id   = (uint8_t)(mega2(p) & 0x0F);
-            s->font_ext_attr = (uint8_t)(mega_digit(p[2]));
-            s->font_ext_size = (uint32_t)(mega4(p + 3));
-            /* Immediately apply the selected font ID */
-            if (s->font_ext_id < BGI_FONT_COUNT)
-                s->font_id = s->font_ext_id;
+            uint16_t pal_index = (uint16_t)mega2(p);
+            uint8_t  pal_bits  = (uint8_t)mega_digit(p[2]);
+            uint32_t pal_rgb   = (uint32_t)mega4(p + 3);
+
+            /* Match the driver's validation: out-of-range values are an
+             * error, not something to clamp into a wrong colour. */
+            if (pal_index <= 0xFF && pal_bits == 8 && pal_rgb <= 0xFFFFFFu) {
+                uint8_t r8 = (uint8_t)((pal_rgb >> 16) & 0xFF);
+                uint8_t g8 = (uint8_t)((pal_rgb >> 8) & 0xFF);
+                uint8_t b8 = (uint8_t)(pal_rgb & 0xFF);
+                uint16_t rgb565 = (uint16_t)(((r8 & 0xF8) << 8) |
+                                             ((g8 & 0xFC) << 3) |
+                                             ((b8 & 0xF8) >> 3));
+                palette_write_rgb565((uint8_t)pal_index, rgb565);
+            }
         }
         break;
 
-    /* ── Font attribute flags (v2.0+) ───────────────────────── */
-    /* DLL command table entry 28: 'f' = RIP_FONT_ATTRIB (2 args: XY,XY
-     * interpreted as two 2-digit flag fields). */
-    case 'f': /* RIP_FONT_ATTRIB — attrib:2 reserved:2 */
-        /* bit0=bold, bit1=italic, bit2=underline, bit3=shadow.
-         * Stored in s->font_attrib and applied by the BGI stroke renderer. */
-        if (len >= 2)
-            s->font_attrib = (uint8_t)(mega2(p) & 0x0F);
+    case 'j': /* RIP_POINT — x:XY y:XY
+               *
+               * Added 2026-08-12 (D-5).  Identified by disassembly: the
+               * handler (RVA 0x01E2F8) transforms the two coordinates, then
+               * fills a 1x1 rectangle with a brush ("Unable to create temp
+               * brush"), and the RIP_Point name string is referenced from
+               * inside its body at 0x1001E3D9.  Distinct from '|X'
+               * RIP_PIXEL, which writes with the draw colour; this plots
+               * through the fill/brush path. */
+        if (len >= 4) {
+            int16_t jx = mega2(p), jy = scale_y(mega2(p + 2));
+            draw_set_color(s->palette[s->fill_color & 0x0F]);
+            draw_pixel(jx, jy);
+            draw_set_color(s->palette[s->draw_color & 0x0F]);
+        }
+        break;
+
+    case 'r': /* RIP_TEXT_METRIC — mode:1 domain:1 res:4
+               *
+               * Added 2026-08-12 (D-5).  Argument widths come from the
+               * dispatch entry's type bytes (01 01 04) and the ranges from
+               * the handler's own validation at RVA 0x020371:
+               *     mode   < 4   "Invalid text metric mode"
+               *     domain < 2   "Invalid text metric domain"
+               *
+               * The driver computes a metric and makes it available to the
+               * host.  WHERE it delivers the result has not been recovered,
+               * so RIPlib validates and records the request without
+               * inventing a delivery channel — see docs/spec §12.12 D-5.
+               * Recording it is still better than the previous behaviour,
+               * which dropped '|r' into error recovery and could desync the
+               * rest of the frame. */
+        if (len >= 2) {
+            uint8_t tm_mode   = (uint8_t)mega_digit(p[0]);
+            uint8_t tm_domain = (uint8_t)mega_digit(p[1]);
+            if (tm_mode < 4 && tm_domain < 2) {
+                s->text_metric_mode   = tm_mode;
+                s->text_metric_domain = tm_domain;
+            }
+        }
+        break;
+
+    case 'y': /* RIP_EXTENDED_FONT_STYLE — 26 characters total
+               *
+               * Added 2026-08-12 (D-5).  This is the driver's real extended
+               * font-style command (slot 75, RVA 0x01ADC0); RIPlib had the
+               * feature on '|d', which is RIP_OneDrawingPalette.
+               *
+               * The dispatch entry's argument-width bytes are
+               *     01 01 04 02 02 02 02 02 02 02 06
+               * i.e. 1+1+4+(2*7)+6 = 26 characters — which independently
+               * matches the "26-digit layout" recovered from FONTS.RIP by
+               * the bbs-land reconstruction.
+               *
+               * Fields identified from the handler's validation branches:
+               *     arg5  string rotation     0 / 90 / 180 / 270
+               *     arg6  character rotation  same set
+               *     arg8  character spacing %  must be non-zero
+               * (the driver compares rotations against 0/900/1800/2700,
+               * i.e. tenths of a degree, after scaling the 2-digit wire
+               * field by 10.)
+               *
+               * The remaining fields are parsed at their correct widths but
+               * NOT interpreted: their meanings have not been recovered, and
+               * assigning them would be a guess.  See docs/spec §12.12. */
+        if (len >= 26) {
+            uint8_t  y_font    = (uint8_t)mega_digit(p[0]);
+            uint16_t y_srot    = (uint16_t)mega2(p + 10);   /* arg5 */
+            uint16_t y_crot    = (uint16_t)mega2(p + 12);   /* arg6 */
+            uint16_t y_spacing = (uint16_t)mega2(p + 16);   /* arg8 */
+
+            bool rot_ok = (y_srot == 0 || y_srot == 90 ||
+                           y_srot == 180 || y_srot == 270) &&
+                          (y_crot == 0 || y_crot == 90 ||
+                           y_crot == 180 || y_crot == 270);
+
+            if (rot_ok && y_spacing != 0) {
+                if (y_font < BGI_FONT_COUNT)
+                    s->font_id = y_font;
+                s->font_ext_id  = y_font;
+                s->char_spacing = y_spacing;
+                /* Same rotation->direction mapping as '|26' SCALABLE_TEXT:
+                 * 90 = CW (dir 3), 270 = CCW (dir 2), 180 unsupported by the
+                 * stroke renderer so it falls back to horizontal. */
+                if (y_srot == 90)       s->font_dir = 3;
+                else if (y_srot == 270) s->font_dir = 2;
+                else                    s->font_dir = 0;
+            }
+        }
+        break;
+
+    /* ── World frame / font attributes ──────────────────────── */
+    /* DLL command table slot 28: 'f' = RIP_SetWorldFrame, 2 args (XY,XY).
+     * DLL command table slot 55: 'q' = RIP_FontAttrib,   1 arg  (mega2).
+     * Both confirmed by name from the handlers' own error strings; see
+     * docs/spec/13-dll-command-table.md. */
+    case 'f': /* RIP_SET_WORLD_FRAME — x_dim:XY y_dim:XY
+               *
+               * CORRECTED 2026-08-12.  This letter previously implemented
+               * RIP_FONT_ATTRIB, which mis-parsed the prologue of most
+               * shipping 3.x scenes: '|fZKQO' (the corpus standard, base-36
+               * "ZK"=1280, "QO"=960) was read as a font-attribute byte and
+               * silently corrupted font state.
+               *
+               * The driver's handler at RVA 0x01F874 names itself
+               * RIP_SetWorldFrame, reads two coordinate values, and rejects
+               * any argument count other than 2 with "Invalid argument".
+               * Font attributes live on 'q' (RIP_FontAttrib) — see below.
+               *
+               * RIPlib stores the frame; it does not yet apply a
+               * world->device transform (tracked as D-1 in
+               * docs/spec/12-dll-provenance.md).  Storing it is strictly
+               * better than the previous behaviour, which mis-applied it. */
+        if (len >= 4) {
+            s->world_w = (int16_t)mega2(p);
+            s->world_h = (int16_t)mega2(p + 2);
+        }
+        break;
+
+    case 'q': /* RIP_FONT_ATTRIB — attrib:2
+               *
+               * bit0=bold, bit1=italic, bit2=underline, bit3=shadow.
+               * Stored in s->font_attrib and applied by the BGI stroke
+               * renderer.  Moved here from 'f' on 2026-08-12.
+               *
+               * The driver's handler (RVA 0x01C799) range-checks the value
+               * with `cmp ebx,0xF / jbe`, i.e. a 4-bit field, and sends
+               * anything larger down the invalid-argument path rather than
+               * masking it.  Match that: ignore out-of-range values instead
+               * of silently truncating them. */
+        if (len >= 2) {
+            uint16_t attrib = mega2(p);
+            if (attrib <= 0x0F)
+                s->font_attrib = (uint8_t)attrib;
+        }
         break;
 
     }
@@ -3431,8 +3686,22 @@ reprocess:
          * start a new << sequence via preproc_state machinery above). */
         if (s->preproc_suppress && ch != '<') return;
 
-        /* DLL: swallow SOH (0x01) — "check_soh" handler */
-        if (ch == 0x01) return;
+        /* Syntax rule 12: SOH (0x01) is an alternate command introducer,
+         * accepted ANYWHERE in a line — deliberately host-only, since a BBS
+         * user cannot readily type a control character.  Equivalent to '!',
+         * so enter GOT_BANG and wait for '|'.
+         *
+         * CORRECTED 2026-08-12 (B12).  This previously read
+         *     if (ch == 0x01) return;      // "DLL: swallow SOH"
+         * which silently DISCARDED the introducer, so a scene opening with
+         * the SOH form ("\x01|*|") never started.  The shipped 2.x corpus
+         * opens exactly that way, and SyncTERM implements this split, so the
+         * swallow was a real interoperability defect rather than a
+         * simplification.  See design/bbs-land-alignment.md B12. */
+        if (ch == 0x01) {
+            s->state = RIP_ST_GOT_BANG;
+            break;
+        }
 
         /* When RIP graphics have been drawn and we return to ANSI
          * passthrough, position the VT100 cursor near the bottom so
@@ -3455,7 +3724,7 @@ reprocess:
             /* ESC[! confirmed — reply with RIPSCRIP<ver><vendor>
              * 032001 = version 3.2, vendor 0, sub 1 */
             s->esc_detect = 0;
-            card_tx_push("RIPSCRIP032001\n", 15);
+            riplib_host_tx("RIPSCRIP032001\n", 15);
             break;
         } else if (s->esc_detect > 0) {
             /* Not ESC[! — flush deferred bytes to VT100 then continue */
@@ -3465,12 +3734,29 @@ reprocess:
             if (ed >= 2) comp_passthrough_vt100(c, '[');
         }
 
-        if (ch == '!') {
-            /* DLL: check lastChar (+0x9F) for line boundary.
-             * '!' triggers RIPscrip only after CR, LF, FF, or start-of-stream.
-             * RELAXED: Also accept after ESC sequence terminators (letters after
-             * CSI params) since BBSes may send !| immediately after ANSI codes
-             * on the same line (e.g., ESC[2J!|*|). */
+        if (ch == '!' && (s->last_char == 0    || s->last_char == '\r' ||
+                          s->last_char == '\n' || s->last_char == '\f')) {
+            /* '!' introduces a command ONLY at a line boundary: start of
+             * stream, or immediately after CR, LF or FF.  The driver enforces
+             * this via lastChar (pContext+0x9F).
+             *
+             * RELAXATION WITHDRAWN 2026-08-12 (X5).  RIPlib previously fired on
+             * ANY '!', so ordinary prose parsed as a command whenever an
+             * exclamation mark happened to follow an ANSI sequence -- e.g.
+             * "\x1b[32m!" in running text.  The line-boundary rule exists
+             * precisely to make that impossible.
+             *
+             * The portable way to start a scene mid-line is the SOH/STX
+             * introducer below (syntax rule 12): host-only, valid back to
+             * 1.54, and what the shipping 2.x corpus actually uses. */
+            s->state = RIP_ST_GOT_BANG;
+        } else if (ch == 0x02) {
+            /* Syntax rule 12: STX (0x02) is an alternate command introducer,
+             * accepted ANYWHERE in a line — deliberately host-only, since a
+             * BBS user cannot readily type a control character.  Equivalent to
+             * '!', so fall straight through to waiting for '|'.
+             * Added 2026-08-12 (B12); the shipped 2.x corpus opens with the
+             * SOH form and would not start a scene without this. */
             s->state = RIP_ST_GOT_BANG;
         } else if (s->tw_active) {
             rip_tw_putchar(s, ch);
@@ -3905,12 +4191,12 @@ void rip_query_response_byte_state(rip_state_t *s, uint8_t data_byte) {
             s->app_vars[idx][rlen] = '\0';
             /* Send response to BBS now that we have it */
             if (rlen > 0)
-                card_tx_push(s->app_vars[idx], rlen);
+                riplib_host_tx(s->app_vars[idx], rlen);
         } else {
             int rlen = s->query_response_len;
             if (rip_user_var_set(s, vn, (int)strlen(vn),
                                  s->query_response, rlen) && rlen > 0) {
-                card_tx_push(s->query_response, rlen);
+                riplib_host_tx(s->query_response, rlen);
             }
         }
         s->query_pending = false;

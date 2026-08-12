@@ -115,26 +115,48 @@ definitions transparently:
 Extends the existing $DATE$ / $TIME$ / $YEAR$ / $WOYM$ family with
 finer-grained accessors:
 
-     Variable    Format    Source                  Range
-     ---------   -------   ---------------------   --------
-     $HOUR$      HH        host_time[0..1]          00-23
-     $MIN$       MM        host_time[3..4]          00-59
-     $SEC$       SS        local RTC                00-59
-     $DOW$       D         day of week (Mon=0)      0-6
-     $DOM$       DD        day of month             01-31
-     $MONTH$     MM        month of year            01-12
+     Variable      Format     Source                 Range
+     -----------   --------   --------------------   -----------
+     $HOUR$        HH         host_time[0..1]        01-12
+     $MHOUR$       HH         host_time[0..1]        00-23
+     $MIN$         MM         host_time[3..4]        00-59
+     $SEC$         SS         local RTC              00-59
+     $WDAY$        D          day of week            0-6, Sun=0
+     $DOW$         name       day of week            "Thursday"
+     $DAY$         DD         day of month           01-31
+     $MONTHNUM$    MM         month of year          01-12
+     $MONTH$       name       month of year          "January"
+
+NAMES CORRECTED 2026-08-12.  This table previously assigned the
+24-hour value to $HOUR$, a Monday=0 digit to $DOW$, the numeric
+month to $MONTH$, and used $DOM$ for day-of-month.  All four were
+wrong against the driver, and wrong silently -- a conforming
+terminal returns a different TYPE, not an error.
+
+RIPSCRIP.DLL 3.0.7 carries BOTH names of each pair as distinct
+NUL-terminated strings -- HOUR and MHOUR, DOW and WDAY, MONTH and
+MONTHNUM, YEAR and FYEAR -- so they are separate variables with
+separate meanings.  It contains no "DOM" string at all.  RIPlib had
+the right values under the wrong names; the values moved, nothing
+was lost.  $DOM$ is gone; use $DAY$.
 
 All fall back to the local RTC (`time()` / `localtime()`) when the
 host has not synced its date/time over CMD_SYNC_DATE/SYNC_TIME yet.
 
-$DOW$ reuses the ISO-week date arithmetic already used by $WOYM$
-(rip_weekday_monday0), so day-of-week and week-of-year stay
-consistent even across leap years.
+$WDAY$ and $DOW$ reuse the ISO-week date arithmetic already used by
+$WOYM$ (rip_weekday_monday0), so day-of-week and week-of-year stay
+consistent even across leap years; $WDAY$ converts to Sunday=0 for
+wire compatibility.
 
 Use case: greeting variation by time of day, or by day of week:
 
-     <<IF $HOUR$<12>>Good morning<<ENDIF>>
-     <<IF $DOW$=4>>Happy Friday!<<ENDIF>>
+     <<IF $MHOUR$<12>>Good morning<<ENDIF>>
+     <<IF $DOW$=Friday>>Happy Friday!<<ENDIF>>
+     <<IF $WDAY$=5>>Happy Friday!<<ENDIF>>
+
+Note the first form is what a conforming 3.x terminal expects.  The
+digit comparison must use $WDAY$ -- and Friday is 5 with Sunday=0,
+not 4 as the pre-correction example had it.
 
 
 ---------------------------------------------------------------------
@@ -206,6 +228,31 @@ Output on TX:
 ---------------------------------------------------------------------
 §A2G.13  RADIAL GRADIENT MODE
 ---------------------------------------------------------------------
+
+PROVENANCE CORRECTED 2026-08-12.  The base command |28 was
+attributed to RIPSCRIP.DLL 3.0.7 and treated as part of RIPlib's
+v3.0 baseline.  That attribution is disproved:
+
+  - The DLL command dispatch table (segment 13) contains NO
+    digit-letter command in the Level 2 band at all — neither |20
+    nor |28 — and the published TeleGrafix tables do not use digit
+    slots at Level 2 either.
+  - No gradient handler name appears in any string class of the
+    binary (segment 12, classes B and C).
+  - No gradient command appears in the 1.54 specification, the
+    2.00 Alpha 4 draft, the RIPtel 3.1 help inventory, or the
+    116-file demo corpus shipped with RIPtel 3.1.
+
+|28 is therefore a RIPlib-ORIGINAL command, not a recovered
+TeleGrafix one.  It works, it is implemented and tested, and it
+stays — but it must be presented as an extension in its own right
+rather than as a mode added to an inherited command.  Modes 0 and 1
+are likewise RIPlib's, not v3.0's; the "(v3.0)" labels below are
+retained only to show the order they were added in.
+
+Shipping 3.x content produced gradients through RIP_FILL_PATTERN
+with alternating dither patterns across bands of a 256-colour fade
+(the BLUEFADE.FN idiom), which is the historically faithful method.
 
 The Level 2 gradient command |28 gains a third mode value:
 

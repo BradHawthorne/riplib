@@ -13,6 +13,31 @@ backward compatible with 1.2.x. (Candidate C-004 variant A′; see
 `design/adr/0004-multi-session-state-family-completion.md`.)
 
 ### Added
+
+- **Four driver commands that RIPlib never implemented** (D-5). Each was
+  recovered from the binary rather than guessed — argument widths come from
+  the dispatch entry's own type bytes, ranges from each handler's validation
+  branches:
+  - `|j` **RIP_POINT** (`x:XY y:XY`) — identified by disassembly: the handler
+    at RVA 0x01E2F8 transforms both coordinates then fills a 1x1 rect with a
+    brush, and the `RIP_Point` name string is referenced from inside its body.
+  - `|r` **RIP_TEXT_METRIC** (`mode:1 domain:1 res:4`) — `mode < 4`,
+    `domain < 2`, per the handler's own diagnostics. The channel the driver
+    delivers the computed metric on has not been recovered, so RIPlib records
+    the request rather than inventing one.
+  - `|x` **RIP_FILLED_POLY_BEZIER** — the filled counterpart of `|z`, which
+    §11.2 Erratum 2 already had the letters right for. Segments are flattened
+    into a single outline so the fill spans the whole curve.
+  - `|y` **RIP_EXTENDED_FONT_STYLE** — the dispatch entry's width bytes
+    (`01 01 04 02×7 06`) sum to **26 characters**, independently matching the
+    "26-digit layout" the bbs-land reconstruction recovered from FONTS.RIP.
+    Rotation and character-spacing fields are applied; the fields whose
+    meaning has not been recovered are parsed at their correct widths and
+    left uninterpreted rather than guessed.
+
+- `scripts/dll-handler-semantics.py` — recovers per-command field semantics
+  from the driver's own validation diagnostics (66 of 129 handlers). Feeds
+  `docs/spec/13-dll-command-table.md` §13.5.
 - Reentrant `*_state()` counterparts for the four host-event entrypoints
   that previously existed **only** as `g_rip_state`-bound globals:
   `rip_sync_date_byte_state()`, `rip_sync_time_byte_state()`,
@@ -30,6 +55,24 @@ backward compatible with 1.2.x. (Candidate C-004 variant A′; see
   now 240 checks; 287 total across the three suites).
 
 ### Changed
+
+- **`card_tx_push` renamed to `riplib_host_tx` (breaking).** One of exactly
+  three functions every port must implement, and its old name carried a
+  specific consumer's terminology into the public API of a library whose
+  headline claim is platform independence.
+- **`<<DEBUG>>` is off by default (X7).** Enable with
+  `-DRIPLIB_ENABLE_DEBUG_DIRECTIVE=ON`. Unsolicited terminal-to-host traffic
+  has no precedent in RIPscrip — everything else a terminal sends is a
+  *response* — and a BBS at a prompt reads those bytes as keystrokes. The
+  directive is still parsed and consumed when disabled, so rendering is
+  unchanged. The README previously called it "safe to leave in production";
+  that was wrong.
+- **EGA palette base is now a port decision, not a baked-in host policy.**
+  `RIPLIB_PALETTE_BASE` (default 240, preserving v1.x behaviour) selects the
+  framebuffer slot of EGA colour 0. RIPlib hardcoded 240 because its first
+  consumer shared the framebuffer with an xterm-256 text renderer — an
+  assumption about the *host*, not the protocol. Ports that own the whole
+  framebuffer can now use `-DRIPLIB_PALETTE_BASE=0`.
 - The existing single-session globals (`rip_sync_date_byte`,
   `rip_sync_time_byte`, `rip_query_response_byte`, `rip_apply_palette`)
   are now thin wrappers over their `_state()` forms — byte-for-byte
@@ -76,6 +119,52 @@ protocol-surface changes — fully backward compatible with 1.2.1.
   `design/knowledge.md`.
 
 ### Fixed
+
+- **`|d` was parsed as extended font style; it is `RIP_OneDrawingPalette`
+  (breaking).** Settled by disassembling RVA 0x01CF95, whose three validation
+  branches carry their own error strings: index must be <= 0xFF ("Color
+  palette index out of range"), bits must be exactly 8 ("Bits value out of
+  range"), rgb must be <= 0xFFFFFF ("RGB Color value is out of range!").
+  `|d` now writes a palette entry and no longer corrupts font state.
+  Extended font style is `|y` (`RIP_ExtendedFontStyle`, 11 arguments), which
+  is **not yet implemented** — its full field layout has not been recovered,
+  and guessing it would be worse than the gap. See docs/spec §12.8 and D-5.
+
+- **`!` now requires a line boundary again (X5).** RIPlib fired on any `!`, so
+  ordinary prose containing an ANSI sequence followed by an exclamation mark
+  parsed as a command. `!` again introduces a command only at start-of-stream
+  or after CR/LF/FF. The portable way to start a scene mid-line is the SOH/STX
+  introducer, which now works.
+- **`|Y` direction `01` restored to its documented meaning (X3, breaking).**
+  v3.1 had redefined direction 1 from the specified bottom-to-top (BGI
+  VERT_DIR) to top-to-bottom, so content authored against either side read
+  upside-down on the other. Direction 1 is bottom-to-top again; the corrected
+  top-to-bottom CW rendering moved to a new **direction 3**. Direction 2 (CCW,
+  top-to-bottom) is unchanged. `|26` SCALABLE_TEXT's 90-degree rotation now
+  maps to direction 3.
+- **Fill pattern `00` paints the background colour on a bar (B9).** The 1.54
+  spec is explicit — "Fill pattern 00 will set the entire fill area to the
+  background color" — but RIPlib skipped the fill, so `!|S0000|` plus a bar,
+  the idiom for blanking a region, did nothing. Corrected for `RIP_BAR`; the
+  polygon case is deliberately left alone, as implementations genuinely
+  disagree there.
+
+- **`|f` was parsed as FONT_ATTRIB but is `RIP_SetWorldFrame` (breaking).**
+  The driver's slot-28 handler names itself `RIP_SetWorldFrame` and takes two
+  coordinate pairs; RIPlib read two MegaNums as `attrib:2 res:2`. The corpus
+  standard `|fZKQO` (base-36 1280x960) opens most shipping 3.x scenes, so
+  RIPlib mis-parsed ordinary content and silently corrupted font state. Font
+  attributes moved to `|q` (`RIP_FontAttrib`, slot 55), which range-checks
+  the value `<= 0x0F` exactly as RIPlib's 4-bit field already did. `|f` now
+  stores the world frame; the world->device transform is not yet applied.
+- **Time variables were the right values under the wrong names (breaking).**
+  RIPSCRIP.DLL 3.0.7 carries both names of each pair as distinct strings, and
+  has no `DOM` at all. Corrected: `$HOUR$` is now 12-hour and `$MHOUR$` is
+  24-hour; `$DOW$` spells the day out and `$WDAY$` is the digit with
+  **Sunday = 0**; `$MONTH$` spells the month out and `$MONTHNUM$` is numeric;
+  `$DOM$` is replaced by `$DAY$`. Previously `<<IF $DOW$=4>>Happy Friday!` --
+  RIPlib's own documented example -- evaluated false on every conforming
+  terminal, and Friday is 5 with Sunday=0 in any case.
 - `26` SCALABLE_TEXT scale was bit-masked `& 0x07` (silently corrupting
   valid scales — e.g. 10 became 2); now clamped to the BGI renderer's
   real 1-10 range, matching the `|Y` RIP_FONT_STYLE size field.
@@ -230,3 +319,49 @@ guards in CI.
 - Tests that create more than one `rip_state_t` should call
   `psram_arena_destroy(&s.psram_arena)` between init calls or track every
   arena base for cleanup; ASan with `detect_leaks=1` will catch leaks.
+
+## [2.0.0] - 2026-08-12
+
+### Fixed
+
+- **Write modes were misnumbered (breaking rendering fix).** `|W` wire values
+  are `0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT`. RIPlib had OR=1, AND=2, XOR=3 and
+  passes the wire byte straight through, so it rendered XOR where content
+  meant OR and vice versa — `|W01` draw-twice-to-erase smeared instead of
+  erasing. Established by disassembling RIPSCRIP.DLL 3.0.7: the handler
+  (RVA 0x02102C) stores the wire byte unmodified and the apply path
+  translates it at RVA 0x00E6B3 into GDI raster ops (`R2_XORPEN` for 1,
+  `R2_MERGEPEN` for 2, `R2_MASKPEN` for 3). Spec §11 `§BUG.7`, the sole
+  basis for the old numbering, is withdrawn — it was never a DLL bug.
+- **SOH/STX command introducers now work.** RIPscrip syntax rule 12 allows
+  `SOH` (0x01) and `STX` (0x02) to replace `!` anywhere in a line. RIPlib
+  discarded SOH outright, so scenes opening with the SOH form — which the
+  shipped 2.x corpus does — never started.
+
+### Changed
+
+- `§A2G.1` (AND/NOT write modes) withdrawn as a protocol extension. Both
+  modes have been documented since v2.00 Alpha 1 and the shipping driver
+  rendered them, so this was a completeness fix to RIPlib's renderer, not a
+  language addition. Spec `§DEAD.3` corrected accordingly.
+- `§A2G.4` qualified: RIPlib provides 11 built-in fill bitmaps plus a
+  user slot, not 13, and four BGI styles still resolve to approximations
+  with styles 5 and 6 collapsing onto one bitmap.
+- `|28` gradient re-attributed as RIPlib-original rather than inherited
+  from RIPSCRIP.DLL 3.0.7; no such command exists in that driver.
+- `§DEV.4` corrected: `|1R`, `|!`, `|(`, `|)` and the backtick composite-icon
+  command are all present in the shipping driver and are not RIPlib
+  extensions. Only `|1V` and `|1X` are RIPlib-original. Closes open
+  question U-026.
+
+### Added
+
+- `docs/spec/12-dll-provenance.md` — evidence classes, opcode adjudication,
+  the `|W` disassembly, and a register of open defects.
+- `docs/spec/13-dll-command-table.md` — the driver's command dispatch table
+  verbatim (129 entries: letter, handler, arity, argument types, name).
+- `docs/historical/ripscrip-v3-RE-notes.md` — restored; it is the substrate
+  segments 11-13 cite.
+- `scripts/dll-provenance.py`, `scripts/dll-dispatch-table.py`,
+  `scripts/dll-name-handlers.py` — regenerate the binary-derived data.
+- `scripts/check-branding.sh` + CI job enforcing platform independence.

@@ -36,7 +36,7 @@ static int tests_passed = 0;
 static uint16_t palette[256];
 void palette_write_rgb565(uint8_t i, uint16_t v) { palette[i] = v; }
 uint16_t palette_read_rgb565(uint8_t i) { return palette[i]; }
-void card_tx_push(const char *buf, int len) { (void)buf; (void)len; }
+void riplib_host_tx(const char *buf, int len) { (void)buf; (void)len; }
 
 /* ── Helper ─────────────────────────────────────────────────────── */
 static void clear(void) {

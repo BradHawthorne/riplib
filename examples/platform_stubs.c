@@ -18,7 +18,7 @@ uint16_t palette_read_rgb565(uint8_t index) {
     return g_palette[index];
 }
 
-void card_tx_push(const char *buf, int len) {
+void riplib_host_tx(const char *buf, int len) {
     /* Send to stdout for demo purposes */
     fwrite(buf, 1, len, stdout);
 }

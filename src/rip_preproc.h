@@ -10,7 +10,7 @@
  *   - the <<IF expr>> expression evaluator (caller pre-evaluates,
  *     passes the result as a bool);
  *   - the <<DEBUG msg>> emission (caller handles directly via
- *     card_tx_push because that's a host-callback concern).
+ *     riplib_host_tx because that's a host-callback concern).
  *
  * This is an INTERNAL header (not under include/).  It exists to peel
  * the preprocessor logic off `src/ripscrip.c` as the first step toward

@@ -117,12 +117,34 @@ them. RIPlib v3.1 corrects all of these.
      v3.1 FIX: Scanline-based per-pixel angle+distance test using
      FPU atan2f. Zero leak potential.
 
-§BUG.7 — Write mode constants misordered:
-     The DLL internal constants were 0=COPY, 1=XOR, 2=OR. The
-     protocol wire values are 0=COPY, 1=OR, 3=XOR. Implementations
-     that used the DLL constants instead of wire values would swap
-     XOR and OR for every BBS connection.
-     v3.1 FIX: Use wire protocol values consistently.
+§BUG.7 — WITHDRAWN 2026-08-12. NOT A DLL BUG.
+     This entry claimed the DLL's internal constants (0=COPY,
+     1=XOR, 2=OR) differed from "the protocol wire values ...
+     0=COPY, 1=OR, 3=XOR", and RIPlib renumbered its write modes
+     accordingly.  The claim carried no citation, skipped value 2,
+     and is disproved by the code.
+
+     Disassembly (see §12.10) shows the '|W' handler at RVA
+     0x02102C stores the wire byte UNMODIFIED, and the apply path
+     feeds that same byte to a five-way translation at RVA
+     0x00E6B3 which calls GDI SetROP2:
+
+          wire 0 -> R2_COPYPEN   COPY
+          wire 1 -> R2_XORPEN    XOR
+          wire 2 -> R2_MERGEPEN  OR
+          wire 3 -> R2_MASKPEN   AND
+          wire 4 -> R2_NOT       NOT
+
+     There is no internal-vs-wire distinction.  The correct wire
+     ordering is 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT, which agrees
+     with the 1.54 specification, the 2.00a4 table, Borland BGI,
+     and §DEAD.3's own reading.
+
+     ACTION REQUIRED: include/drawing.h defines DRAW_MODE_OR=1,
+     DRAW_MODE_AND=2, DRAW_MODE_XOR=3 and the handler passes the
+     wire byte straight through, so RIPlib currently renders XOR
+     where the protocol means OR and vice versa.  Correct the four
+     constants; the compositing switch is symbolic and follows.
 
 §BUG.8 — Bottom-to-top vertical text:
      BGI VERT_DIR rendered text bottom-to-top, producing backwards-
@@ -190,13 +212,23 @@ v3.1 activates them with working implementations.
      validation, correct 16-byte header, offsets-before-widths
      table order. All 10 BGI fonts load and render correctly.
 
-§DEAD.3 — AND and NOT write modes:
-     The DLL's write mode handler accepted mode values 0-4 on
-     the wire but only implemented COPY (0), XOR (1), and OR (2)
-     internally. AND and NOT were parsed and stored but the
-     pixel-write paths only had switch cases for three modes.
-     v3.1: All five modes implemented in every pixel-write path
-     (line, rect, fill, text, copy operations).
+§DEAD.3 — CORRECTED 2026-08-12. AND AND NOT WERE NOT DEAD.
+     This entry claimed the DLL "only implemented COPY (0), XOR
+     (1), and OR (2) internally", with AND and NOT parsed but
+     never rendered.  Disassembly disproves it: the translation at
+     RVA 0x00E6B3 maps all five wire values to GDI raster ops,
+     including 3 -> R2_MASKPEN (AND) and 4 -> R2_NOT (NOT).  Both
+     were live in the shipping driver.
+
+     The one part of this entry that stands is its ordering —
+     COPY 0, XOR 1, OR 2 — which is confirmed and is the basis for
+     withdrawing §BUG.7 above.
+
+     CONSEQUENCE: §A2G.1 presents AND and NOT as v3.1 additions
+     that "activate" dead code.  They were neither new to the
+     language nor dead in the implementation.  §A2G.1 should be
+     restated as what it actually is — a completeness fix for
+     RIPlib's own renderer — and dropped as a protocol extension.
 
 §DEAD.4 — Vertical text direction:
      The DLL accepted direction=1 in font style commands and
@@ -318,25 +350,31 @@ The genuine, decided deviations follow.
      to a proper clamp.  Spec §5.9 has been corrected to state the
      1-10 range.  KEPT (as a documented renderer limit).
 
-§DEV.4 — RIPlib-original commands beyond the TeleGrafix tables:
-     RIPlib implements several commands absent from the historical
-     TeleGrafix command tables:
-        Level 1:  1V SET_VIEWPORT_EXT (viewport + stored scale field),
-                  1X CLIPBOARD_OP (compound clipboard: clear/flipH/
-                  flipV/rot180/invert/capture/paste),
-                  1R READ_SCENE (queue a scene-file host request)
-        Level 0:  backtick (0x60) COMPOSITE_ICON (multi-cell icon
-                  assembly), '!' comment marker (`!|!…|`, consumed
-                  with no output), '(' / ')' group markers (no-ops
-                  reserved for stream structuring)
-     These are additive — a stream that never sends them is unaffected,
-     and unknown-to-a-peer commands degrade harmlessly.  They are now
-     documented in the spec command tables (§A.1) as RIPlib extensions
-     so the dispatch surface is fully described.  KEPT.
-     (Origin note: whether any of these mirror undocumented RIPSCRIP.DLL
-     behaviour or are wholly RIPlib-original is an open provenance
-     question, U-026; it does not affect that they are intentional and
-     documented.)
+§DEV.4 — CORRECTED 2026-08-12.  Most of these are NOT RIPlib-original.
+     This entry listed six commands as "RIPlib extensions beyond the
+     published TeleGrafix tables".  The DLL dispatch table (segment 13)
+     settles the open provenance question U-026, and four of the six
+     are present in the shipping driver:
+
+        |1R  PRESENT  handler RVA 0x00D64D, 2 args.  The handler
+                      names itself RIP_ReadScene.  A documented
+                      command since 1.54, not an extension.
+        |!   PRESENT  handler RVA 0x01AD36, 0 args (RIP_COMMENT).
+        |(   PRESENT  handler RVA 0x01CA84, 0 args (group begin).
+        |)   PRESENT  handler RVA 0x01CA85, 0 args (group end).
+        |`   PRESENT  handler RVA 0x01D963, 11 args.  The backtick
+                      composite-icon command is in the driver.
+
+     Only two survive as genuine RIPlib originals — neither letter
+     appears anywhere in the Level 1 dispatch band:
+
+        |1V  ABSENT   SET_VIEWPORT_EXT — RIPlib-original.
+        |1X  ABSENT   CLIPBOARD_OP     — RIPlib-original.
+
+     U-026 is therefore CLOSED.  The deviation register loses four
+     entries at zero behavioural cost; behaviour matched in every
+     case, only the standing was wrong.  §A.1 should describe the
+     four as documented commands rather than RIPlib extensions.
 
 §DEV.5 — RIP_SET_WINDOW ('22') draws fixed window chrome:
      Spec §5.10 defines '22' arguments as `x:2 y:2 w:2 h:2` with no

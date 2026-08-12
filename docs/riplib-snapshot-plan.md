@@ -2,7 +2,7 @@
 
 ## What It Is
 
-A pure C drawing library extracted from the A2GSPU card firmware.
+A pure C drawing library extracted from an embedded RIPscrip terminal firmware.
 Platform-independent, zero dependencies beyond `<math.h>` and
 `<string.h>`. Renders to any `uint8_t*` framebuffer.
 
@@ -26,7 +26,7 @@ Platform-independent, zero dependencies beyond `<math.h>` and
   - Text (bitmap 8x8/8x16)
   - Pixel, HLine, VLine
   - Copy rect, Save/Restore region, Get pixel
-  - 5 write modes (COPY, OR, AND, XOR, NOT)
+  - 5 write modes (COPY=0, XOR=1, OR=2, AND=3, NOT=4)
   - 13 fill patterns (11 built-in + user + solid)
   - Clip region (set, save, restore)
   - Dirty-rect callback for efficient refresh
@@ -67,7 +67,7 @@ Platform-independent, zero dependencies beyond `<math.h>` and
 // Implement these for your platform:
 void palette_write_rgb565(uint8_t index, uint16_t rgb565);
 void *gpu_psram_alloc(uint32_t size);  // or just malloc()
-void card_tx_push(const char *buf, int len);  // send to BBS
+void riplib_host_tx(const char *buf, int len);  // send to BBS
 ```
 
 ## What's NOT Included
@@ -109,7 +109,7 @@ for (int i = 0; i < data_len; i++)
 
 Features not in any other BGI implementation:
 - AND + NOT write modes
-- Vertical text CW + CCW (direction 0/1/2)
+- Vertical text: dir 1 bottom-to-top, dir 2 CCW / dir 3 CW top-to-bottom
 - Top-to-bottom vertical text (corrected from Borland bottom-to-top)
 - Font attributes (bold/italic/underline/shadow)
 - 13 native fill patterns (most implementations have 8)
@@ -123,6 +123,6 @@ Features not in any other BGI implementation:
 ## Proven Portability
 
 Already compiles and runs on:
-- RP2350 Cortex-M33 @ 384MHz (A2GSPU card firmware)
+- RP2350 Cortex-M33 @ 384MHz (embedded reference target)
 - x86/x64 Windows (GSSquared emulator, SDL2)
 - Any platform with a C99 compiler + framebuffer

@@ -57,7 +57,13 @@ bool bgi_font_parse(bgi_font_t *font, const uint8_t *data, int size);
 
 /* Draw a string using a BGI stroke font.
  * x, y = baseline origin. scale = 1-10 (RIPscrip charsize).
- * color = palette index. direction = 0(horiz) or 1(vert).
+ * color = palette index.  direction:
+ *   0 = horizontal, left to right
+ *   1 = vertical, BOTTOM TO TOP, CCW glyphs  (BGI VERT_DIR, per the 1.54
+ *       specification; restored 2026-08-12 — see docs/spec §A2G.2)
+ *   2 = vertical, top to bottom, CCW glyphs
+ *   3 = vertical, top to bottom, CW  glyphs
+ * Only direction 1 advances upward; 2 and 3 advance downward.
  * Returns the X advance (total width drawn). */
 int16_t bgi_font_draw_string(const bgi_font_t *font,
                               int16_t x, int16_t y,

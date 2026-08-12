@@ -19,7 +19,7 @@
 #include <time.h>
 
 /* Provided by the host platform (declared in riplib_platform.h). */
-extern void card_tx_push(const char *buf, int len);
+extern void riplib_host_tx(const char *buf, int len);
 
 /* ── private helpers — moved from ripscrip.c with no behavioural change ── */
 
@@ -135,7 +135,7 @@ bool rip_query_prompt_begin(rip_state_t *s,
     for (int k = 0; k < copy; k++)
         prompt_buf[plen++] = vname[k];
     prompt_buf[plen++] = '\0';
-    card_tx_push(prompt_buf, plen);
+    riplib_host_tx(prompt_buf, plen);
 
     copy = vlen < (int)sizeof(s->query_var_name) - 1
          ? vlen
@@ -337,27 +337,27 @@ int rip_expand_variables(rip_state_t *s,
          * All sound variables expand to the empty string in the text stream. */
         } else if (vlen == 4 && memcmp(vname, "BEEP", 4) == 0) {
             /* $BEEP$ — BEL character; host bridge handles audible beep */
-            card_tx_push("\x07", 1);
+            riplib_host_tx("\x07", 1);
             val[0] = '\0';
             vval_len = 0;
         } else if (vlen == 4 && memcmp(vname, "BLIP", 4) == 0) {
             /* $BLIP$ — short click tone; send CMD_PLAY_SOUND token to host */
-            card_tx_push("\x3D" "BLIP\0", 6);  /* marker + "BLIP" + NUL */
+            riplib_host_tx("\x3D" "BLIP\0", 6);  /* marker + "BLIP" + NUL */
             val[0] = '\0';
             vval_len = 0;
         } else if (vlen == 5 && memcmp(vname, "ALARM", 5) == 0) {
             /* $ALARM$ — alarm tone sequence */
-            card_tx_push("\x3D" "ALARM\0", 7);
+            riplib_host_tx("\x3D" "ALARM\0", 7);
             val[0] = '\0';
             vval_len = 0;
         } else if (vlen == 6 && memcmp(vname, "PHASER", 6) == 0) {
             /* $PHASER$ — phaser sweep tone */
-            card_tx_push("\x3D" "PHASER\0", 8);
+            riplib_host_tx("\x3D" "PHASER\0", 8);
             val[0] = '\0';
             vval_len = 0;
         } else if (vlen == 5 && memcmp(vname, "MUSIC", 5) == 0) {
             /* $MUSIC$ — background music cue */
-            card_tx_push("\x3D" "MUSIC\0", 7);
+            riplib_host_tx("\x3D" "MUSIC\0", 7);
             val[0] = '\0';
             vval_len = 0;
 
@@ -409,7 +409,15 @@ int rip_expand_variables(rip_state_t *s,
         /* $YEAR$ — 4-digit current year.
          * DLL ripTextVarEngine @ 0x026218, handler @ 0x0390CA.
          * Use host_date if synced (via rip_sync_date_byte); fall back to local RTC. */
-        } else if (vlen == 4 && memcmp(vname, "YEAR", 4) == 0) {
+        /* $YEAR$ is the TWO-digit year; $FYEAR$ is the four-digit one.
+         * Both names are present as distinct strings in RIPSCRIP.DLL 3.0.7.
+         * RIPlib returned four digits from $YEAR$ until 2026-08-12, which is
+         * a silent mismatch: a host comparing <<IF $YEAR$=26>> saw "2026".
+         * Corrected as part of X1 (see design/bbs-land-alignment.md). */
+        } else if ((vlen == 4 && memcmp(vname, "YEAR", 4) == 0) ||
+                   (vlen == 5 && memcmp(vname, "FYEAR", 5) == 0)) {
+            bool full = (vlen == 5);
+            int yyyy;
             if (s->host_date[0] != '\0') {
                 /* host_date is "MM/DD/YY" — year is the last two digits.
                  * Expand to 4-digit year by assuming 2000+ (BBS era is over). */
@@ -419,12 +427,15 @@ int rip_expand_variables(rip_state_t *s,
                     p_slash2[1] >= '0' && p_slash2[1] <= '9') {
                     yy = (p_slash2[0] - '0') * 10 + (p_slash2[1] - '0');
                 }
-                vval_len = snprintf(val, sizeof(val), "%04d", 2000 + yy);
+                yyyy = 2000 + yy;
             } else {
                 time_t now = time(NULL);
                 struct tm *tm = localtime(&now);
-                vval_len = snprintf(val, sizeof(val), "%04d", 1900 + tm->tm_year);
+                yyyy = 1900 + tm->tm_year;
             }
+            vval_len = full
+                ? snprintf(val, sizeof(val), "%04d", yyyy)
+                : snprintf(val, sizeof(val), "%02d", yyyy % 100);
             if (vval_len < 0) vval_len = 0;
 
         /* $WOYM$ — ISO week-of-year (Monday start), 2-digit string.
@@ -536,7 +547,13 @@ int rip_expand_variables(rip_state_t *s,
             if (vval_len < 0) vval_len = 0;
 
         /* §A2G (v3.2): Time component variables ------------------------- */
-        } else if (vlen == 4 && memcmp(vname, "HOUR", 4) == 0) {
+        /* $HOUR$ is the 12-hour (non-military) hour; $MHOUR$ is the
+         * 24-hour form.  Both names exist as distinct NUL-terminated
+         * strings in RIPSCRIP.DLL 3.0.7, so they are separate variables.
+         * RIPlib previously returned 00-23 from $HOUR$ -- i.e. $MHOUR$'s
+         * value under $HOUR$'s name -- which is silently wrong against any
+         * conforming terminal.  Corrected 2026-08-12 (X2). */
+        } else if (vlen == 5 && memcmp(vname, "MHOUR", 5) == 0) {
             if (s->host_time[0] >= '0' && s->host_time[0] <= '9' &&
                 s->host_time[1] >= '0' && s->host_time[1] <= '9') {
                 val[0] = s->host_time[0]; val[1] = s->host_time[1];
@@ -545,6 +562,22 @@ int rip_expand_variables(rip_state_t *s,
                 time_t now = time(NULL);
                 struct tm *tm = localtime(&now);
                 vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_hour);
+                if (vval_len < 0) vval_len = 0;
+            }
+        } else if (vlen == 4 && memcmp(vname, "HOUR", 4) == 0) {
+            int h24;
+            if (s->host_time[0] >= '0' && s->host_time[0] <= '9' &&
+                s->host_time[1] >= '0' && s->host_time[1] <= '9') {
+                h24 = (s->host_time[0] - '0') * 10 + (s->host_time[1] - '0');
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                h24 = tm->tm_hour;
+            }
+            {   /* 00->12, 13..23 -> 1..11; 01..12 unchanged */
+                int h12 = h24 % 12;
+                if (h12 == 0) h12 = 12;
+                vval_len = snprintf(val, sizeof(val), "%02d", h12);
                 if (vval_len < 0) vval_len = 0;
             }
         } else if (vlen == 3 && memcmp(vname, "MIN", 3) == 0) {
@@ -564,7 +597,28 @@ int rip_expand_variables(rip_state_t *s,
             struct tm *tm = localtime(&now);
             vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_sec);
             if (vval_len < 0) vval_len = 0;
+        /* $WDAY$ is the numeric weekday with 0 = SUNDAY; $DOW$ is the day
+         * spelled out.  Both names are present in the driver.  RIPlib
+         * previously returned a Monday=0 digit from $DOW$, so the README's
+         * own example -- <<IF $DOW$=4>>Happy Friday!<<ENDIF>> -- evaluated
+         * false on every conforming terminal.  Corrected 2026-08-12 (X2). */
+        } else if (vlen == 4 && memcmp(vname, "WDAY", 4) == 0) {
+            int year, month, day, wd;
+            if (s->host_date[0] != '\0' &&
+                rip_parse_host_date(s->host_date, &year, &month, &day)) {
+                wd = (rip_weekday_monday0(year, month, day) + 1) % 7;
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                wd = tm->tm_wday;           /* already 0 = Sunday */
+            }
+            vval_len = snprintf(val, sizeof(val), "%d", wd);
+            if (vval_len < 0) vval_len = 0;
         } else if (vlen == 3 && memcmp(vname, "DOW", 3) == 0) {
+            static const char *const k_days[7] = {
+                "Sunday", "Monday", "Tuesday", "Wednesday",
+                "Thursday", "Friday", "Saturday"
+            };
             int year, month, day, dow;
             if (s->host_date[0] != '\0' &&
                 rip_parse_host_date(s->host_date, &year, &month, &day)) {
@@ -575,9 +629,14 @@ int rip_expand_variables(rip_state_t *s,
                 /* tm_wday: 0=Sunday..6=Saturday. Convert to Monday=0. */
                 dow = (tm->tm_wday + 6) % 7;
             }
-            vval_len = snprintf(val, sizeof(val), "%d", dow);
-            if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 3 && memcmp(vname, "DOM", 3) == 0) {
+            {   /* dow is Monday=0; k_days is indexed Sunday=0 */
+                int idx = (dow + 1) % 7;
+                vval_len = snprintf(val, sizeof(val), "%s", k_days[idx]);
+                if (vval_len < 0) vval_len = 0;
+            }
+        /* The driver has no "DOM" string at all; the day-of-month variable
+         * is $DAY$.  Renamed 2026-08-12 (X2). */
+        } else if (vlen == 3 && memcmp(vname, "DAY", 3) == 0) {
             int year, month, day;
             if (s->host_date[0] != '\0' &&
                 rip_parse_host_date(s->host_date, &year, &month, &day)) {
@@ -588,7 +647,10 @@ int rip_expand_variables(rip_state_t *s,
                 vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_mday);
             }
             if (vval_len < 0) vval_len = 0;
-        } else if (vlen == 5 && memcmp(vname, "MONTH", 5) == 0) {
+        /* $MONTHNUM$ is the numeric month; $MONTH$ is the month spelled
+         * out.  Both names are present in the driver.  Corrected
+         * 2026-08-12 (X2). */
+        } else if (vlen == 8 && memcmp(vname, "MONTHNUM", 8) == 0) {
             int year, month, day;
             if (s->host_date[0] != '\0' &&
                 rip_parse_host_date(s->host_date, &year, &month, &day)) {
@@ -598,6 +660,23 @@ int rip_expand_variables(rip_state_t *s,
                 struct tm *tm = localtime(&now);
                 vval_len = snprintf(val, sizeof(val), "%02d", tm->tm_mon + 1);
             }
+            if (vval_len < 0) vval_len = 0;
+        } else if (vlen == 5 && memcmp(vname, "MONTH", 5) == 0) {
+            static const char *const k_months[12] = {
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            };
+            int year, month, day, m;
+            if (s->host_date[0] != '\0' &&
+                rip_parse_host_date(s->host_date, &year, &month, &day)) {
+                m = month;
+            } else {
+                time_t now = time(NULL);
+                struct tm *tm = localtime(&now);
+                m = tm->tm_mon + 1;
+            }
+            if (m < 1 || m > 12) m = 1;
+            vval_len = snprintf(val, sizeof(val), "%s", k_months[m - 1]);
             if (vval_len < 0) vval_len = 0;
 
         /* §A2G (v3.2): EGA color-name aliases — expand to 2-digit MegaNum

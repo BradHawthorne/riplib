@@ -84,8 +84,35 @@ extern uint16_t palette_read_rgb565(uint8_t index);
 /**
  * Send response bytes back to the BBS (via serial/TCP).
  * Used for query responses, file transfer, mouse events.
+ *
+ * Renamed from card_tx_push in v2.0.0 — the old name carried a specific
+ * consumer's terminology into an API every port must implement.
  */
-extern void card_tx_push(const char *buf, int len);
+extern void riplib_host_tx(const char *buf, int len);
+
+/**
+ * Framebuffer index of EGA colour 0.
+ *
+ * RIPscrip content addresses 16 EGA colours as 0-15.  Where those land in
+ * an 8-bit framebuffer is a PORT decision, not a protocol one: a host that
+ * shares the framebuffer with an xterm-256 text renderer needs the EGA
+ * block out of the way at the top, while a host that owns the whole
+ * framebuffer usually wants it at 0.
+ *
+ * RIPlib defaulted to 240 from v1.x because its first consumer had exactly
+ * that xterm-256 conflict.  That default is kept for compatibility, but it
+ * is now overridable so the policy is no longer baked into the library
+ * (see docs/spec/12-dll-provenance.md D-6).  Define it to 0 for a plain
+ * 16-colour target:
+ *
+ *     cmake -DCMAKE_C_FLAGS=-DRIPLIB_PALETTE_BASE=0
+ */
+#ifndef RIPLIB_PALETTE_BASE
+#define RIPLIB_PALETTE_BASE 240
+#endif
+#if RIPLIB_PALETTE_BASE < 0 || RIPLIB_PALETTE_BASE > 240
+#error "RIPLIB_PALETTE_BASE must be 0..240 (16 EGA entries must fit in 0..255)"
+#endif
 
 /* gpu_psram_alloc was previously declared here but the library uses
  * psram_arena_alloc() exclusively.  Removed to avoid ghost-symbol

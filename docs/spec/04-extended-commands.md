@@ -312,10 +312,16 @@ sizes beyond the standard 1-10 range).
 ---------------------------------------------------------------------
 
      Function:     Set Font Attributes
-     Command:      |f
-     Arguments:    attrib:2 reserved:2
-     Format:       !|f<attrib><res>|
-     Example:      !|f0100|        bold only
+     Command:      |q
+     Arguments:    attrib:2
+     Format:       !|q<attrib>|
+     Example:      !|q01|          bold only
+
+     LETTER CORRECTED 2026-08-12.  This command was documented on
+     '|f' with a reserved second field.  '|f' is RIP_SetWorldFrame
+     in the shipping driver; font attributes are slot 55, '|q',
+     taking a single argument which the driver range-checks <= 0x0F.
+     See docs/spec/12-dll-provenance.md D-1.
 
 Sets font rendering attributes for subsequent text commands.
 

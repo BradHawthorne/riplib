@@ -27,7 +27,7 @@
 #include "riplib_platform.h"
 
 /* ── Silent platform stubs ──────────────────────────────────────── */
-/* Unlike examples/platform_stubs.c which writes card_tx_push bytes to
+/* Unlike examples/platform_stubs.c which writes riplib_host_tx bytes to
  * stdout, the fuzz harness discards everything so the corpus runner's
  * console stays readable. */
 
@@ -41,7 +41,7 @@ uint16_t palette_read_rgb565(uint8_t index) {
     return g_palette[index];
 }
 
-void card_tx_push(const char *buf, int len) {
+void riplib_host_tx(const char *buf, int len) {
     (void)buf;
     (void)len;
 }

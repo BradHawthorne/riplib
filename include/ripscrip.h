@@ -268,7 +268,9 @@ typedef struct {
     int16_t  draw_x, draw_y; /* Current drawing position */
     uint8_t  draw_color;     /* Current drawing color (0-15) */
     uint8_t  back_color;     /* Background color index */
-    uint8_t  write_mode;     /* 0=COPY, 1=OR, 2=AND, 3=XOR, 4=NOT */
+    uint8_t  write_mode;     /* 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT
+                              * (RIPscrip wire order; see drawing.h
+                              * DRAW_MODE_* and docs/spec §2.3) */
     uint8_t  line_style;     /* 0=solid, 1=dotted, 2=center, 3=dashed, 4=user */
     uint16_t line_pattern;   /* Active 16-bit dash pattern passed to drawing.c */
     uint8_t  line_thick;     /* 1 or 3 */
@@ -280,10 +282,34 @@ typedef struct {
     uint8_t  font_hjust;     /* 0=left, 1=center, 2=right (v3.0 ext) */
     uint8_t  font_vjust;     /* 0=bottom, 1=center, 2=top, 3=baseline */
     uint8_t  font_attrib;    /* bit0=bold, bit1=italic, bit2=underline,
-                              * bit3=shadow (set by the 'f' command) */
+                              * bit3=shadow.  Set by the 'q' command
+                              * (RIP_FontAttrib).  NOTE: this was on 'f'
+                              * until 2026-08-12; 'f' is RIP_SetWorldFrame
+                              * in the shipping driver.  See docs/spec/
+                              * 12-dll-provenance.md D-1. */
     uint8_t  font_ext_id;    /* RIP_EXT_FONT_STYLE: 2-digit font selector */
     uint8_t  font_ext_attr;  /* RIP_EXT_FONT_STYLE: 1-digit attribute */
     uint32_t font_ext_size;  /* RIP_EXT_FONT_STYLE: 4-digit point size */
+
+    /* World coordinate frame (RIP_SET_WORLD_FRAME 'f').
+     * The driver's handler (RVA 0x01F874) takes exactly two coordinate
+     * values and rejects any other argument count.  The corpus standard
+     * is '|fZKQO' = 1280x960.  RIPlib stores the frame but does not yet
+     * apply a world->device transform; see docs/spec/12-dll-provenance.md
+     * D-1.  Zero means "never set". */
+    int16_t  world_w, world_h;
+
+    /* RIP_TEXT_METRIC ('r').  The driver validates mode < 4 and
+     * domain < 2 (RVA 0x020371) and computes a metric; the channel it
+     * delivers the result on has not been recovered, so RIPlib records the
+     * request rather than inventing one.  See docs/spec §12.12 D-5. */
+    uint8_t  text_metric_mode;
+    uint8_t  text_metric_domain;
+
+    /* RIP_EXTENDED_FONT_STYLE ('y') character spacing percentage.
+     * Non-zero is enforced by the driver ("Character spacing percentage
+     * cannot be zero!"). 0 means "never set". */
+    uint16_t char_spacing;
 
     /* Extended text window state (RIP_EXT_TEXT_WINDOW 'b') */
     uint8_t  etw_font_id;    /* Font ID for extended text window */
