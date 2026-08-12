@@ -2660,7 +2660,7 @@ static void test_save_icon_slot_out_of_range_is_noop(void) {
     init_fixture(&s, &ctx);
     draw_set_color(0x55);
     draw_rect(0, 0, 1, 1, true);
-    feed_script(&s, &ctx, "!|<00000000|");
+    feed_script(&s, &ctx, "!|1C000000000|");
     /* slot 36 ("10" in MegaNum) is just past RIP_ICON_SLOT_MAX (36). */
     feed_script(&s, &ctx, "!|J10|");
     int any_valid = 0;
@@ -2680,8 +2680,8 @@ static void test_stamp_icon_unset_slot_falls_back_to_clipboard(void) {
     init_fixture(&s, &ctx);
     draw_set_color(0x44);
     draw_rect(2, 2, 1, 1, true);
-    feed_script(&s, &ctx, "!|<02020202|");
-    if (!s.clipboard.valid) { FAIL("setup: <"); return; }
+    feed_script(&s, &ctx, "!|1C020202020|");
+    if (!s.clipboard.valid) { FAIL("setup: |1C"); return; }
     /* Stamp slot 03 (never saved) at (20, 20).  Should use clipboard. */
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|.030K0K000000|");
@@ -2699,7 +2699,7 @@ static void test_save_and_stamp_icon_slot(void) {
     init_fixture(&s, &ctx);
     draw_set_color(88);
     draw_rect(2, 2, 2, 2, true);
-    feed_script(&s, &ctx, "!|<02020202|");
+    feed_script(&s, &ctx, "!|1C020202020|");
     feed_script(&s, &ctx, "!|J05|");
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|.050U0U000000|");
@@ -2717,12 +2717,12 @@ static void test_save_icon_slot_updates_load_alias(void) {
     init_fixture(&s, &ctx);
     draw_set_color(88);
     draw_rect(2, 2, 2, 2, true);
-    feed_script(&s, &ctx, "!|<02020202|");
+    feed_script(&s, &ctx, "!|1C020202020|");
     feed_script(&s, &ctx, "!|J05|");
 
     draw_set_color(99);
     draw_rect(2, 2, 2, 2, true);
-    feed_script(&s, &ctx, "!|<02020202|");
+    feed_script(&s, &ctx, "!|1C020202020|");
     feed_script(&s, &ctx, "!|J05|");
 
     draw_fill_screen(0);
@@ -3391,16 +3391,17 @@ static void test_ext_animation_frame_brace(void) {
 
 static void test_ext_kill_mouse_in_region_K(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|K removes mouse regions intersecting rect");
+    TEST("|1k removes mouse regions enclosed by rect");
     init_fixture(&s, &ctx);
     /* Define a region at (10,10)-(50,50) */
     feed_script(&s, &ctx, "!|1M000A0A1E1E0000000X|");
     if (s.num_mouse_regions != 1) { FAIL("setup: 1M missed"); return; }
-    /* Kill any region intersecting (0,0)-(60,60) — should drop ours.
-     * x0:2 y0:2 x1:2 y1:2 = "00"+"00"+"1O"+"1O" where "1O"=60. */
-    feed_script(&s, &ctx, "!|K00001O1O|");
+    /* Kill enclosed fields with |1k, the command that actually does this.
+     * '|K' is RIP_FILLED_RECTANGLE and no longer touches mouse state.
+     * x0:2 y0:2 x1:2 y1:2 res:4, flags bit 1 = delete contained fields. */
+    feed_script(&s, &ctx, "!|1k00001O1O0001|");
     if (s.num_mouse_regions == 0) PASS();
-    else FAIL("|K did not remove intersecting region");
+    else FAIL("|1k did not remove the enclosed region");
 }
 
 static void test_ext_mouse_region_ext_colon(void) {

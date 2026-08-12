@@ -341,6 +341,46 @@ REFUTED — RIPlib's assignment is incompatible with the binary:
        appears in any string class.  The attribution is REFUTED;
        §A2G.13 extends a command this binary does not contain.
 
+APPLICATION STATUS (added 2026-08-12).  Recording a refutation is not
+the same as acting on it, and for months this register did the former
+without the latter.  Where each entry now stands in the CODE:
+
+  APPLIED   |f   -> RIP_SET_WORLD_FRAME
+            |&   -> RIP_SKEWED_OVAL            (see 12.14)
+            |-   -> RIP_FILLED_SKEWED_OVAL
+            |]   -> RIP_SKEWED_OVAL_ARC
+            |[   -> RIP_SKEWED_OVAL_PIE_SLICE
+            |+   -> RIP_SKEWED_OVAL_CHORD
+            |_   -> RIP_FILLED_OVAL_CHORD
+            |K   -> RIP_FILLED_RECTANGLE.  Handler 0x01bee5 orders
+                    (arg0,arg2) and (arg1,arg3) through 0x1003112e —
+                    normalising x0/x1 and y0/y1, i.e. rectangle setup.
+                    SyncTERM's ripper.c agrees.  The mouse-field kill it
+                    displaced was redundant: '|1k' already does that.
+            |<   -> RIP_POLY_POLYGON.  Handler 0x01e80a reads arg[0] as
+                    a count and walks the rest; ICONS/POLYPOLY.RIP
+                    exercises it and prints "RIP_POLY_POLYGON" on
+                    screen.  Wire layout read off that file:
+                    count:2 { nverts:2 (x:2 y:2)* }*.  Filled even-odd
+                    across all contours, because the demo places a
+                    circle behind the shape to show the holes.
+                    Clipboard capture stays on '|1C'.
+
+  OPEN      |J   arity now matches (one mega2), but RIPlib still calls
+                 it SAVE_ICON where the record says RIP_SET_BASE_MATH.
+                 A naming question, not a rendering bug.
+            |D   RIPlib keeps FILL_PATTERN (8x2 + colour) against a
+                 variable-length entry.  Needs the handler read before
+                 changing; '|d' RIP_OneDrawingPalette is already
+                 separate and correct.
+            |2R  RIPlib's REFRESH takes zero arguments; the entry
+                 records one mega4.
+            |1S  RIPlib keeps IMAGE_STYLE on a letter with no dispatch
+                 entry; the record puts image style on '1i'.
+            |28  RIPlib's GRADIENT_FILL has no entry in this driver.
+                 It may stand as a RIPlib extension, but section 6a
+                 must stop attributing it to TeleGrafix.
+
 SETTLED BY NAME — 52 handlers name themselves in their own error
 paths (scripts/dll-name-handlers.py; segment 13 carries the full
 column).  Where a disputed letter's handler names itself, the

@@ -258,6 +258,68 @@ static int rip_skewed_oval_points(int16_t cx, int16_t cy,
 static bool rip_begin_filled_border(rip_state_t *s, uint8_t *saved_mode);
 static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode);
 
+/* -- Multi-contour (poly-polygon) fill ------------------------------------
+ * '|<' RIP_POLY_POLYGON submits several closed contours as ONE shape, and
+ * the interior is decided by the even-odd rule across all of them together:
+ * where contours overlap, the overlap is a HOLE.  TeleGrafix's own demo
+ * (ICONS/POLYPOLY.RIP) draws a circle behind the shape and comments "so you
+ * can see the transparency aspect", so the holes are the point of the
+ * command -- filling each contour independently would paint them solid and
+ * lose exactly the effect being demonstrated.
+ *
+ * Contours are stored back-to-back in `pts` with `starts[i]`/`counts[i]`
+ * delimiting each one. */
+#define RIP_POLYPOLY_MAX_CONTOURS  32
+#define RIP_POLYPOLY_MAX_PTS      512
+
+static void rip_fill_poly_polygon(const int16_t *pts,
+                                  const int *starts, const int *counts,
+                                  int ncontours)
+{
+    int16_t xs[RIP_POLYPOLY_MAX_PTS];
+    int16_t ymin = 32767, ymax = -32768;
+    int c, i, y, n, a, b;
+
+    for (c = 0; c < ncontours; c++) {
+        for (i = 0; i < counts[c]; i++) {
+            int16_t py = pts[2 * (starts[c] + i) + 1];
+            if (py < ymin) ymin = py;
+            if (py > ymax) ymax = py;
+        }
+    }
+    if (ymin > ymax)
+        return;
+
+    for (y = ymin; y <= ymax; y++) {
+        n = 0;
+        for (c = 0; c < ncontours; c++) {
+            int cnt = counts[c];
+            for (i = 0; i < cnt && n < RIP_POLYPOLY_MAX_PTS; i++) {
+                const int16_t *p0 = &pts[2 * (starts[c] + i)];
+                const int16_t *p1 = &pts[2 * (starts[c] + (i + 1) % cnt)];
+                int16_t y0 = p0[1], y1 = p1[1];
+
+                /* Half-open rule: count an edge only where y0 <= y < y1 (or
+                 * the mirror), so shared vertices are not counted twice. */
+                if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
+                    int32_t dx = (int32_t)p1[0] - p0[0];
+                    int32_t dy = (int32_t)y1 - y0;
+                    xs[n++] = (int16_t)(p0[0] + dx * (y - y0) / dy);
+                }
+            }
+        }
+        /* Insertion sort: spans are short and this avoids pulling in qsort. */
+        for (a = 1; a < n; a++) {
+            int16_t v = xs[a];
+            for (b = a - 1; b >= 0 && xs[b] > v; b--)
+                xs[b + 1] = xs[b];
+            xs[b + 1] = v;
+        }
+        for (a = 0; a + 1 < n; a += 2)
+            draw_line(xs[a], (int16_t)y, xs[a + 1], (int16_t)y);
+    }
+}
+
 /* How the point run from rip_skewed_oval_points() is closed. */
 typedef enum {
     RIP_OVAL_OUTLINE,   /* open run, stroked as a polyline (arc)          */
@@ -3806,22 +3868,36 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL command table entry 42: 'K' = RIP_KILL_MOUSE_FIELDS (4 args: XY,XY,XY,XY).
      * Level 0 'K' removes all mouse regions whose rect intersects (x0,y0)-(x1,y1).
      * Level 1 'K' (above) kills ALL regions unconditionally. */
-    case 'K': /* RIP_KILL_MOUSE_FIELDS — x0:2 y0:2 x1:2 y1:2 */
+    /* Dispatch slot 42 (RVA 0x01bee5), argc 4, all XY — a rectangle, not a
+     * mouse operation.  The handler orders (arg0,arg2) and then (arg1,arg3)
+     * through the pair-ordering helper at 0x1003112e, i.e. it normalises
+     * x0/x1 and y0/y1, which is rectangle setup.  SyncTERM's ripper.c and
+     * bbs-land's reference both bind 'K' to RIP_FILLED_RECTANGLE.
+     *
+     * RIPlib previously ran a mouse-field kill here.  Nothing is lost: the
+     * real killer is '|1k' RIP_KILL_ENCLOSED_MOUSE_FIELDS, which RIPlib
+     * already implements with the flags semantics bbs-land documents. */
+    case 'K': /* RIP_FILLED_RECTANGLE — x0:2 y0:2 x1:2 y1:2 */
         if (len >= 8) {
             int16_t kx0 = mega2(p),     ky0 = scale_y(mega2(p + 2));
             int16_t kx1 = mega2(p + 4), ky1 = scale_y1(mega2(p + 6));
-            uint16_t dst = 0;
-            for (uint16_t i = 0; i < s->num_mouse_regions; i++) {
-                rip_mouse_region_t *r = &s->mouse_regions[i];
-                /* Keep region if it does NOT intersect the kill rectangle */
-                if (r->x1 < kx0 || r->x0 > kx1 ||
-                    r->y1 < ky0 || r->y0 > ky1) {
-                    if (dst != i)
-                        s->mouse_regions[dst] = *r;
-                    dst++;
-                }
+            uint8_t border_mode;
+
+            if (kx0 > kx1) { int16_t t = kx0; kx0 = kx1; kx1 = t; }
+            if (ky0 > ky1) { int16_t t = ky0; ky0 = ky1; ky1 = t; }
+
+            if (s->fill_pattern != 0) {
+                draw_set_color(s->palette[s->fill_color & 0x0F]);
+                draw_rect(kx0, ky0, (int16_t)(kx1 - kx0 + 1),
+                          (int16_t)(ky1 - ky0 + 1), true);
             }
-            s->num_mouse_regions = dst;
+            if (rip_begin_filled_border(s, &border_mode)) {
+                draw_rect(kx0, ky0, (int16_t)(kx1 - kx0 + 1),
+                          (int16_t)(ky1 - ky0 + 1), false);
+                rip_end_filled_border(s, border_mode);
+            } else {
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+            }
         }
         break;
 
@@ -3846,12 +3922,68 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL command table entry 13: '<' = RIP_GET_IMAGE (var, data block).
      * Captures a screen region into the clipboard for later PUT_IMAGE.
      * Minimum data block: x0:2 y0:2 x1:2 y1:2 (8 MegaNum chars). */
-    case '<': /* RIP_GET_IMAGE — x0:2 y0:2 x1:2 y1:2 */
-        if (len >= 8) {
-            int16_t gx0 = mega2(p),     gy0 = scale_y(mega2(p + 2));
-            int16_t gx1 = mega2(p + 4), gy1 = scale_y1(mega2(p + 6));
-            int16_t gw = gx1 - gx0 + 1, gh = gy1 - gy0 + 1;
-            (void)rip_clipboard_capture(s, gx0, gy0, gw, gh);
+    /* Dispatch slot 13 (RVA 0x01e80a), VARIABLE length.  The handler reads
+     * arg[0] as a count and then walks the remaining arguments, and its own
+     * diagnostics are "Must have at least two vertices to make a polygon"
+     * and "Insufficient vertices (2)" — it is a polygon command, not the
+     * fixed rectangle read RIPlib had here.  TeleGrafix's ICONS/POLYPOLY.RIP
+     * exercises it and labels itself RIP_POLY_POLYGON on screen.
+     *
+     * Wire layout, read off that file:
+     *     count:2  then per contour  nverts:2  followed by nverts * (x:2 y:2)
+     *
+     * Clipboard capture is unaffected — '|1G' and the port path still call
+     * rip_clipboard_capture(). */
+    case '<': /* RIP_POLY_POLYGON — count:2 { nverts:2 (x:2 y:2)* }* */
+        if (len >= 2) {
+            int16_t pts[2 * RIP_POLYPOLY_MAX_PTS];
+            int starts[RIP_POLYPOLY_MAX_CONTOURS];
+            int counts[RIP_POLYPOLY_MAX_CONTOURS];
+            int npolys = mega2(p);
+            int off = 2, ncontours = 0, total = 0, c, i;
+            uint8_t border_mode;
+
+            if (npolys > RIP_POLYPOLY_MAX_CONTOURS)
+                npolys = RIP_POLYPOLY_MAX_CONTOURS;
+
+            for (c = 0; c < npolys; c++) {
+                int nv;
+
+                if (off + 2 > len)
+                    break;
+                nv = mega2(p + off);
+                off += 2;
+                /* The driver rejects a contour with fewer than two vertices
+                 * by name; do the same rather than emitting a degenerate
+                 * edge list. */
+                if (nv < 2 || off + 4 * nv > len ||
+                    total + nv > RIP_POLYPOLY_MAX_PTS)
+                    break;
+
+                starts[ncontours] = total;
+                counts[ncontours] = nv;
+                for (i = 0; i < nv; i++) {
+                    pts[2 * (total + i)]     = mega2(p + off + 4 * i);
+                    pts[2 * (total + i) + 1] = scale_y(mega2(p + off + 4 * i + 2));
+                }
+                total += nv;
+                off   += 4 * nv;
+                ncontours++;
+            }
+
+            if (ncontours > 0) {
+                if (s->fill_pattern != 0) {
+                    draw_set_color(s->palette[s->fill_color & 0x0F]);
+                    rip_fill_poly_polygon(pts, starts, counts, ncontours);
+                }
+                if (rip_begin_filled_border(s, &border_mode)) {
+                    for (c = 0; c < ncontours; c++)
+                        draw_polygon(&pts[2 * starts[c]], counts[c], false);
+                    rip_end_filled_border(s, border_mode);
+                } else {
+                    draw_set_color(s->palette[s->draw_color & 0x0F]);
+                }
+            }
         }
         break;
 
