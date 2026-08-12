@@ -1336,7 +1336,37 @@ LIMITS, WHICH MATTER FOR HOW FAR THIS CAN BE PUSHED.
 Requires reading further handler bodies:
 
      * GFXSTYLE facing-bit offsets (bold/italic/underline/shadow)
-     * disambiguation of '|;' and '|d'
+
+     * '|;' — RESOLVED 2026-08-12.  It is RIP_PolyMarker: the handler at
+       RVA 0x01E4FF names itself and validates all three of its scalar
+       fields with distinct diagnostics, which gives the signature
+       outright —
+
+            x:XY y:XY marker:mega2 w:XY h:XY rotation:mega2 flags:mega2
+
+            cmp marker,   0x24  -> "Invalid marker number"
+            cmp rotation, 0x168 -> "Invalid marker rotation angle (>=360)"
+            cmp flags,    3     -> "Invalid marker flags value"
+
+       so marker < 36, rotation < 360, flags <= 3.  TeleGrafix's
+       ICONS/MARKER.RIP ("RIPscrip Markers") exercises exactly numbers
+       0..35, rotations 0..300 and sizes from 1x1 upward, matching every
+       bound.  Class I corroborates: the handler reaches GDI32!Polygon.
+
+       RIPlib had this letter as RIP_BUTTON_EXT and added a MOUSE REGION
+       per call.  That was worse than a wrong shape — the corpus issues
+       361 of these, so a scene of markers manufactured hundreds of
+       phantom clickable areas.  Now corrected, with the driver's own
+       validation reproduced rather than clamping bad fields.
+
+       STILL OPEN, narrowly: the 36 glyph DESIGNS.  They live behind the
+       handler's polygon builder and have not been extracted, so every
+       marker number renders one neutral glyph — correctly placed, sized
+       and rotated, but not the right shape.  Geometry is faithful;
+       glyph identity is not.
+
+     * disambiguation of '|d' — settled: it is RIP_OneDrawingPalette
+       (12.8, B6), with '|D' the block form (12.12).
      * what 0x10012D63 does for '|1k'.  PARTIALLY ANSWERED by class I:
        its chain reaches GDI32!GetStockObject and USER32!FillRect via
        0x10012DE2, so it erases a region — consistent with a mouse-field

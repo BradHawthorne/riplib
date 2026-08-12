@@ -3458,14 +3458,48 @@ static void test_ext_mouse_region_ext_colon(void) {
     else FAIL("|: did not add region");
 }
 
-static void test_ext_button_ext_semicolon(void) {
+static void test_ext_poly_marker_semicolon(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|; adds extended button + region");
+    TEST("|; draws a marker and adds no mouse region");
     init_fixture(&s, &ctx);
-    /* x0:2 y0:2 x1:2 y1:2 style:2 lx:2 ly:2 = 14 chars min */
-    feed_script(&s, &ctx, "!|;05050F0F00000000|");
-    if (s.num_mouse_regions == 1) PASS();
-    else FAIL("|; did not add region");
+    feed_script(&s, &ctx, "!|c0F|");
+    /* x=2S(100) y=2S(100) marker=05 w=0K(20) h=0K(20) rot=00 flags=00 */
+    feed_script(&s, &ctx, "!|;2S2S050K0K0000|");
+    /* The marker must paint, and -- the point of the fix -- must NOT
+     * manufacture a clickable region.  The corpus issues 361 of these. */
+    if (s.num_mouse_regions != 0) {
+        FAIL("|; created a phantom mouse region");
+        return;
+    }
+    {
+        int painted = 0, xx, yy;
+        /* The glyph is an outline, so scan its bounding box rather than
+         * betting on which pixel an edge lands in. */
+        for (yy = 95; yy <= 135 && !painted; yy++)
+            for (xx = 80; xx <= 120 && !painted; xx++)
+                if (draw_get_pixel((int16_t)xx, (int16_t)yy) == s.palette[15])
+                    painted = 1;
+        if (painted)
+            PASS();
+        else
+            FAIL("|; painted no marker");
+    }
+}
+
+static void test_ext_poly_marker_rejects_bad_fields(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|; rejects the fields the driver rejects");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|");
+    /* marker=10(36) is out of range: the handler reports "Invalid marker
+     * number" for >= 0x24, so nothing may be drawn. */
+    feed_script(&s, &ctx, "!|;2S2S100K0K0000|");
+    /* rotation=A0(360) trips "Invalid marker rotation angle (>=360)". */
+    feed_script(&s, &ctx, "!|;2S2S050K0KA000|");
+    if (draw_get_pixel(100, 104) == 0 && draw_get_pixel(100, 114) == 0)
+        PASS();
+    else
+        FAIL("|; drew despite an out-of-range field");
 }
 
 static void test_ext_ext_text_window_b(void) {
@@ -5057,7 +5091,8 @@ int main(void) {
     test_ext_animation_frame_brace();
     test_ext_kill_mouse_in_region_K();
     test_ext_mouse_region_ext_colon();
-    test_ext_button_ext_semicolon();
+    test_ext_poly_marker_semicolon();
+    test_ext_poly_marker_rejects_bad_fields();
     test_ext_ext_text_window_b();
     test_level1_kill_enclosed_mouse_fields();
     test_level3_goto_url_records_without_launching();

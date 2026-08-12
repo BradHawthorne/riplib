@@ -4165,20 +4165,57 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * Registers a clickable visual region only; this variant carries no
      * host-command text (text_len stays 0 via the memset), unlike 1U/1M —
      * intentional per the DLL tables (C-016). */
-    case ';': /* RIP_BUTTON_EXT — x0:2 y0:2 x1:2 y1:2 style:2 lx:2 ly:2 rx:2 ry:2 flags:2 tidx:2 */
-        if (len >= 14 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
-            rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
-            memset(r, 0, sizeof(*r));
-            r->x0     = mega2(p);
-            r->y0     = scale_y(mega2(p + 2));
-            r->x1     = mega2(p + 4);
-            r->y1     = scale_y1(mega2(p + 6));
-            /* style:2 at p+8; label xy at p+10/p+12; flags:2 at p+14 */
-            r->flags  = RIP_MF_ACTIVE;
-            r->active = true;
-            draw_rect(r->x0, r->y0,
-                      r->x1 - r->x0 + 1, r->y1 - r->y0 + 1, false);
-            s->num_mouse_regions++;
+    /* Dispatch slot 12 (RVA 0x01e4ff), argc 7:
+     *     XY, XY, mega2, XY, XY, mega2, mega2
+     * The handler names itself RIP_PolyMarker() and validates each field
+     * with its own diagnostic, which gives the whole signature:
+     *
+     *     cmp marker,   0x24  -> "Invalid marker number"
+     *     cmp rotation, 0x168 -> "Invalid marker rotation angle (>=360)"
+     *     cmp flags,    3     -> "Invalid marker flags value"
+     *
+     * so marker < 36, rotation < 360, flags <= 3.  TeleGrafix's own
+     * ICONS/MARKER.RIP ("RIPscrip Markers") exercises exactly numbers
+     * 0..35, rotations 0..300 and sizes from 1x1 upward, which matches.
+     *
+     * RIPlib previously read this letter as a button, adding a MOUSE
+     * REGION per call and stroking a rectangle.  That was not merely a
+     * wrong shape: the corpus issues 361 of these, so a scene of markers
+     * manufactured hundreds of phantom clickable areas.
+     *
+     * GLYPH SHAPES ARE NOT RECOVERED.  The 36 marker designs live behind
+     * the handler's polygon builder and have not been extracted, so every
+     * marker number currently renders the same neutral glyph, correctly
+     * placed, sized and rotated.  Position and geometry are faithful;
+     * which of the 36 shapes you get is not.  See docs/spec/12 §12.15. */
+    case ';': /* RIP_POLY_MARKER — x:2 y:2 marker:2 w:2 h:2 rotation:2 flags:2 */
+        if (len >= 14) {
+            int16_t mx  = mega2(p),     my = scale_y(mega2(p + 2));
+            int16_t num = mega2(p + 4);
+            int16_t mw  = mega2(p + 6), mh = scale_y(mega2(p + 8));
+            int16_t rot = mega2(p + 10);
+            int16_t mfl = mega2(p + 12);
+
+            /* Reject exactly what the driver rejects, rather than clamping
+             * a bad field into a plausible-looking marker. */
+            if (num < 36 && rot < 360 && mfl <= 3 && mw > 0 && mh > 0) {
+                int16_t pts[8];
+                int32_t cs = rip_cos14(rot), sn = rip_sin14(rot);
+                int16_t hw = (int16_t)(mw / 2), hh = (int16_t)(mh / 2);
+                const int16_t corner[8] = { -1, -1,  1, -1,  1,  1, -1,  1 };
+                int i;
+
+                if (hw < 1) hw = 1;
+                if (hh < 1) hh = 1;
+                for (i = 0; i < 4; i++) {
+                    int32_t X = corner[2 * i]     * hw;
+                    int32_t Y = corner[2 * i + 1] * hh;
+                    pts[2 * i]     = (int16_t)(mx + ((X * cs - Y * sn) >> RIP_Q14));
+                    pts[2 * i + 1] = (int16_t)(my - ((X * sn + Y * cs) >> RIP_Q14));
+                }
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+                draw_polygon(pts, 4, false);
+            }
         }
         break;
 
