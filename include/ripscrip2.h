@@ -50,6 +50,16 @@
 #define RIP2_CMD_SET_REFRESH    'R'  /* Host-triggered screen refresh */
 #define RIP2_CMD_PORT_FLAGS     'F'  /* Extended port attributes (alpha/mode/zorder) */
 
+/* Resource-slot switching (recovered from the driver's dispatch table
+ * 2026-08-12; all take slot:1 flags:2, and each names its own slot in the
+ * handler's validation diagnostic). */
+#define RIP2_CMD_SWITCH_PALETTE      'A'  /* !|2A — RIP_SwitchPalette      */
+#define RIP2_CMD_SWITCH_BUTTON_STYLE 'B'  /* !|2B — RIP_SwitchButtonStyle  */
+#define RIP2_CMD_SWITCH_ENVIRONMENT  'E'  /* !|2E — RIP_SwitchEnvironment  */
+#define RIP2_CMD_SWITCH_TEXT_WINDOW  'T'  /* !|2T — RIP_SwitchTextWindow   */
+#define RIP2_CMD_SLOT_Y              'Y'  /* !|2Y — same shape, target unnamed */
+#define RIP2_CMD_PORT_WRITE          'W'  /* !|2W — RIP_PortWrite (to bitmap) */
+
 void ripscrip2_init(ripscrip2_state_t *s);
 
 /* Process a Level 2 command (called from ripscrip.c when '2' prefix detected).

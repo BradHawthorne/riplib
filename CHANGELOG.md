@@ -56,6 +56,34 @@ backward compatible with 1.2.x. (Candidate C-004 variant A′; see
 
 ### Changed
 
+- **Argument-count overloads are now dispatched (D-2).** The driver accepts
+  several signatures per letter, selected by argument length; RIPlib bound one
+  layout per letter, so any other accepted form was read with the wrong field
+  offsets and drew the wrong picture. `|t`, `|x` and `|z` share a
+  poly-bezier pattern (4-char header, 5-char move-to, 13-char curve-to) whose
+  lengths are distinct, so dispatch is exact. `|h`'s 4- and 6-character forms
+  now read their own layouts instead of being parsed with the 8-character one,
+  which pulled id and flags from past the end of the parameters.
+- **Level-0 `|t` is `RIP_POLY_BEZIER_LINE`, not `RIP_REGION_TEXT` (B8).**
+  Its handler (RVA 0x01E4A4) sits beside `|z` with a structurally identical
+  body plus a write-mode apply — a drawing command. Region text is `|1t`,
+  which RIPlib already implemented, so the correction loses nothing.
+
+### Security
+
+- **`|3G` RIP_GotoURL is opt-in, with a scheme allow-list.** RIPlib still never
+  opens a URL or spawns a process. By default the URL is validated and stored
+  only. An embedder that wants click-through registers a handler with
+  `rip_set_url_handler()`; `javascript:`, `data:`, `file:`, `vbscript:` and
+  everything else outside `http`/`https` are refused outright, even with a
+  handler registered. Over-long URLs are rejected rather than truncated, since
+  truncation can change which host a URL points at.
+- **`$GOTOURL$` routed through the same path.** It was hard-neutered while
+  `|3G` was not, so the same request behaved differently depending on which
+  syntax the BBS used. Both now share the allow-list, validation and opt-in
+  gate. The stream still receives a zero-length response either way, so a host
+  cannot probe whether a handler exists.
+
 - **`card_tx_push` renamed to `riplib_host_tx` (breaking).** One of exactly
   three functions every port must implement, and its old name carried a
   specific consumer's terminology into the public API of a library whose

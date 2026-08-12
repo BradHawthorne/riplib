@@ -723,6 +723,59 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *   1 = protect dest, 2 = unprotect dest
      *   4 = protect src,  8 = unprotect src
      */
+    /* ── Resource-slot switching: !|2A !|2B !|2E !|2T !|2Y ──────────
+     *
+     * All five share the signature slot:1 flags:2.  The driver validates the
+     * slot ("Invalid palette slot number", "Illegal button style slot
+     * number", "Illegal environment slot number", "Illegal text window slot
+     * number") and switches a backing table.  RIPlib keeps one of each
+     * resource, so it validates identically and records the selection rather
+     * than pretending to swap a store it does not have.  Added 2026-08-12;
+     * see docs/spec §12.12 for the parity caveat. */
+    case RIP2_CMD_SWITCH_PALETTE:
+    case RIP2_CMD_SWITCH_BUTTON_STYLE:
+    case RIP2_CMD_SWITCH_ENVIRONMENT:
+    case RIP2_CMD_SWITCH_TEXT_WINDOW:
+    case RIP2_CMD_SLOT_Y: {
+        if (raw_len < 1)
+            break;
+        uint8_t slot = (uint8_t)mega1(raw + 0);
+        if (slot >= RIP_MAX_PORTS)      /* same 36-slot table size as ports */
+            break;                        /* driver rejects out-of-range slots */
+        switch (cmd) {
+        case RIP2_CMD_SWITCH_PALETTE:      s->cur_palette_slot      = slot; break;
+        case RIP2_CMD_SWITCH_BUTTON_STYLE: s->cur_button_style_slot = slot; break;
+        case RIP2_CMD_SWITCH_ENVIRONMENT:  s->cur_environment_slot  = slot; break;
+        case RIP2_CMD_SWITCH_TEXT_WINDOW:  s->cur_text_window_slot  = slot; break;
+        default:                           s->cur_slot_y            = slot; break;
+        }
+        break;
+    }
+
+    /* ── !|2W -- RIP_PortWrite ──────────────────────────────────────
+     *
+     * port:1 x0:2 y0:2 x1:2 y1:2 flags:2 res:2 <filename>
+     * Writes a port's rectangle out to a bitmap FILE.  Diagnostics:
+     * "Invalid port number", "Drawing port is not in use", "Specified
+     * rectangle is empty", "Invalid bitmap filename".
+     *
+     * This is a host filesystem operation.  RIPlib has no filesystem and
+     * deliberately performs no file I/O, so it validates the request the way
+     * the driver does and stops there — consistent with how the library
+     * treats every other storage-oriented command. */
+    case RIP2_CMD_PORT_WRITE: {
+        if (raw_len < 9)
+            break;
+        uint8_t port_num = (uint8_t)mega1(raw + 0);
+        int16_t wx0 = (int16_t)mega2l(raw + 1), wy0 = (int16_t)mega2l(raw + 3);
+        int16_t wx1 = (int16_t)mega2l(raw + 5), wy1 = (int16_t)mega2l(raw + 7);
+        if (port_num >= RIP_MAX_PORTS) break;   /* "Invalid port number"      */
+        if (wx1 <= wx0 || wy1 <= wy0)   break;   /* "rectangle is empty"        */
+        /* No file is written; a filename with no filesystem behind it is not
+         * something this library should pretend to honour. */
+        break;
+    }
+
     case RIP2_CMD_PORT_SWITCH: {
         if (raw_len < 1)
             break;

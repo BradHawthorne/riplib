@@ -121,6 +121,40 @@ typedef struct {
     bool     valid;             /* true if clipboard contains data */
 } rip_clipboard_t;
 
+/* Handler for '|3G' RIP_GotoURL.
+ *
+ * RIPlib NEVER opens a URL or spawns a process itself.  A stream is untrusted
+ * input, and a terminal that acts on it directly is a remote-code-execution
+ * surface -- which is why the $GOTOURL$ text-variable path has been neutered
+ * since SV-2/S2.
+ *
+ * But refusing to expose the request at all just means the feature cannot
+ * work.  The compromise is that the EMBEDDER opts in explicitly:
+ *
+ *   - No handler registered (the default) -- the URL is validated and stored
+ *     in rip_state_t.goto_url and nothing else happens.  A host can poll it.
+ *   - Handler registered -- it is invoked with a URL that has already passed
+ *     RIPlib's own checks, and the host applies its own policy on top
+ *     (prompting the user, checking an allow-list, whatever it needs).
+ *
+ * RIPlib's checks are a floor, not a substitute for the host's judgement:
+ * the URL must be printable with no control characters or whitespace, must
+ * fit the buffer, and must begin with http:// or https://.  Every other
+ * scheme is refused outright -- javascript:, data:, file:, vbscript: and
+ * friends are exactly the payloads that turn "open a link" into code
+ * execution, and no host policy should have to re-litigate them.
+ *
+ * The handler is still called with attacker-influenced data.  Treat it as
+ * such: do not pass it to a shell. */
+struct rip_state_s;
+typedef struct rip_state_s rip_state_t;
+
+typedef void (*rip_url_handler_t)(const char *url, int len);
+
+/* Register (or clear, with NULL) the URL handler for this session.
+ * Call after rip_init_first(), which zeroes the state. */
+void rip_set_url_handler(rip_state_t *s, rip_url_handler_t handler);
+
 /* Text block state (1T/1t/1E) */
 typedef struct {
     int16_t  x0, y0, x1, y1;   /* Text region bounds */
@@ -158,6 +192,24 @@ typedef struct {
     uint8_t  port_alpha[36];      /* 0=transparent, 35=fully opaque */
     uint8_t  port_comp_mode[36];  /* Compositing mode per port (0=COPY) */
     uint8_t  port_zorder[36];     /* Z-order per port */
+
+    /* Level 2 resource-slot selection (added 2026-08-12).
+     *
+     * The driver keeps a table of slots for each of these resources and
+     * switches between them with '|2A' / '|2B' / '|2E' / '|2T'.  RIPlib keeps
+     * exactly ONE of each resource, so switching cannot swap a backing store;
+     * what it can do is validate the slot the way the driver does ("Invalid
+     * palette slot number", "Illegal button style slot number", …) and record
+     * which slot the stream believes is active, so the selection is visible
+     * to an embedder and does not silently vanish.
+     *
+     * This is a deliberate partial implementation, not a claim of parity —
+     * see docs/spec §12.12. */
+    uint8_t  cur_palette_slot;
+    uint8_t  cur_button_style_slot;
+    uint8_t  cur_environment_slot;
+    uint8_t  cur_text_window_slot;
+    uint8_t  cur_slot_y;          /* '|2Y': same signature, target unnamed */
 } ripscrip2_state_t;
 
 /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────────── *
@@ -251,7 +303,7 @@ typedef struct {
  * ───────────────────────────────────────────────────────────────── */
 
 /* RIPscrip parser state */
-typedef struct {
+struct rip_state_s {
     uint8_t  state;          /* Current FSM state (RIP_ST_* constants, 0-13) */
     uint8_t  prev_state;     /* Saved state for line-continuation restore */
     char     cmd_buf[256];   /* Command parameter accumulator */
@@ -305,6 +357,34 @@ typedef struct {
      * request rather than inventing one.  See docs/spec §12.12 D-5. */
     uint8_t  text_metric_mode;
     uint8_t  text_metric_domain;
+
+    /* Level 3 state (added 2026-08-12 with the Level 3 dispatch).
+     *
+     * goto_url: the URL from '|3G' RIP_GotoURL, validated but NEVER acted on.
+     * RIPlib does not launch URLs or spawn processes -- see the $GOTOURL$
+     * policy note in ripscrip.c.  An embedder that wants click-through reads
+     * this and applies its own policy.  Empty means "none received". */
+    char     goto_url[128];
+    /* Opt-in handler; NULL (the default) means the URL is stored only. */
+    rip_url_handler_t url_handler;
+    /* '|3U' RIP_BeginEncodedStream announcement. The payload format has not
+     * been recovered, so the announcement is recorded, not decoded. */
+    uint16_t encoded_stream_type;
+    uint32_t encoded_stream_len;
+    /* '|3e' style-slot protection flag. RIPlib keeps one graphics style
+     * rather than a slot table; slot 0 is rejected as the driver does. */
+    uint8_t  style_slot_protected;
+    /* '|1c' RIP_SetMouseCursor selection. RIPlib renders no pointer, so the
+     * choice is recorded for an embedder that does. */
+    uint8_t  mouse_cursor_id;
+
+    /* Poly-bezier family pen state ('|t' '|x' '|z').  The driver's 5-char
+     * signature is a move-to and its 13-char signature is a curve-to that
+     * continues from wherever the pen is, so the current point has to
+     * persist between commands.  See D-2 in docs/spec §12.12. */
+    int16_t  bez_x, bez_y;
+    bool     bez_valid;
+    uint16_t bez_steps;
 
     /* RIP_EXTENDED_FONT_STYLE ('y') character spacing percentage.
      * Non-zero is enforced by the driver ("Character spacing percentage
@@ -512,7 +592,7 @@ typedef struct {
         int16_t vp_x0, vp_y0, vp_x1, vp_y1;
     } state_stack[8];
     uint8_t state_stack_depth;
-} rip_state_t;
+};
 
 #define RIP_STATE_STACK_MAX 8
 

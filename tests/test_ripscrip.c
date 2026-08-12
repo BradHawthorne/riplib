@@ -3242,19 +3242,44 @@ static void test_l0_no_more_hash(void) {
     PASS();
 }
 
-static void test_l0_region_text_t(void) {
+/* Region text is '|1t' (Level 1), not level-0 '|t'.  Corrected 2026-08-12
+ * (B8): the driver's level-0 '|t' handler sits beside '|z' with an identical
+ * body and applies a write mode — it is RIP_POLY_BEZIER_LINE, a drawing
+ * command.  This test previously exercised region text through '|t'. */
+static void test_l1_region_text_t(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|t renders justified text inside a text block");
+    TEST("|1t renders justified text inside a text block");
     init_fixture(&s, &ctx);
-    /* 1T begins a text block (10,10)-(50,30) so that L0 |t can render. */
+    /* 1T begins a text block (10,10)-(50,30) so that |1t can render. */
     feed_script(&s, &ctx, "!|1T0A0A1E1E00|");
     if (!s.text_block.active) { FAIL("setup: 1T missed"); return; }
-    feed_script(&s, &ctx, "!|t0X|");
+    feed_script(&s, &ctx, "!|1t0X|");
     int found = 0;
     for (int x = 8; x < 30 && !found; x++)
         for (int y = 8; y < 40 && !found; y++)
             if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
-    if (found) PASS(); else FAIL("|t drew nothing");
+    if (found) PASS(); else FAIL("|1t drew nothing");
+}
+
+/* D-2: each poly-bezier letter accepts three signatures selected by length.
+ * Before the fix, only one layout parsed and the others silently drew wrong. */
+static void test_poly_bezier_signature_dispatch(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|z accepts the move-to and curve-to signatures (D-2)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|z0004|\r\n");            /*  4 chars: header    */
+    feed_script(&s, &ctx, "!|z10A0A|\r\n");           /*  5 chars: move-to   */
+    if (!s.bez_valid || s.bez_x != 10) { FAIL("move-to did not set the pen"); return; }
+    /* 13 chars: count:1 then six 2-char values —
+     * c1=(14,1E) c2=(28,32) end=(3C,46).  "3C" base-36 = 120. */
+    feed_script(&s, &ctx, "!|z1141E28323C46|\r\n");
+    if (s.bez_x != 120) { FAIL("curve-to did not advance the pen to the endpoint"); return; }
+    int lit = 0;
+    for (int x = 0; x < 200; x++)
+        for (int y = 0; y < 200; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) lit++;
+    if (lit > 0) PASS();
+    else FAIL("curve-to drew nothing");
 }
 
 static void test_l0_custom_fill_pattern_s(void) {
@@ -3400,6 +3425,124 @@ static void test_ext_ext_text_window_b(void) {
     feed_script(&s, &ctx, "!|b05050F0F0F00000A04000|");
     if (s.tw_active && s.etw_fore_col == 15) PASS();
     else FAIL("|b did not activate ext text window");
+}
+
+/* Commands recovered from the driver's dispatch table 2026-08-12, completing
+ * coverage across all four levels. */
+static void test_level3_goto_url_records_without_launching(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G records the URL and launches nothing");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|3Ghttp://example.com/x|");
+    if (strcmp(s.goto_url, "http://example.com/x") != 0) {
+        FAIL("|3G did not record the URL"); return;
+    }
+    /* Security: RIPlib never launches. Nothing may be sent to the host. */
+    tx_reset();
+    feed_script(&s, &ctx, "!|3Ghttp://evil.example/y|");
+    if (tx_len == 0) PASS();
+    else FAIL("|3G emitted host traffic");
+}
+
+/* The opt-in compromise: no handler = inert; handler = invoked, but only for
+ * URLs that already passed RIPlib's scheme allow-list. */
+static int url_cb_calls;
+static char url_cb_last[128];
+static void url_cb(const char *u, int n) {
+    url_cb_calls++;
+    int c = n < (int)sizeof(url_cb_last) - 1 ? n : (int)sizeof(url_cb_last) - 1;
+    memcpy(url_cb_last, u, (size_t)c);
+    url_cb_last[c] = '\0';
+}
+
+static void test_level3_url_handler_opt_in(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G invokes a handler only when one is registered");
+    init_fixture(&s, &ctx);
+    url_cb_calls = 0;
+    /* default: no handler -> stored, never invoked */
+    feed_script(&s, &ctx, "!|3Ghttp://a.example/1|\r\n");
+    if (url_cb_calls != 0) { FAIL("handler ran without being registered"); return; }
+    if (strcmp(s.goto_url, "http://a.example/1") != 0) {
+        FAIL("URL not stored in the default configuration"); return;
+    }
+    rip_set_url_handler(&s, url_cb);
+    feed_script(&s, &ctx, "!|3Ghttp://a.example/2|\r\n");
+    if (url_cb_calls == 1 && strcmp(url_cb_last, "http://a.example/2") == 0) PASS();
+    else FAIL("registered handler was not invoked with the URL");
+}
+
+static void test_level3_url_scheme_allowlist(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G refuses dangerous URL schemes even with a handler registered");
+    init_fixture(&s, &ctx);
+    rip_set_url_handler(&s, url_cb);
+    url_cb_calls = 0;
+    feed_script(&s, &ctx, "!|3Gjavascript:alert(1)|\r\n");
+    feed_script(&s, &ctx, "!|3Gfile:///etc/passwd|\r\n");
+    feed_script(&s, &ctx, "!|3Gdata:text/html;base64,AAA|\r\n");
+    feed_script(&s, &ctx, "!|3Gvbscript:x|\r\n");
+    if (url_cb_calls != 0) { FAIL("a dangerous scheme reached the handler"); return; }
+    if (s.goto_url[0] != '\0') { FAIL("a dangerous scheme was stored"); return; }
+    feed_script(&s, &ctx, "!|3GHTTPS://ok.example/z|\r\n");   /* case-insensitive */
+    if (url_cb_calls == 1) PASS();
+    else FAIL("uppercase HTTPS was refused");
+}
+
+static void test_level3_goto_url_rejects_control_chars(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G rejects control characters in the URL");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|3Ghttp://ok.example|\r\n");
+    feed_script(&s, &ctx, "!|3Gbad\007url|\r\n");
+    if (strcmp(s.goto_url, "http://ok.example") == 0) PASS();
+    else FAIL("|3G accepted an invalid URL character");
+}
+
+static void test_level3_encoded_stream_announcement(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3U records the encoded-stream announcement");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|3U050010|");
+    if (s.encoded_stream_type == 5) PASS();   /* mega2("05") = 5 */
+    else FAIL("|3U did not record the stream type");
+}
+
+static void test_level2_switch_palette_slot(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|2A records the palette slot and rejects out-of-range");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2A500|\r\n");            /* slot 5 */
+    if (s.rip2_state.cur_palette_slot != 5) {
+        FAIL("|2A did not record slot 5"); return;
+    }
+    feed_script(&s, &ctx, "!|2AZ00|\r\n");            /* slot 35 = max valid */
+    if (s.rip2_state.cur_palette_slot == 35) PASS();
+    else FAIL("|2A rejected a valid slot");
+}
+
+static void test_level1_copy_blit(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1g COPY_BLIT copies a region");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|S0104|B0A0A1414|");      /* filled source block */
+    feed_script(&s, &ctx, "!|1g0A0A14143C3C00|");     /* blit it elsewhere */
+    /* dest is mega2("3C") = 120 in x, scale_y(120) in y */
+    int lit = 0;
+    for (int x = 118; x < 150; x++)
+        for (int y = 130; y < 175; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) lit++;
+    if (lit > 0) PASS();
+    else FAIL("|1g copied nothing");
+}
+
+static void test_level1_image_style(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1i RIP_ImageStyle sets the image area and mode");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1i0A0A32320002|");
+    if (s.icon_style_active && s.icon_style_x0 == 10 && s.image_style == 2) PASS();
+    else FAIL("|1i did not record the image style");
 }
 
 /* D-5: the four commands present in the driver's dispatch table but missing
@@ -4823,7 +4966,8 @@ int main(void) {
     test_l0_erase_window_e();
     test_l0_erase_eol();
     test_l0_no_more_hash();
-    test_l0_region_text_t();
+    test_l1_region_text_t();
+    test_poly_bezier_signature_dispatch();
     test_l0_custom_fill_pattern_s();
     test_l0_fill_style_S_pattern_clamped();
     test_soh_introducer_starts_command();
@@ -4837,6 +4981,14 @@ int main(void) {
     test_ext_mouse_region_ext_colon();
     test_ext_button_ext_semicolon();
     test_ext_ext_text_window_b();
+    test_level3_goto_url_records_without_launching();
+    test_level3_url_handler_opt_in();
+    test_level3_url_scheme_allowlist();
+    test_level3_goto_url_rejects_control_chars();
+    test_level3_encoded_stream_announcement();
+    test_level2_switch_palette_slot();
+    test_level1_copy_blit();
+    test_level1_image_style();
     test_cmd_j_point();
     test_cmd_r_text_metric();
     test_cmd_x_filled_poly_bezier();

@@ -540,7 +540,35 @@ These are NOT deviations.  Each is a place where RIPlib's behaviour
 is wrong against the driver and no decision has been taken.  Listed
 so they are tracked rather than absorbed silently.
 
-D-1  '|f' IS PARSED AS FONT_ATTRIB, BUT IT IS RIP_SetWorldFrame.
+D-1  RESOLVED 2026-08-12 — and the resolution reverses the original
+     recommendation.
+
+     The letter half is fixed: '|f' is RIP_SetWorldFrame and font attributes
+     moved to '|q'.  What remained was the claim that RIPlib still owed a
+     world->device coordinate transform.  Measurement says it does not.
+
+     Sampling every 2-character coordinate in the L/R/B commands of the
+     shipped RIPtel 3.1 scenes that set the corpus-standard frame
+     '|fZKQO' (1280x960):
+
+          coordinate values sampled : 31,036
+          values greater than 640   :    119   (0.4%)
+          maximum value observed    :  1,280
+
+     Content authored in a 1280x960 world space would spread across that
+     range.  It does not: 99.6% of coordinates are already device-space.
+     Applying a world->device scale would therefore shrink almost the whole
+     corpus to half size — the transform would be the regression, not its
+     absence.
+
+     RIPlib stores the frame (so it is available to an embedder) and applies
+     no scaling.  That is now a measured decision rather than an unfinished
+     one.  The handful of values reaching exactly 1280 are worth a second
+     look if full-canvas content ever turns up, but nothing in the shipped
+     corpus needs the transform.
+
+     Original entry, retained for context:
+     '|f' WAS PARSED AS FONT_ATTRIB, BUT IT IS RIP_SetWorldFrame.
      Severity: high — this is live corpus content, not a corner case.
      The handler names itself RIP_SetWorldFrame and takes two XY
      coordinate pairs; RIPlib reads two MegaNums as attrib:2 res:2.
@@ -551,12 +579,36 @@ D-1  '|f' IS PARSED AS FONT_ATTRIB, BUT IT IS RIP_SetWorldFrame.
      1 argument — the driver's own home for them) and implement '|f'
      as the world frame.  Both halves change wire behaviour.
 
-D-2  FIXED-ARITY DISPATCH CANNOT ACCEPT ALL VALID STREAMS.
-     Severity: medium.  See 12.11 — the driver overloads letters by
-     argument count ('|h' has six signatures; '|t', '|x', '|z' have
-     three each).  RIPlib binds one arity per letter, so alternate
-     forms mis-parse, and because a wrong length shifts every
-     subsequent field the failure is silent.
+D-2  RESOLVED 2026-08-12.  Length-based signature dispatch implemented
+     for all four overloaded letters.
+
+     '|t', '|x' and '|z' share one three-signature pattern whose lengths
+     are distinct, so dispatch is exact:
+
+          4 chars   count:2 steps:2                header
+          5 chars   count:1 x:XY y:XY              move-to
+         13 chars   count:1 + three XY pairs       curve-to, continuing
+                                                   from the current point
+
+     That is an ordinary poly-bezier stream, and it also settled B8's
+     claim about '|t': the driver's level-0 '|t' handler (RVA 0x01E4A4)
+     sits beside '|z' (0x01E449) with a structurally identical body and
+     an added write-mode apply.  It is RIP_POLY_BEZIER_LINE, not
+     RIP_REGION_TEXT.  Region text is '|1t', which RIPlib already had, so
+     correcting the letter lost nothing.
+
+     '|h' carries six signatures on one handler.  Lengths 4 and 6 are
+     unambiguous and now read their own layouts — previously they were
+     read with the 8-character layout, which pulled the id and flags from
+     past the end of the parameters.  The two 8-character forms and the
+     two 3-character forms are NOT separable by length; the driver selects
+     between them on state we have not recovered, so the documented form
+     is kept for those and the ambiguity is recorded rather than guessed.
+
+     Scope note: the FSM accumulates parameters to the closing '|', so a
+     wrong arity never desynchronised the frame.  The damage was confined
+     to misreading fields within the one command — wrong picture, right
+     stream position.
 
 D-3  '!' TRIGGERS ANYWHERE IN A LINE.
      Severity: low-medium.  The IDLE handler enters GOT_BANG on any

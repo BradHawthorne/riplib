@@ -1364,6 +1364,137 @@ void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
         comp_set_cursor(c, 0, 0);
 }
 
+/* Scheme allow-list for '|3G' RIP_GotoURL.
+ *
+ * Only http:// and https:// are permitted.  This is a categorical refusal
+ * rather than a policy knob: javascript:, data:, file:, vbscript: and the
+ * like are the payloads that convert "open a link" into code execution or
+ * local-file disclosure, and an embedder should not have to know that list
+ * to be safe.  A host that wants a broader set can read s->goto_url itself.
+ *
+ * Case-insensitive, since schemes are. */
+static bool rip_url_scheme_allowed(const char *u, int len) {
+    static const char *const allowed[] = { "http://", "https://" };
+    for (size_t k = 0; k < sizeof(allowed) / sizeof(allowed[0]); k++) {
+        int n = (int)strlen(allowed[k]);
+        if (len <= n)
+            continue;                     /* scheme alone is not a URL */
+        int match = 1;
+        for (int i = 0; i < n; i++) {
+            char c = u[i];
+            if (c >= 'A' && c <= 'Z')
+                c = (char)(c - 'A' + 'a');
+            if (c != allowed[k][i]) { match = 0; break; }
+        }
+        if (match)
+            return true;
+    }
+    return false;
+}
+
+void rip_set_url_handler(rip_state_t *s, rip_url_handler_t handler) {
+    if (s)
+        s->url_handler = handler;
+}
+
+/* Poly-bezier family — '|t' (line), '|x' (filled), '|z' (outline).
+ *
+ * D-2, fixed 2026-08-12.  The driver accepts THREE distinct signatures for
+ * each of these letters, selected by ARGUMENT LENGTH, and their handlers sit
+ * adjacent in .text with structurally identical bodies:
+ *
+ *      4 chars   count:2  steps:2                    header  (no geometry)
+ *      5 chars   count:1  x:XY y:XY                  move-to (start point)
+ *     13 chars   count:1  x:XY y:XY x:XY y:XY x:XY y:XY
+ *                                                    curve-to: two control
+ *                                                    points plus an endpoint,
+ *                                                    continuing from the
+ *                                                    current point
+ *
+ * That is an ordinary poly-bezier stream: a header, a move, then a run of
+ * curve-to segments each contributing three points to a cubic whose first
+ * point is wherever the pen already is.
+ *
+ * RIPlib previously bound ONE layout per letter, so every other accepted form
+ * shifted each subsequent field and rendered silently wrong — a wrong length
+ * does not error, it just draws the wrong picture.  Dispatching on length
+ * removes that whole class of failure.
+ *
+ * RIPlib's own variable-length form (nsegs:2 nsteps:2 then four XY pairs per
+ * segment) is what its existing content and fixtures use, so it is kept and
+ * handled last.
+ *
+ * mode: 0 = line ('|t'), 1 = filled ('|x'), 2 = outline ('|z').
+ */
+static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
+                                   int mode) {
+    if (len == 4) {                       /* header: count, steps */
+        s->bez_steps = (uint16_t)mega2(p + 2);
+        return;
+    }
+    if (len == 5) {                       /* move-to */
+        s->bez_x = mega2(p + 1);
+        s->bez_y = scale_y(mega2(p + 3));
+        s->bez_valid = true;
+        return;
+    }
+    if (len == 13) {                      /* curve-to from the current point */
+        int16_t c1x = mega2(p + 1),  c1y = scale_y(mega2(p + 3));
+        int16_t c2x = mega2(p + 5),  c2y = scale_y(mega2(p + 7));
+        int16_t ex  = mega2(p + 9),  ey  = scale_y(mega2(p + 11));
+        int16_t sx = s->bez_valid ? s->bez_x : c1x;
+        int16_t sy = s->bez_valid ? s->bez_y : c1y;
+
+        if (mode == 1) {
+            /* Filled: flatten the segment and hand the closed outline to the
+             * scanline filler, matching how '|x' renders its long form. */
+            int16_t pts[2 * 16];
+            int n = 0;
+            for (int k = 0; k <= 12 && n < 16; k++, n++) {
+                float t = (float)k / 12.0f, mt = 1.0f - t;
+                float a = mt*mt*mt, b = 3.0f*mt*mt*t, c = 3.0f*mt*t*t, d = t*t*t;
+                pts[n*2]     = (int16_t)(a*sx + b*c1x + c*c2x + d*ex);
+                pts[n*2 + 1] = (int16_t)(a*sy + b*c1y + c*c2y + d*ey);
+            }
+            if (n >= 3)
+                draw_polygon(pts, n, s->fill_pattern != 0);
+        } else {
+            draw_bezier(sx, sy, c1x, c1y, c2x, c2y, ex, ey);
+        }
+        s->bez_x = ex;
+        s->bez_y = ey;
+        s->bez_valid = true;
+        return;
+    }
+
+    /* RIPlib's multi-segment form: nsegs:2 nsteps:2 then 4 XY pairs each. */
+    if (len >= 4) {
+        int nsegs = mega2(p), offset = 4;
+        for (int seg = 0; seg < nsegs && offset + 16 <= len; seg++) {
+            int16_t bx0 = mega2(p + offset),      by0 = scale_y(mega2(p + offset + 2));
+            int16_t bx1 = mega2(p + offset + 4),  by1 = scale_y(mega2(p + offset + 6));
+            int16_t bx2 = mega2(p + offset + 8),  by2 = scale_y(mega2(p + offset + 10));
+            int16_t bx3 = mega2(p + offset + 12), by3 = scale_y(mega2(p + offset + 14));
+            if (mode == 1) {
+                int16_t pts[2 * 16];
+                int n = 0;
+                for (int k = 0; k <= 12 && n < 16; k++, n++) {
+                    float t = (float)k / 12.0f, mt = 1.0f - t;
+                    float a = mt*mt*mt, b = 3.0f*mt*mt*t, c = 3.0f*mt*t*t, d = t*t*t;
+                    pts[n*2]     = (int16_t)(a*bx0 + b*bx1 + c*bx2 + d*bx3);
+                    pts[n*2 + 1] = (int16_t)(a*by0 + b*by1 + c*by2 + d*by3);
+                }
+                if (n >= 3)
+                    draw_polygon(pts, n, s->fill_pattern != 0);
+            } else {
+                draw_bezier(bx0, by0, bx1, by1, bx2, by2, bx3, by3);
+            }
+            s->bez_x = bx3; s->bez_y = by3; s->bez_valid = true;
+            offset += 16;
+        }
+    }
+}
+
 static void execute_rip_command(rip_state_t *s, void *ctx) {
     comp_context_t *c = (comp_context_t *)ctx;
     const char *p = s->cmd_buf;
@@ -1377,15 +1508,106 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     apply_draw_state(s);
 
     if (s->is_level3) {
-        /* Level 3 commands (prefixed with '3') — RIPscrip 3.0 extensions.
-         * DLL command table: 5 entries at level 3 (entries 125-129 of 129
-         * total).  Command letters and argument counts are not publicly
-         * documented and no real-world BBS is known to send them.
+        /* Level 3 commands (prefixed with '3').
          *
-         * INTENTIONAL: accept and silently discard so a stray Level 3
-         * command does not poison the stream and trigger ERROR_RECOVERY,
-         * which would consume the next several !|... frames as resync. */
-        (void)s->cmd_char;
+         * IMPLEMENTED 2026-08-12.  This block previously discarded every
+         * Level 3 command on the grounds that the letters were "not publicly
+         * documented".  They are now recovered from the driver's own dispatch
+         * table (docs/spec/13-dll-command-table.md), with argument widths from
+         * each entry's type bytes and field meanings from each handler's
+         * validation diagnostics.  Discarding them silently meant a stream
+         * using any of the five rendered nothing with no diagnosis. */
+        switch (s->cmd_char) {
+
+        case 'G': /* RIP_GotoURL — url:string
+                   * Handler RVA 0x0251CB.  Diagnostics: "No URL string
+                   * present", "Invalid URL character found", "URL too long".
+                   *
+                   * SECURITY: RIPlib does NOT launch anything.  The existing
+                   * $GOTOURL$ path is deliberately neutered (see "Fix SV-2/S2"
+                   * below in this file) precisely so a hostile stream cannot
+                   * make the terminal open a URL or spawn a process.  That
+                   * decision governs here too: the URL is validated and stored
+                   * for the embedder to display or act on under its own policy,
+                   * and nothing is launched.  A host that wants click-through
+                   * reads s->goto_url and decides for itself. */
+            if (len > 0 && len < (int)sizeof(s->goto_url)) {
+                /* "URL too long" is a rejection, not a truncation: silently
+                 * shortening a URL can change which host it points at. */
+                int ok = 1;
+                for (int i = 0; i < len; i++) {
+                    /* "Invalid URL character found": a URL field carries no
+                     * control bytes and no whitespace. */
+                    if ((unsigned char)p[i] < 0x21 || (unsigned char)p[i] > 0x7E) {
+                        ok = 0;
+                        break;
+                    }
+                }
+                /* Scheme allow-list.  Everything except http/https is refused
+                 * outright -- javascript:, data:, file:, vbscript: and friends
+                 * are what turn "open a link" into code execution, and no host
+                 * policy should have to re-litigate them. */
+                if (ok && !rip_url_scheme_allowed(p, len))
+                    ok = 0;
+                if (ok) {
+                    memcpy(s->goto_url, p, (size_t)len);
+                    s->goto_url[len] = '\0';
+                    /* Opt-in only.  With no handler registered the URL is
+                     * merely stored -- RIPlib itself launches nothing, ever. */
+                    if (s->url_handler)
+                        s->url_handler(s->goto_url, len);
+                }
+            }
+            break;
+
+        case 'U': /* RIP_BeginEncodedStream — type:2 length:4
+                   * Handler RVA 0x0252C0.  "Illegal type parameter 1".
+                   * The encoded-stream payload format is not recovered, so
+                   * RIPlib records the announcement rather than attempting to
+                   * decode a stream it cannot interpret. */
+            if (len >= 6) {
+                s->encoded_stream_type = (uint16_t)mega2(p);
+                s->encoded_stream_len  = (uint32_t)mega4(p + 2);
+            }
+            break;
+
+        case 'R': /* Register text variable — id:4 flags:2 name:string
+                   * Handler RVA 0x0252F2.  Diagnostics: "Can't register text
+                   * variable - invalid variable name".  Maps onto RIPlib's
+                   * existing user-variable store. */
+            if (len >= 6) {
+                const char *nm = p + 6;
+                int nlen = len - 6;
+                if (nlen > 0)
+                    (void)rip_user_var_set(s, nm, nlen, "", 0);
+            }
+            break;
+
+        case 'e': /* Style-slot protection — slot:2
+                   * Handler RVA 0x038BE1.  Diagnostics: "Cannot protect style
+                   * slot #0", "Current style slot is protected".  RIPlib keeps
+                   * one graphics style rather than a slot table, so the
+                   * protect flag is recorded; slot 0 is rejected as the driver
+                   * does. */
+            if (len >= 2) {
+                uint16_t slot = (uint16_t)mega2(p);
+                if (slot != 0)
+                    s->style_slot_protected = 1;
+            }
+            break;
+
+        case 'D': /* Two dispatch slots (122 and 125) carry 'D' with distinct
+                   * handlers (RVA 0x038BD2 and 0x024AF4), both taking a single
+                   * 4-digit field.  Which one a stream reaches is selected by
+                   * state we have not recovered, and neither handler names
+                   * itself.  Accepted and consumed so the frame stays in sync;
+                   * deliberately not acted on.  See docs/spec §12.12. */
+            break;
+
+        default:
+            /* Unknown Level 3 letter: consume without poisoning the stream. */
+            break;
+        }
         return;
     }
 
@@ -1735,6 +1957,118 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 }
             }
             break;
+        /* ── Level 1 commands recovered from the driver 2026-08-12 ──────
+         *
+         * These eight were in the driver's dispatch table but absent from
+         * RIPlib.  Argument widths come from each entry's type bytes, field
+         * meanings from each handler's validation diagnostics
+         * (docs/spec §13.5).  Where RIPlib has the machinery the command is
+         * performed; where the command is a host filesystem or windowing
+         * operation the library deliberately does not have, it is validated
+         * the way the driver validates it and recorded, not faked. */
+
+        case 'g': /* COPY_BLIT — sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY
+                   *             mode:1 res:1     (handler RVA 0x00B7A4,
+                   *             "Illegal mode parameter")
+                   * A real blit, and RIPlib has the machinery for it. */
+            if (len >= 12) {
+                int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
+                int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
+                int16_t dx  = mega2(p + 8),  dy  = scale_y(mega2(p + 10));
+                uint8_t bmode = (len >= 13) ? (uint8_t)mega_digit(p[12]) : 0;
+                if (bmode <= DRAW_MODE_NOT && sx1 >= sx0 && sy1 >= sy0) {
+                    uint8_t saved = s->write_mode;
+                    draw_set_write_mode(bmode);
+                    draw_copy_rect(sx0, sy0, dx, dy,
+                                   (int16_t)(sx1 - sx0 + 1),
+                                   (int16_t)(sy1 - sy0 + 1));
+                    draw_set_write_mode(saved);
+                }
+            }
+            break;
+
+        case 'i': /* RIP_ImageStyle — x0:XY y0:XY x1:XY y1:XY flags:4 res
+                   * Handler RVA 0x00C39A, "Invalid flags parameter".
+                   * This is the command B8 established exists, against
+                   * RIPlib's previous (non-existent) '1S'. */
+            if (len >= 12) {
+                /* Reuse the existing icon-style rect, which is exactly this
+                 * concept: an image area plus a presentation mode. */
+                s->icon_style_active = true;
+                s->icon_style_x0 = mega2(p);
+                s->icon_style_y0 = scale_y(mega2(p + 2));
+                s->icon_style_x1 = mega2(p + 4);
+                s->icon_style_y1 = scale_y1(mega2(p + 6));
+                s->image_style   = (uint8_t)(mega4(p + 8) & 0xFF);
+            }
+            break;
+
+        case 'c': /* RIP_SetMouseCursor — cursor:2 res:4
+                   * Handler RVA 0x00DC96.  RIPlib renders no pointer, so the
+                   * selection is recorded for an embedder that does. */
+            if (len >= 2)
+                s->mouse_cursor_id = (uint8_t)(mega2(p) & 0xFF);
+            break;
+
+        case 'b': /* RIP_LoadBitmap — rect + flags/colour + <filename>
+                   * Handler RVA 0x00C569.  Diagnostics include "Invalid
+                   * flags parameter", "Invalid colour value", "Invalid string
+                   * parameter".  Loading a file needs a filesystem RIPlib
+                   * does not have; the name is validated and queued through
+                   * the same host-request path as the other file commands. */
+            if (len >= 14) {
+                const char *fn = p + 14;
+                int fnlen = len - 14;
+                if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
+                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+                /* rip_filename_is_safe rejects '..', path separators and
+                 * control characters at ingest, so the name that reaches the
+                 * host queue is already constrained to a bare filename.  The
+                 * consumer still owns the trust boundary: RIPlib does not
+                 * open files, and a host that does MUST re-validate against
+                 * its own root.  Same contract as '|1N' (C-013 / ADR-0003). */
+            }
+            break;
+
+        case 'p': /* Image-by-name — res:4 <filename>
+                   * Handler RVA 0x00C2C6, "Invalid image filename". */
+            if (len >= 4) {
+                const char *fn = p + 4;
+                int fnlen = len - 4;
+                if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
+                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+            }
+            break;
+
+        case 'e': /* RIP_BeginExtendedText — rect + font/flags + search words
+                   * Handler RVA 0x00A5ED.  Diagnostics: "Invalid column
+                   * number", "Invalid highlight colour", "No search words
+                   * encountered", "Too many search words (8 max)".
+                   * The search-word highlighting layer is not implemented;
+                   * the text block itself reuses the existing '1T' path so
+                   * the text still renders rather than vanishing. */
+            if (len >= 8) {
+                s->text_block.active = true;
+                s->text_block.x0 = mega2(p);
+                s->text_block.y0 = scale_y(mega2(p + 2));
+                s->text_block.x1 = mega2(p + 4);
+                s->text_block.y1 = scale_y1(mega2(p + 6));
+                s->text_block.cur_y = s->text_block.y0;
+            }
+            break;
+
+        case 'k': /* rect:XYx4 res:4 — handler RVA 0x00C474, no diagnostics
+                   * recovered and the handler does not name itself.  Accepted
+                   * and consumed so the frame stays in sync; deliberately not
+                   * acted on rather than guessed.  See docs/spec §12.12. */
+            break;
+
+        case 'w': /* mode:1 <string> — handler RVA 0x00D24E, "Invalid string
+                   * parameter", "Unable to create temp buffer".  The
+                   * reconstruction reads this letter as RIP_PLAY_AUDIO;
+                   * RIPlib performs no audio, so the request is consumed. */
+            break;
+
         case 'W': /* RIP_WRITE_ICON — cache current clipboard under a filename */
             if (len > 0 && s->clipboard.valid && s->clipboard.data) {
                 const char *name = p;
@@ -2175,12 +2509,35 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     /* Received $FILEDEL$ — silently ignore, do not delete anything */
                     rlen = 0;
 
-                /* Fix SV-2/S2: $GOTOURL$ — do not launch processes.
-                 * Display the URL in the status area only; never exec/ShellExecute. */
+                /* Fix SV-2/S2: $GOTOURL$ — RIPlib never launches a process or
+                 * opens a URL itself.  Since 2026-08-12 this route is routed
+                 * through the SAME opt-in path as '|3G', so the two ways a
+                 * stream can ask for a URL behave identically instead of one
+                 * being a dead end and the other not:
+                 *   - same scheme allow-list (http/https only),
+                 *   - same control-character rejection,
+                 *   - stored in s->goto_url,
+                 *   - handler invoked ONLY if the embedder registered one.
+                 * The response to the stream stays zero-length either way, so
+                 * a hostile host learns nothing about whether a handler
+                 * exists. */
                 } else if (vlen >= 10 &&
                     memcmp(vname, "$GOTOURL$", 9) == 0) {
-                    /* URL follows after the variable name — display as status text */
-                    /* No process launch; just acknowledge with zero-length response */
+                    const char *u = vname + 9;
+                    int ulen = vlen - 9;
+                    if (ulen > 0 && ulen < (int)sizeof(s->goto_url)) {
+                        int ok = 1;
+                        for (int i = 0; i < ulen; i++) {
+                            if ((unsigned char)u[i] < 0x21 ||
+                                (unsigned char)u[i] > 0x7E) { ok = 0; break; }
+                        }
+                        if (ok && rip_url_scheme_allowed(u, ulen)) {
+                            memcpy(s->goto_url, u, (size_t)ulen);
+                            s->goto_url[ulen] = '\0';
+                            if (s->url_handler)
+                                s->url_handler(s->goto_url, ulen);
+                        }
+                    }
                     rlen = 0;
 
                 } else {
@@ -2643,20 +3000,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* v1.54 spec: 't' = RIP_REGION_TEXT — display a line of text in a
      * previously defined text region (Level 0, used with 'T' begin/end).
      * L16: also missed $variable expansion before this fix. */
-    case 't': /* RIP_REGION_TEXT — justify:1 text */
-        if (s->text_block.active && len >= 1) {
-            int tstart = 1;
-            if (tstart < len) {
-                char tbuf_t[256];
-                char vbuf_t[256];
-                int tlen_t = unescape_text(p + tstart, len - tstart, tbuf_t);
-                tlen_t = rip_expand_variables(s, tbuf_t, tlen_t, vbuf_t, sizeof(vbuf_t));
-                uint8_t tc_t = s->palette[s->draw_color & 0x0F];
-                draw_text(s->text_block.x0, s->text_block.cur_y,
-                          vbuf_t, tlen_t, cp437_8x16, 16, tc_t, 0xFF);
-                s->text_block.cur_y += 16;
-            }
-        }
+    case 't': /* RIP_POLY_BEZIER_LINE — the third member of the bezier family.
+               *
+               * CORRECTED 2026-08-12 (B8).  RIPlib had RIP_REGION_TEXT here.
+               * The driver's '|t' handler (RVA 0x01E4A4) sits adjacent to
+               * '|z' (0x01E449) with a structurally identical body — same
+               * call sequence, plus a write-mode apply — and carries the same
+               * three argument signatures as '|x' and '|z'.  It is a drawing
+               * command, not a text command.
+               *
+               * Region text is '|1t' (Level 1), which RIPlib already
+               * implements, so nothing is lost by correcting this letter. */
+        rip_poly_bezier_family(s, p, len, 0);
         break;
 
     /* ── Fill style + custom fill pattern ───────────────────── */
@@ -2916,13 +3271,44 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Header (v2.0+) -------------------------------------------------- */
     /* DLL command table entry 32: 'h' = RIP_HEADER (3 args: 2,4,2) */
-    case 'h': /* RIP_HEADER -- type:2 id:4 flags:2 */
-        /* Scene metadata; no visible output.  A header that resets the
-         * environment also restores filled-object borders by spec. */
+    case 'h': /* RIP_HEADER — six accepted signatures, selected by length.
+               *
+               * D-2, 2026-08-12.  The driver's '|h' carries SIX dispatch
+               * entries on one handler (RVA 0x01CAE1), the most overloaded
+               * command in the table:
+               *
+               *     8 chars  type:2 id:4 flags:2      (RIPlib's original)
+               *     8 chars  a:1 id:4 b:1 c:1 d:1     (ambiguous with above)
+               *     6 chars  a:1 id:4 b:1
+               *     4 chars  a:1 id:2 b:1
+               *     3 chars  a:1 id:2                 (two entries, identical)
+               *
+               * Reading a 4- or 6-character header with the 8-character layout
+               * pulls fields from past the end of the parameters, so the id
+               * and flags came out as noise.  Each length now reads its own
+               * layout.  The two 8-char forms and the two 3-char forms are not
+               * separable by length alone; the driver must select between them
+               * on state we have not recovered, so the first (documented) form
+               * is kept for those and the ambiguity is recorded rather than
+               * guessed — see docs/spec §12.12. */
         if (len >= 8) {
-            s->header_type = (uint8_t)(mega2(p) & 0xFF);
-            s->header_id = (uint32_t)mega4(p + 2);
+            s->header_type  = (uint8_t)(mega2(p) & 0xFF);
+            s->header_id    = (uint32_t)mega4(p + 2);
             s->header_flags = (uint8_t)(mega2(p + 6) & 0xFF);
+            s->filled_borders_enabled = true;
+        } else if (len == 6) {
+            s->header_type  = (uint8_t)mega_digit(p[0]);
+            s->header_id    = (uint32_t)mega4(p + 1);
+            s->header_flags = (uint8_t)mega_digit(p[5]);
+            s->filled_borders_enabled = true;
+        } else if (len == 4) {
+            s->header_type  = (uint8_t)mega_digit(p[0]);
+            s->header_id    = (uint32_t)mega2(p + 1);
+            s->header_flags = (uint8_t)mega_digit(p[3]);
+            s->filled_borders_enabled = true;
+        } else if (len == 3) {
+            s->header_type  = (uint8_t)mega_digit(p[0]);
+            s->header_id    = (uint32_t)mega2(p + 1);
             s->filled_borders_enabled = true;
         }
         break;
@@ -2970,61 +3356,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Poly-Bezier (v2.0+) --------------------------------------------- */
     /* DLL command table entry 77: 'z' = RIP_POLY_BEZIER (nsegs:2 nsteps:2, then XY pairs) */
-    case 'x': /* RIP_FILLED_POLY_BEZIER -- nsegs:2 nsteps:2 [XY x 4 per seg]
-               *
-               * Added 2026-08-12 (D-5).  The driver has this at slot 71
-               * (RVA 0x01BC1D), immediately adjacent to RIP_FilledPolygon
-               * at 0x01BC78 — the filled counterpart of 'z'.  spec §11.2
-               * Erratum 2 already had the letters right ('x' filled,
-               * 'z' unfilled); only the implementation was missing.
-               *
-               * Flatten every segment to line vertices, then hand the whole
-               * outline to the scanline polygon filler so the fill spans the
-               * complete curve rather than each segment separately. */
-        if (len >= 4) {
-            int nsegs  = mega2(p);
-            int offset = 4;
-            int16_t pts[128];   /* 64 vertices x 2 coords, matching '|P' */
-            int npts = 0;
-            for (int seg = 0; seg < nsegs && offset + 16 <= len; seg++) {
-                int16_t bx0 = mega2(p + offset),       by0 = scale_y(mega2(p + offset + 2));
-                int16_t bx1 = mega2(p + offset + 4),   by1 = scale_y(mega2(p + offset + 6));
-                int16_t bx2 = mega2(p + offset + 8),   by2 = scale_y(mega2(p + offset + 10));
-                int16_t bx3 = mega2(p + offset + 12),  by3 = scale_y(mega2(p + offset + 14));
-                /* Fixed 12-step flattening: enough for the curve sizes this
-                 * protocol carries, and keeps the vertex budget bounded. */
-                for (int k = (seg == 0 ? 0 : 1); k <= 12; k++) {
-                    float t  = (float)k / 12.0f;
-                    float mt = 1.0f - t;
-                    float a = mt * mt * mt, b = 3.0f * mt * mt * t;
-                    float c = 3.0f * mt * t * t, dd = t * t * t;
-                    if (npts >= 64) break;
-                    pts[npts * 2]     = (int16_t)(a * bx0 + b * bx1 + c * bx2 + dd * bx3);
-                    pts[npts * 2 + 1] = (int16_t)(a * by0 + b * by1 + c * by2 + dd * by3);
-                    npts++;
-                }
-                offset += 16;
-            }
-            if (npts >= 3)
-                draw_polygon(pts, npts, s->fill_pattern != 0);
-        }
+    case 'x': /* RIP_FILLED_POLY_BEZIER — filled.
+               * Driver slot 71 (RVA 0x01BC1D), adjacent to RIP_FilledPolygon;
+               * spec §11.2 Erratum 2 had the letters right ('x' filled,
+               * 'z' unfilled).  All three driver signatures plus RIPlib's
+               * long form go through the shared family helper (D-2). */
+        rip_poly_bezier_family(s, p, len, 1);
         break;
 
-    case 'z': /* RIP_POLY_BEZIER -- nsegs:2 nsteps:2 [XY x 4 per segment] */
-        /* Multi-segment cubic Bezier.  nsteps = subdivision hint (ignored).
-         * Each segment is 4 XY pairs = 16 MegaNum chars. */
-        if (len >= 4) {
-            int nsegs  = mega2(p);
-            int offset = 4; /* skip nsegs:2 + nsteps:2 */
-            for (int seg = 0; seg < nsegs && offset + 16 <= len; seg++) {
-                int16_t bx0 = mega2(p + offset),       by0 = scale_y(mega2(p + offset + 2));
-                int16_t bx1 = mega2(p + offset + 4),   by1 = scale_y(mega2(p + offset + 6));
-                int16_t bx2 = mega2(p + offset + 8),   by2 = scale_y(mega2(p + offset + 10));
-                int16_t bx3 = mega2(p + offset + 12),  by3 = scale_y(mega2(p + offset + 14));
-                draw_bezier(bx0, by0, bx1, by1, bx2, by2, bx3, by3);
-                offset += 16;
-            }
-        }
+    case 'z': /* RIP_POLY_BEZIER — outline.
+               * All three driver signatures plus RIPlib's long form are
+               * handled by the shared family helper; see D-2. */
+        rip_poly_bezier_family(s, p, len, 2);
         break;
 
     /* -- Group markers (v2.0+) ------------------------------------------- */
