@@ -1087,7 +1087,74 @@ D-11 COORDINATE WIDTH IS RECORDED BUT NOT HONOURED.  Recorded
      rendering garbage.  Until the refactor lands, read the 0xFF type
      byte as "2 in practice".
 
-D-10 BASE-64 MEGANUM IS ACCEPTED BUT NOT DECODED.  Recorded
+D-12 RESOLVED 2026-08-12 — THE BASE-64 ALPHABET, AND WHO USES IT.
+     This supersedes D-10 below, which is retained for the record of how
+     the search went wrong.  The answer was in TeleGrafix's own content,
+     not in the binary, and the binary only confirmed it afterwards.
+
+     THE ALPHABET.  ICONS/TUNNEL.RIP writes 64 consecutive palette
+     entries with '|d'.  Their indices must increase by exactly one and
+     their RGB values by exactly four; only one alphabet makes both
+     sequences come out right, and it is the only reading under which
+     '0z' (61) is followed by '0#', '0&' and then '10' (64):
+
+          '0'-'9' ->  0..9        'a'-'z' -> 36..61
+          'A'-'Z' -> 10..35       '#'     -> 62      '&' -> 63
+
+     The two symbols past 'z' are '#' and '&' — printable, and neither
+     is '|'.  The candidate table at RVA 0x07EEE8 recorded under D-10
+     was wrong, as its zero .text references suggested.
+
+     CORROBORATION FROM THE BINARY.  A 4-digit base-64 field spans
+     0..64^4-1 = 0..0xFFFFFF exactly — which is the bound the palette
+     handler enforces with "RGB Color value is out of range!".  The RGB
+     field is 24-bit and only reaches 24 bits in this radix; in base 36
+     four digits cap at 1679615 and the check could never fire.
+
+     WHICH COMMANDS.  The radix is per-command, not global.  The flag
+     word at dispatch entry +0x26 — the trailing bytes of each record —
+     carries a 2-bit field, and the parser's predicate at 0x039D70 reads
+     it before falling back to the global base byte at (state+2)+0x38:
+
+          1  always base 36        '|J', '|N'          (2 entries)
+          2  always base 64        '|D', '|d', '|h', '|y'  (4 entries)
+          3  follow the global base                    (96 entries)
+
+     The predicate picks between two character validators: 0x100210B2
+     accepts only 0x30-0x39 and 0x41-0x5A (base 36 exactly), while
+     0x100210D0 goes through the CRT ctype table and admits lowercase.
+
+     '|J' being permanently base 36 is the keystone of the design: the
+     command that SETS the radix must itself decode unambiguously.  It
+     also explains why every '|J' in the corpus is '|J10' — that is 36
+     in base 36 and 64 in base 64, so it asserts the current radix
+     rather than changing it.
+
+     TUNNEL.RIP settles that the selection really is per-command: it
+     carries base-64 '|d' payloads AND '|fZKQO', which is 1280x960 only
+     in base 36.  Both in one file.
+
+     WHAT IT COST RIPlib.  rip_mega_digit() is case-INSENSITIVE, which
+     is right for base 36 and ruinous here: it folds 'a'..'z' onto
+     10..35 and returns 0 for '#' and '&'.  61 of TUNNEL.RIP's 65
+     palette entries decoded wrong, with '#' and '&' collapsing onto
+     entry 0.  '|y' RIP_ExtendedFontStyle was equally affected across
+     195 uses in 25 files: every one carries '1a1a' in its scale fields,
+     which is 100,100 in base 64 — a percentage — and a meaningless
+     46,46 in base 36.
+
+     FIXED for all four commands via rip_mega_digit64()/rip_mega2_64()/
+     rip_mega4_64() in src/rip_meganum.h.  The change is deliberately
+     confined to those four; the other 96 entries follow the global base,
+     which stays 36, so nothing else moves.
+
+     STILL OPEN: how a stream selects global base 64, given '|J10'
+     asserts rather than sets and no corpus file sends '|J1S'.  It does
+     not matter for the four always-64 commands, which is why the fix
+     lands without it.
+
+D-10 SUPERSEDED BY D-12.  BASE-64 MEGANUM IS ACCEPTED BUT NOT DECODED.
+     Recorded
      2026-08-12.  '|J' RIP_SET_BASE_MATH (RVA 0x01f32e) selects the
      MegaNum radix, and the handler accepts exactly two values: 0x24
      (36) and 0x40 (64), forcing 36 for anything else.  So the protocol

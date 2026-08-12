@@ -55,6 +55,12 @@
 #define mega2      rip_mega2
 #define mega3      rip_mega3
 #define mega4      rip_mega4    /* extracted MegaNum decoder (C-002 step 3) */
+/* Base-64 forms, for the four commands the dispatch table marks as always
+ * base 64 ('|D', '|d', '|h', '|y').  Never use these on any other command,
+ * and never use the base-36 forms on these -- see rip_meganum.h and D-12. */
+#define mega_digit64 rip_mega_digit64
+#define mega2_64     rip_mega2_64
+#define mega4_64     rip_mega4_64
 #include "rip_clipboard.h"  /* extracted clipboard + blit (C-002 step 6) */
 #include "rip_internal.h"   /* shared inline helpers (rip_strnlen, rip_filename_is_safe) */
 /* rip_raf: stubbed in riplib */
@@ -4083,9 +4089,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * is '|s' RIP_FILL_PATTERN, which RIPlib already implements. */
     case 'D': /* RIP_SET_DRAWING_PALETTE — start:2 count:2 bits:1 (rgb:4)×count */
         if (len >= 5) {
-            uint16_t start = (uint16_t)mega2(p);
-            int      count = mega2(p + 2);
-            uint8_t  bits  = (uint8_t)mega_digit(p[4]);
+            /* Base 64, same flag as '|d' -- see D-12. */
+            uint16_t start = (uint16_t)mega2_64(p);
+            int      count = mega2_64(p + 2);
+            uint8_t  bits  = (uint8_t)mega_digit64(p[4]);
             int i;
 
             /* Reject rather than clamp, matching the driver: a truncated or
@@ -4093,7 +4100,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             if (start <= 0xFF && count > 0 && count <= 256 && bits == 8 &&
                 len >= 5 + 4 * count) {
                 for (i = 0; i < count && (int)start + i <= 0xFF; i++) {
-                    uint32_t rgb = (uint32_t)mega4(p + 5 + 4 * i);
+                    uint32_t rgb = (uint32_t)mega4_64(p + 5 + 4 * i);
                     uint8_t  r8  = (uint8_t)((rgb >> 16) & 0xFF);
                     uint8_t  g8  = (uint8_t)((rgb >> 8) & 0xFF);
                     uint8_t  b8  = (uint8_t)(rgb & 0xFF);
@@ -4308,9 +4315,16 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * font state on any stream that set a palette entry, so that
                * behaviour is removed rather than kept pending '|y'. */
         if (len >= 7) {
-            uint16_t pal_index = (uint16_t)mega2(p);
-            uint8_t  pal_bits  = (uint8_t)mega_digit(p[2]);
-            uint32_t pal_rgb   = (uint32_t)mega4(p + 3);
+            /* Base 64: the dispatch entry's flag word marks '|d' as always
+             * using the extended radix.  Decoded as base 36 this command is
+             * wrong in three ways at once -- 'a'..'z' fold onto 10..35,
+             * '#'/'&' become 0, and a 4-digit field can only reach
+             * 1679615 instead of the full 0xFFFFFF the handler validates
+             * against.  TeleGrafix's TUNNEL.RIP writes a 64-entry ramp that
+             * only decodes monotonically this way.  See D-12. */
+            uint16_t pal_index = (uint16_t)mega2_64(p);
+            uint8_t  pal_bits  = (uint8_t)mega_digit64(p[2]);
+            uint32_t pal_rgb   = (uint32_t)mega4_64(p + 3);
 
             /* Match the driver's validation: out-of-range values are an
              * error, not something to clamp into a wrong colour. */
@@ -4392,10 +4406,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * NOT interpreted: their meanings have not been recovered, and
                * assigning them would be a guess.  See docs/spec §12.12. */
         if (len >= 26) {
-            uint8_t  y_font    = (uint8_t)mega_digit(p[0]);
-            uint16_t y_srot    = (uint16_t)mega2(p + 10);   /* arg5 */
-            uint16_t y_crot    = (uint16_t)mega2(p + 12);   /* arg6 */
-            uint16_t y_spacing = (uint16_t)mega2(p + 16);   /* arg8 */
+            /* Base 64: the dispatch entry marks '|y' as always using the
+             * extended radix, and real content proves it -- every |y in the
+             * shipped corpus carries '1a1a' in its two scale fields, which
+             * is 100,100 in base 64 (a clean percentage) and a meaningless
+             * 46,46 in base 36.  See D-12. */
+            uint8_t  y_font    = (uint8_t)mega_digit64(p[0]);
+            uint16_t y_srot    = (uint16_t)mega2_64(p + 10);   /* arg5 */
+            uint16_t y_crot    = (uint16_t)mega2_64(p + 12);   /* arg6 */
+            uint16_t y_spacing = (uint16_t)mega2_64(p + 16);   /* arg8 */
 
             bool rot_ok = (y_srot == 0 || y_srot == 90 ||
                            y_srot == 180 || y_srot == 270) &&

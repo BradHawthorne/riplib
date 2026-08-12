@@ -3784,14 +3784,65 @@ static void test_cmd_x_filled_poly_bezier(void) {
     else FAIL("|x produced no filled region");
 }
 
+/* '|d' and '|D' are base-64 commands.  These payloads are taken verbatim
+ * from TeleGrafix's ICONS/TUNNEL.RIP, which writes a 64-entry ramp whose
+ * indices step by one and whose RGB steps by four -- a sequence that only
+ * comes out right in base 64.  Decoded as base 36 the '#' and '&' digits
+ * become 0 and collapse onto palette entry 0.  See D-12. */
+static void test_cmd_d_palette_uses_base64(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|d decodes index and RGB in base 64");
+    init_fixture(&s, &ctx);
+    /* "0#" = 62, bits = 8, "001u" = 120.  '#' is digit 62, which the
+     * base-36 decoder would read as 0. */
+    feed_script(&s, &ctx, "!|d0#8001u|");
+    /* rgb 120 = (r 0, g 0, b 120) -> rgb565 (120 & 0xF8) >> 3 = 15 */
+    if (palette_read_rgb565(62) != 15) {
+        FAIL("|d wrote the wrong palette entry or colour");
+        return;
+    }
+    if (palette_read_rgb565(0) != 0) {
+        FAIL("|d clobbered entry 0, so '#' decoded as digit 0");
+        return;
+    }
+    PASS();
+}
+
+static void test_cmd_D_palette_block_uses_base64(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|D writes a palette block in base 64");
+    init_fixture(&s, &ctx);
+    /* start "0z" = 61, count "02" = 2, bits 8, then two 24-bit RGB values.
+     * "00#0" uses digit '#' = 62, so the value is 62 << 6 = 3968; "001u"
+     * uses 'u' = 56, giving 1*64 + 56 = 120.  Both digits are outside the
+     * base-36 alphabet, which is the point. */
+    feed_script(&s, &ctx, "!|D0z028" "00#0" "001u" "|");
+    /* entry 61 gets 3968 = 0x000F80 -> r 0, g 15, b 128
+     *   rgb565 = ((0&0xF8)<<8) | ((15&0xFC)<<3) | ((128&0xF8)>>3) = 96 + 16 */
+    if (palette_read_rgb565(61) != (uint16_t)((((0 & 0xF8) << 8)) |
+                                              (((15 & 0xFC) << 3)) |
+                                              (((128 & 0xF8) >> 3)))) {
+        FAIL("|D first block entry decoded wrong");
+        return;
+    }
+    if (palette_read_rgb565(62) != 15) {
+        FAIL("|D second block entry decoded wrong");
+        return;
+    }
+    PASS();
+}
+
 static void test_cmd_y_extended_font_style(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|y RIP_EXTENDED_FONT_STYLE parses the 26-char layout");
     init_fixture(&s, &ctx);
-    /* widths 1,1,4,2,2,2,2,2,2,2,6 = 26 chars.
-     * font=1 .. arg5 rotation=90 (offset 10), arg8 spacing=64 (offset 16) */
-    feed_script(&s, &ctx, "!|y" "1" "0" "0000" "00" "00" "2I" "00" "00" "1S" "00" "000000" "|");
-    if (s.char_spacing != 64) { FAIL("|y did not record character spacing"); return; }
+    /* widths 1,1,4,2,2,2,2,2,2,2,6 = 26 chars.  '|y' is one of the four
+     * commands the dispatch table marks as always BASE 64, so the fields
+     * below are base-64 encoded: "1Q" = 90 (rotation), "1a" = 100 (spacing
+     * as a percentage -- exactly what every |y in the shipped corpus
+     * carries).  See D-12. */
+    feed_script(&s, &ctx, "!|y" "1" "0" "0000" "00" "00" "1Q" "00" "00" "1a" "00" "000000" "|");
+    if (s.char_spacing != 100) { FAIL("|y did not record character spacing"); return; }
     if (s.font_dir != 3)      { FAIL("|y rotation 90 did not map to dir 3"); return; }
     PASS();
 }
@@ -5196,6 +5247,8 @@ int main(void) {
     test_cmd_j_point();
     test_cmd_r_text_metric();
     test_cmd_x_filled_poly_bezier();
+    test_cmd_d_palette_uses_base64();
+    test_cmd_D_palette_block_uses_base64();
     test_cmd_y_extended_font_style();
     test_cmd_y_rejects_zero_spacing();
     test_ext_one_drawing_palette_d();
