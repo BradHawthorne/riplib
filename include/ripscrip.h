@@ -317,7 +317,7 @@ typedef struct {
 struct rip_state_s {
     uint8_t  state;          /* Current FSM state (RIP_ST_* constants, 0-13) */
     uint8_t  prev_state;     /* Saved state for line-continuation restore */
-    char     cmd_buf[256];   /* Command parameter accumulator */
+    char     cmd_buf[1024];  /* Command parameter accumulator */
     uint16_t cmd_len;        /* Bytes used in cmd_buf; widened from uint8_t
                               * (C-014) so the type range cannot coincide
                               * with sizeof(cmd_buf) == 256 */

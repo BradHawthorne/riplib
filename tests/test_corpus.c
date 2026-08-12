@@ -204,8 +204,18 @@ int main(void) {
             else if (painted == 0)
                 printf("PASS        0 fg  (%d asset request(s) pending)\n", requests);
             else
-                printf("PASS  %7ld fg  %2d colours  %d req\n",
-                       painted, colours, requests);
+                /* "fg" is everything that is not the single most common
+                 * colour, so it FLIPS once drawing covers more than half the
+                 * screen: the drawn colour becomes the majority and fg then
+                 * counts the background instead.  CURVES.RIP does exactly
+                 * that -- widening cmd_buf let it draw 41 bezier segments
+                 * instead of 15, painting 188186 pixels, and fg fell from
+                 * 98008 to 67814 while the scene got MORE complete.  The
+                 * dominant share is printed so that flip is visible rather
+                 * than looking like a regression. */
+                printf("PASS  %7ld fg  %2d colours  %2d%% dom  %d req\n",
+                       painted, colours,
+                       (int)(100 - (painted * 100 / (long)(W * H))), requests);
         }
     }
 

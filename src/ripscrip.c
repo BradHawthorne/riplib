@@ -341,6 +341,64 @@ static void rip_fill_poly_polygon(const int16_t *pts,
     }
 }
 
+/* '|P' RIP_POLYGON, '|p' RIP_FILL_POLYGON and '|l' RIP_POLYLINE.
+ *
+ * Vertex cap, and why it moved.  This used to allow at most 64 vertices and
+ * REJECT anything larger outright -- not truncate, drop the whole command.
+ * Real content exceeds that: TeleGrafix's HAWK.RIP declares a 153-vertex
+ * filled polygon and LGF1.RIP two of 88 and 85, so those shapes rendered as
+ * nothing at all.  The old comment justified the cap as keeping the point
+ * array on the stack and "out of the malloc fallback path inside
+ * draw_polygon", but draw_polygon already handles any n -- 64 intersections
+ * on the stack, malloc above that -- so the cap only ever cost content.
+ *
+ * The array lives here rather than in the command switch for the same
+ * reason '|<' does: inside the switch it would sit in execute_rip_command's
+ * frame and every command in the protocol would pay for it. */
+#define RIP_POLY_MAX_PTS 192      /* corpus maximum is 153 */
+
+static void rip_exec_polygon(rip_state_t *s, char cmd, const char *p, int len)
+{
+    int16_t pts[2 * RIP_POLY_MAX_PTS];
+    int npts, i;
+
+    if (len < 6)
+        return;
+    npts = mega2(p);
+    /* Two vertices is the driver's own floor -- '|<' reports "Must have at
+     * least two vertices to make a polygon" -- and the ceiling is this
+     * buffer.  A stream above it is still refused rather than silently
+     * drawn short, because half a polygon is a wrong shape, not a partial
+     * one. */
+    if (npts < 2 || npts > RIP_POLY_MAX_PTS)
+        return;
+    if (len < 2 + npts * 4)
+        return;
+
+    for (i = 0; i < npts; i++) {
+        pts[i * 2]     = mega2(p + 2 + i * 4);
+        pts[i * 2 + 1] = scale_y(mega2(p + 4 + i * 4));
+    }
+
+    if (cmd == 'l') {
+        draw_polyline(pts, npts);
+    } else if (cmd == 'p') {
+        uint8_t border_mode;
+        if (s->fill_pattern != 0) {
+            draw_set_color(s->palette[s->fill_color & 0x0F]);
+            draw_polygon(pts, npts, true);
+        }
+        if (rip_begin_filled_border(s, &border_mode)) {
+            draw_polygon(pts, npts, false);
+            rip_end_filled_border(s, border_mode);
+        } else {
+            draw_set_color(s->palette[s->draw_color & 0x0F]);
+        }
+    } else {
+        draw_polygon(pts, npts, false);
+    }
+}
+
 /* '|<' RIP_POLY_POLYGON, kept out of the command switch purely for STACK.
  *
  * Its point array and contour index tables total several hundred bytes, and
@@ -1084,9 +1142,20 @@ static uint16_t rip_line_style_to_pattern(uint8_t style, uint16_t user_pat) {
  * Returns unescaped length (always <= input length, in-place safe).
  * ══════════════════════════════════════════════════════════════════ */
 
-static int unescape_text(const char *src, int len, char *dst) {
+/* `dst_max` is the capacity of dst and is enforced here rather than left to
+ * each caller.
+ *
+ * It was previously left to callers, and four of the six clamped their
+ * length argument by hand while two did not.  Those two wrote into a
+ * 256-byte buffer and were safe only because cmd_buf happened to be 256, so
+ * `len` could never exceed 255 — the sizes matched by accident, not by
+ * design.  Widening cmd_buf to hold the corpus's longest command turned
+ * that into an immediate stack-smash.  Bounding the function removes the
+ * whole class instead of adding two more hand clamps. */
+static int unescape_text(const char *src, int len, char *dst, int dst_max) {
     int j = 0;
-    for (int i = 0; i < len; i++) {
+    if (dst_max <= 0) return 0;
+    for (int i = 0; i < len && j < dst_max; i++) {
         if (src[i] == '\\' && i + 1 < len) {
             char next = src[i + 1];
             if (next == '!' || next == '|' || next == '\\' || next == '^') {
@@ -1503,7 +1572,7 @@ static void rip_render_text(rip_state_t *s, const char *raw, int raw_len) {
     int tlen;
 
     if (raw_len <= 0) return;
-    tlen = unescape_text(raw, raw_len, tbuf);
+    tlen = unescape_text(raw, raw_len, tbuf, (int)sizeof(tbuf));
     tlen = rip_expand_variables(s, tbuf, tlen, vbuf, sizeof(vbuf));
     if (tlen <= 0) return;
 
@@ -2223,7 +2292,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 /* Draw display label centered (or below icon if icon present) */
                 if (label_len > 0) {
                     char lbuf[128];
-                    int llen = unescape_text(label_text, label_len > 127 ? 127 : label_len, lbuf);
+                    int llen = unescape_text(label_text, label_len, lbuf, (int)sizeof(lbuf));
                     if (llen > 0) {
                         uint8_t tc = s->palette[bs->dfore & 0x0F];
                         int16_t tx = (int16_t)(bx0 + (bw - llen * 8) / 2);
@@ -2303,7 +2372,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 if (tstart < len) {
                     char tbuf[256];
                     char vbuf[256];
-                    int tlen = unescape_text(p + tstart, len - tstart, tbuf);
+                    int tlen = unescape_text(p + tstart, len - tstart, tbuf, (int)sizeof(tbuf));
                     tlen = rip_expand_variables(s, tbuf, tlen, vbuf, sizeof(vbuf));
                     uint8_t tc = s->palette[s->draw_color & 0x0F];
                     draw_text(s->text_block.x0, s->text_block.cur_y,
@@ -2824,7 +2893,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int tstart = (len >= 5) ? 5 : 0;
                 if (tstart < len) {
                     char tbuf[128];
-                    int tlen = unescape_text(p + tstart, len - tstart > 127 ? 127 : len - tstart, tbuf);
+                    int tlen = unescape_text(p + tstart, len - tstart, tbuf, (int)sizeof(tbuf));
                     int eq = -1;
                     bool handled_define = false;
                     for (int i = 0; i < tlen; i++) {
@@ -2880,8 +2949,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     }
                     if (!handled_define) {
                         char rawbuf[128];
-                        int rawlen = unescape_text(p, len > 127 ? 127 : len,
-                                                   rawbuf);
+                        int rawlen = unescape_text(p, len, rawbuf,
+                                                   (int)sizeof(rawbuf));
                         int raw_eq = -1;
                         for (int i = 0; i < rawlen; i++) {
                             if (rawbuf[i] == '=') { raw_eq = i; break; }
@@ -3395,38 +3464,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* ── Polygon / Polyline ──────────────────────────────────── */
     case 'P': /* RIP_POLYGON (outline) */
     case 'p': /* RIP_FILL_POLYGON */
-    case 'l': /* RIP_POLYLINE */ {
-        if (len >= 6) {
-            int npts = mega2(p);
-            /* Cap at 64 points to keep `pts[]` on the stack and out of the
-             * malloc fallback path inside draw_polygon. */
-            if (npts < 2 || npts > 64) break;
-            if (len < 2 + npts * 4) break;
-            int16_t pts[128]; /* max 64 points × 2 coords */
-            for (int i = 0; i < npts; i++) {
-                pts[i * 2]     = mega2(p + 2 + i * 4);
-                pts[i * 2 + 1] = scale_y(mega2(p + 4 + i * 4));
-            }
-            if (s->cmd_char == 'l') {
-                draw_polyline(pts, npts);
-            } else if (s->cmd_char == 'p') {
-                uint8_t border_mode;
-                if (s->fill_pattern != 0) {
-                    draw_set_color(s->palette[s->fill_color & 0x0F]);
-                    draw_polygon(pts, npts, true);
-                }
-                if (rip_begin_filled_border(s, &border_mode)) {
-                    draw_polygon(pts, npts, false);
-                    rip_end_filled_border(s, border_mode);
-                } else {
-                    draw_set_color(s->palette[s->draw_color & 0x0F]);
-                }
-            } else {
-                draw_polygon(pts, npts, false);
-            }
-        }
+    case 'l': /* RIP_POLYLINE */
+        rip_exec_polygon(s, s->cmd_char, p, len);
         break;
-    }
 
     /* ── Flood fill ──────────────────────────────────────────── */
     case 'F': /* v1.54 spec: '|F' = RIP_FILL — flood fill from (x,y) until hitting border color.
@@ -3889,7 +3929,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 char vbuf[256];
                 draw_clip_state_t saved_clip;
                 int16_t cx0, cy0, cx1, cy1;
-                int outlen = unescape_text(tp, tlen > 255 ? 255 : tlen, tbuf);
+                int outlen = unescape_text(tp, tlen, tbuf, (int)sizeof(tbuf));
                 outlen = rip_expand_variables(s, tbuf, outlen, vbuf, sizeof(vbuf));
                 uint8_t tc = s->palette[s->draw_color & 0x0F];
                 int char_w = 8, char_h = 16;
