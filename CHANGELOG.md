@@ -56,6 +56,19 @@ backward compatible with 1.2.x. (Candidate C-004 variant A′; see
 
 ### Changed
 
+- **X1 closed: `$COMPAT$` / `$COPY$` / `$PROT$` renamed** to `$RLCOMPAT$` /
+  `$RLCOPY$` / `$RLPROT$` (breaking). The driver uses those bare names for
+  *parameterized actions* — `$COMPAT(env)$` drops an environment to 1.54
+  settings and has 21 uses in the shipped corpus — so occupying them meant a
+  host could not tell a compliant terminal from RIPlib. The `RL` prefix cannot
+  collide with a driver name.
+- **`§A2G` is a documented opaque revision tag** (ADR-0007). It derives from a
+  consumer name but expands to nothing for any reader, and is cited ~20 times
+  in an external repository; renaming would cost real interoperability for a
+  cosmetic gain. The platform-independence constraint is amended **with** an
+  ADR and a chronological log row rather than in place — the exact defect
+  code-review finding 6 flagged on `3e05ecb`.
+
 - **Argument-count overloads are now dispatched (D-2).** The driver accepts
   several signatures per letter, selected by argument length; RIPlib bound one
   layout per letter, so any other accepted form was read with the wrong field

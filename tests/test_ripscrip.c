@@ -641,14 +641,14 @@ static void test_var_copy_resets_write_mode(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("$COPY$ resets write_mode to COPY(0)");
+    TEST("$RLCOPY$ resets write_mode to COPY(0)");
     init_fixture(&s, &ctx);
     s.write_mode = DRAW_MODE_XOR;
-    feed_script(&s, &ctx, "!|T$COPY$|");
+    feed_script(&s, &ctx, "!|T$RLCOPY$|");
     if (s.write_mode == 0)
         PASS();
     else
-        FAIL("$COPY$ did not reset write_mode");
+        FAIL("$RLCOPY$ did not reset write_mode");
 }
 
 static void test_var_abort_resets_fsm(void) {
@@ -3934,11 +3934,11 @@ static void test_var_ripver_returns_a2gspu(void) {
 
 static void test_var_compat_returns_one(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$COMPAT$ expands to \"1\"");
+    TEST("$RLCOMPAT$ expands to \"1\"");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "<<IF $COMPAT$=1>>!|X1200|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $RLCOMPAT$=1>>!|X1200|<<ENDIF>>");
     if (draw_get_pixel(38, 0) != 0) PASS();
-    else FAIL("$COMPAT$ did not return \"1\"");
+    else FAIL("$RLCOMPAT$ did not return \"1\"");
 }
 
 static void test_var_ispalette_returns_one(void) {
@@ -3952,12 +3952,12 @@ static void test_var_ispalette_returns_one(void) {
 
 static void test_var_prot_reflects_resolution_mode(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$PROT$ expands to s->resolution_mode");
+    TEST("$RLPROT$ expands to s->resolution_mode");
     init_fixture(&s, &ctx);
     s.resolution_mode = 2;
-    feed_script(&s, &ctx, "<<IF $PROT$=2>>!|X1400|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $RLPROT$=2>>!|X1400|<<ENDIF>>");
     if (draw_get_pixel(40, 0) != 0) PASS();
-    else FAIL("$PROT$ did not match resolution_mode");
+    else FAIL("$RLPROT$ did not match resolution_mode");
 }
 
 static void test_var_coordsize_reflects_state(void) {
