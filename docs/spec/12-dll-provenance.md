@@ -1062,10 +1062,30 @@ D-11 COORDINATE WIDTH IS RECORDED BUT NOT HONOURED.  Recorded
      all 24 uses of '|n' across the 35 shipped scenes are byte_size=2,
      the default — the same situation as '|J10' in D-10.
 
-     Closing it means threading the width through src/rip_meganum.h,
-     whose decoders are deliberately stateless static inlines, so it is
-     a genuine refactor rather than a patch.  Until then the 0xFF type
-     byte should be read as "2 in practice".
+     THE WIDTH MODEL IS NOW FULLY RECOVERED (2026-08-12).  The resolver
+     at RVA 0x039DE0 takes the engine state and an argument index and
+     returns that argument's digit count:
+
+          t = argtype[i]                  ; the +0x14 byte of the entry
+          t >= 0      -> t                ; literal count (1, 2, 4)
+          t == 0xFF   -> (state+2)->[0x39] ; SET_COORDINATE_SIZE
+          t == 0xFE   -> (state+2)->[0x3a] ; SET_COLOR_MODE, resolving
+                                            to 2, or 4 via a jump table
+                                            for modes 0x01..0x18
+
+     So 0xFF and 0xFE are indirections through two state bytes, and the
+     three state bytes sit adjacent: +0x38 MegaNum base, +0x39 coordinate
+     size, +0x3a colour mode.  That is the complete answer to how the
+     driver sizes an argument.
+
+     RIPlib does not implement it.  Closing it means threading the width
+     through src/rip_meganum.h, whose decoders are deliberately stateless
+     static inlines called from several hundred sites, so it is a genuine
+     refactor rather than a patch.  What HAS changed is that the failure
+     is no longer silent: '|n' with any width but 2 sets
+     rip_state_t.coord_size_unsupported, so a host can stop instead of
+     rendering garbage.  Until the refactor lands, read the 0xFF type
+     byte as "2 in practice".
 
 D-10 BASE-64 MEGANUM IS ACCEPTED BUT NOT DECODED.  Recorded
      2026-08-12.  '|J' RIP_SET_BASE_MATH (RVA 0x01f32e) selects the
@@ -1089,12 +1109,41 @@ D-10 BASE-64 MEGANUM IS ACCEPTED BUT NOT DECODED.  Recorded
      base 64 will currently mis-decode, and that is a known, recorded
      limitation rather than an unnoticed one.
 
-     To close it: 0x1003e8eb, which '|J' calls with the accepted base,
-     turns out only to STORE it — into (state+2)+0x38 and into a second
-     slot at (state+0xe) indexed by (word at +0x0a) * 16 + 5.  The digit
-     decoder itself reads that byte somewhere else and has not been
-     located.  Next step is to find the reader of +0x38 rather than the
-     writer.
+     PROGRESS 2026-08-12 — the reader is found, the alphabet is not.
+     0x1003E8EB, which '|J' calls, only STORES the base: into
+     (state+2)+0x38 and a second slot at (state+0xe) indexed by
+     (word at +0x0a) * 16 + 5.  Enumerating every byte read of +0x38
+     across .text gives exactly ONE consumer (a third apparent hit at
+     0x05200F is a false positive — 8A 4C 38 04 is mov cl,[eax+edi+4],
+     where 0x38 is a SIB byte, not a displacement):
+
+          0x039D70   a predicate returning 0 or 1.  It consults the
+                     colour mode at +0x3a, then two flag bits in the
+                     dispatch entry's word at +0x26, and only as a final
+                     fallback returns (base == 0x40).
+
+     That predicate has exactly one caller, 0x03A02E, inside the parser's
+     per-character loop — the same loop that rejects bytes >= 0x7F and
+     treats 0x5C ('\') as the line-continuation character, which is the
+     continuation POLYPOLY.RIP uses.
+
+     So the base does not select a digit TABLE at the point of decode; it
+     feeds a per-character predicate that decides how the accumulator
+     treats the byte.  The digit-to-value conversion itself is further
+     down that loop and is still not isolated.  This also means the
+     candidate at 0x07EEE8 is now LESS likely, not more: nothing indexes
+     it, and the one place the base is consulted does not look up a table
+     at all.
+
+     Incidental confirmation from the same loop: at 0x03A004 the parser
+     computes its dispatch entry as
+
+          lea eax, [ebp + ebp*4]            ; index * 5
+          lea ecx, [eax*8 + 0x10080820]     ; * 8  ->  index*40 + base
+
+     which is the driver validating RIPlib's recorded table layout —
+     0x080820, 40-byte entries — from its own code rather than from the
+     reconstruction that first asserted it.
 
      CANDIDATE ALPHABET, NOT ADOPTED.  RVA 0x07eee8 (.data) holds
      exactly 64 contiguous bytes, ASCII 0x20..0x5F — space through

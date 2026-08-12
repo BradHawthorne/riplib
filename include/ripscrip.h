@@ -572,6 +572,11 @@ struct rip_state_s {
     /* '|3D' RIP_DELAY request, in sixtieths of a second.  RIPlib never
      * blocks; read and clear it with rip_take_delay(). */
     uint32_t delay_ticks;
+    /* Set when '|n' requested a coordinate width RIPlib cannot decode
+     * (anything but 2).  Everything parsed after that point is unreliable,
+     * so a host that cares should stop rather than render it.  See
+     * docs/spec/12-dll-provenance.md D-11. */
+    bool coord_size_unsupported;
 
     /* RIP_ICON_STYLE ('&') parameters for subsequent icon rendering.
      * Coordinates are stored in pixels.  style follows 1S where possible:

@@ -3688,14 +3688,30 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Coordinate size (v2.0+) ----------------------------------------- */
     /* DLL command table entry 49: 'n' = RIP_SET_COORDINATE_SIZE (2 args: 1,3) */
-    case 'n': /* RIP_SET_COORDINATE_SIZE -- byte_size:1 res:3 */
-        /* Track the requested coordinate byte width.  The renderer keeps
-         * using its fixed framebuffer coordinate transform, but $COORDSIZE$
-         * and subsequent state snapshots now reflect the negotiated size. */
+    case 'n': /* RIP_SET_COORDINATE_SIZE -- byte_size:1 res:3
+               *
+               * This field is the width of every argument the dispatch table
+               * types 0xFF.  The driver resolves it at RVA 0x039DE0:
+               *
+               *     t = argtype[i]
+               *     t >= 0    -> t                    literal digit count
+               *     t == 0xFF -> (state+2)->[0x39]    this field
+               *     t == 0xFE -> (state+2)->[0x3a]    colour mode, 2 or 4
+               *
+               * RIPlib's decoders are fixed at 2 digits (rip_meganum.h keeps
+               * them stateless static inlines), so any width but 2 would be
+               * mis-read from the first coordinate onward.  Rather than
+               * mis-parse silently, an unsupported width is recorded: a host
+               * can check coord_size_unsupported and stop rather than render
+               * garbage.  All 24 uses of '|n' in TeleGrafix's shipped corpus
+               * request 2, so no real content trips this.  See D-11. */
         if (len >= 4) {
             uint8_t size = (uint8_t)mega_digit(p[0]);
-            if (size >= 2 && size <= 5)
+            if (size >= 2 && size <= 5) {
                 s->coordinate_size = size;
+                if (size != 2)
+                    s->coord_size_unsupported = true;
+            }
             s->coordinate_res = (uint32_t)mega3(p + 1);
         }
         break;

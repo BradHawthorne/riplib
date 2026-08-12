@@ -784,6 +784,29 @@ static void test_l1_image_style_stored(void) {
         FAIL("1i image_style not stored");
 }
 
+static void test_n_flags_unsupported_coordinate_width(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|n flags a coordinate width the decoders cannot honour");
+    init_fixture(&s, &ctx);
+    /* byte_size=2 is what every shipped scene requests and what RIPlib
+     * decodes, so it must NOT raise the flag. */
+    feed_script(&s, &ctx, "!|n2000|");
+    if (s.coord_size_unsupported) {
+        FAIL("width 2 was reported unsupported");
+        return;
+    }
+    /* Width 3 is legal protocol but RIPlib reads fixed 2-digit fields, so
+     * everything after this point would be mis-parsed.  The condition has
+     * to be observable rather than silent -- see D-11. */
+    feed_script(&s, &ctx, "!|n3000|");
+    if (s.coord_size_unsupported && s.coordinate_size == 3)
+        PASS();
+    else
+        FAIL("width 3 was accepted silently");
+}
+
 static void test_l3_delay_is_recorded_not_slept(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -4884,6 +4907,7 @@ int main(void) {
     test_l1_button_registers_region();
     test_l1_image_style_stored();
     test_l3_delay_is_recorded_not_slept();
+    test_n_flags_unsupported_coordinate_width();
     test_l1_viewport_ext();
     test_l1_query_ext_returns_app_var();
     test_l1_define_query_and_expand_generic_var();
