@@ -56,6 +56,17 @@ target_include_directories(test_corpus PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_test(NAME corpus_tests COMMAND test_corpus)
 
+# ── Seeded mutation fuzz ─────────────────────────────────────────
+# Plain C99 with a fixed seed, so it runs everywhere the rest of the suite
+# runs (fuzz_parser below needs clang + libFuzzer and stays optional).
+# Takes an iteration count.  20k keeps ctest under ~10s in a Debug build;
+# run it directly with a larger count for a deeper sweep:
+#     ./build/tests/test_fuzz_seeded 1000000
+add_executable(test_fuzz_seeded test_fuzz_seeded.c)
+target_link_libraries(test_fuzz_seeded PRIVATE riplib)
+
+add_test(NAME fuzz_seeded_tests COMMAND test_fuzz_seeded 20000)
+
 # ── Optional libFuzzer harness ───────────────────────────────────
 # Build with: cmake -DRIPLIB_BUILD_FUZZ=ON -DCMAKE_C_COMPILER=clang
 #
