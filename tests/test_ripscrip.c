@@ -641,14 +641,14 @@ static void test_var_copy_resets_write_mode(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("$COPY$ resets write_mode to COPY(0)");
+    TEST("$RLCOPY$ resets write_mode to COPY(0)");
     init_fixture(&s, &ctx);
     s.write_mode = DRAW_MODE_XOR;
-    feed_script(&s, &ctx, "!|T$COPY$|");
+    feed_script(&s, &ctx, "!|T$RLCOPY$|");
     if (s.write_mode == 0)
         PASS();
     else
-        FAIL("$COPY$ did not reset write_mode");
+        FAIL("$RLCOPY$ did not reset write_mode");
 }
 
 static void test_var_abort_resets_fsm(void) {
@@ -775,13 +775,57 @@ static void test_l1_image_style_stored(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("1S stores image display style");
+    TEST("1i stores image display style");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|1S02|");  /* style = 2 (center) */
+    feed_script(&s, &ctx, "!|1i000000000002|");  /* rect 0,0-0,0; flags = 2 (center) */
     if (s.image_style == 2)
         PASS();
     else
-        FAIL("1S image_style not stored");
+        FAIL("1i image_style not stored");
+}
+
+static void test_n_flags_unsupported_coordinate_width(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|n flags a coordinate width the decoders cannot honour");
+    init_fixture(&s, &ctx);
+    /* byte_size=2 is what every shipped scene requests and what RIPlib
+     * decodes, so it must NOT raise the flag. */
+    feed_script(&s, &ctx, "!|n2000|");
+    if (s.coord_size_unsupported) {
+        FAIL("width 2 was reported unsupported");
+        return;
+    }
+    /* Width 3 is legal protocol but RIPlib reads fixed 2-digit fields, so
+     * everything after this point would be mis-parsed.  The condition has
+     * to be observable rather than silent -- see D-11. */
+    feed_script(&s, &ctx, "!|n3000|");
+    if (s.coord_size_unsupported && s.coordinate_size == 3)
+        PASS();
+    else
+        FAIL("width 3 was accepted silently");
+}
+
+static void test_l3_delay_is_recorded_not_slept(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|3D records a delay request and never blocks");
+    init_fixture(&s, &ctx);
+    /* ticks:4 = "0056" -> 5*36 + 6 = 186 sixtieths of a second (3.1 s).
+     * The driver would busy-wait here; RIPlib must return immediately and
+     * hand the request to the host. */
+    feed_script(&s, &ctx, "!|3D0056|");
+    if (rip_take_delay(&s) != 186) {
+        FAIL("|3D did not record the tick count");
+        return;
+    }
+    /* Taking it clears it, so a host polling twice does not delay twice. */
+    if (rip_take_delay(&s) == 0)
+        PASS();
+    else
+        FAIL("rip_take_delay did not clear the pending request");
 }
 
 static void test_l1_viewport_ext(void) {
@@ -1122,7 +1166,7 @@ static void test_text_xy_ext_renders_via_shared_helper(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("- (TEXT_XY_EXT) routes through shared text path (regression for L14)");
+    TEST("|3- (bounded text box) routes through shared text path (regression for L14)");
     init_fixture(&s, &ctx);
     /* Bitmap font path (font_id == 0).  Before L14 this passed NULL
      * font to draw_text, which silently dropped the entire string.
@@ -1130,14 +1174,14 @@ static void test_text_xy_ext_renders_via_shared_helper(void) {
      * easily verify without comparing rendered glyphs. */
     tx_reset();
     /* x0=05 y0=05 x1=14(40) y1=0K(20) flags=00 body=$BEEP$ */
-    feed_script(&s, &ctx, "!|-0505140K00$BEEP$|");
+    feed_script(&s, &ctx, "!|3-0505140K00$BEEP$|");
     int has_bel = 0;
     for (size_t i = 0; i < tx_len; i++)
         if (tx_capture[i] == 0x07) { has_bel = 1; break; }
     if (has_bel)
         PASS();
     else
-        FAIL("- did not run shared text rendering (still uses old broken code)");
+        FAIL("|3- did not run shared text rendering");
 }
 
 static void test_text_xy_ext_clips_to_box(void) {
@@ -1146,10 +1190,10 @@ static void test_text_xy_ext_clips_to_box(void) {
     int inside = 0;
     int outside = 0;
 
-    TEST("- (TEXT_XY_EXT) clips glyphs to its bounding box");
+    TEST("|3- (bounded text box) clips glyphs to its bounding box");
     init_fixture(&s, &ctx);
     /* Box (5,5)-(12,20), flags=00, long text would extend past x=12. */
-    feed_script(&s, &ctx, "!|-05050C0K00AAAA|");
+    feed_script(&s, &ctx, "!|3-05050C0K00AAAA|");
     for (int y = 5; y <= 23 && !inside; y++)
         for (int x = 5; x <= 12 && !inside; x++)
             if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) inside = 1;
@@ -1159,23 +1203,26 @@ static void test_text_xy_ext_clips_to_box(void) {
     if (inside && !outside)
         PASS();
     else
-        FAIL("TEXT_XY_EXT ignored its clipping box");
+        FAIL("|3- ignored its clipping box");
 }
 
 static void test_draw_to_moves_cursor(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("_ DRAW_TO updates draw cursor and optionally draws a line");
+    TEST("_ FILLED_OVAL_CHORD fills the arc side and not beyond the chord");
     init_fixture(&s, &ctx);
-    /* x0=05 y0=05 mode=01 (draw on) param=00 x1=0F y1=0F */
-    feed_script(&s, &ctx, "!|_050501000F0F|");
-    /* Pixel between (5,5) and (15,15) on the diagonal — e.g. (10, 11)
-     * (scale_y skews Y by 8/7).  Just check that draw_x/draw_y advanced. */
-    if (s.draw_x == 15 && s.draw_y == /* scale_y(15) = 17 */ 17)
+    feed_script(&s, &ctx, "!|c0F|S0104|");
+    /* cx=2S(100) cy=2S(100) start=00(0) end=50(180) rx=14(40) ry=0K(20).
+     * Angles run counter-clockwise from east with Y inverted, so 0..180 is
+     * the UPPER half and the chord closes flat across the centre line.
+     * Centre lands at (100, scale_y(100)=114); ry scales to 22. */
+    feed_script(&s, &ctx, "!|_2S2S0050140K|");
+    if (draw_get_pixel(100, 105) == s.palette[4] &&
+        draw_get_pixel(100, 125) != s.palette[4])
         PASS();
     else
-        FAIL("DRAW_TO did not update cursor position");
+        FAIL("FILLED_OVAL_CHORD did not fill the arc side only");
 }
 
 static void test_icon_request_queue_dequeue(void) {
@@ -2042,23 +2089,26 @@ static void test_filled_border_disabled_skips_rect_outline(void) {
     comp_context_t ctx;
     int outline_pixel;
     int interior_pixel;
+    int scan_x, scan_y;
 
-    TEST("N00 also disables outlines on filled rects via [");
+    TEST("N00 also disables outlines on the filled pie slice via [");
     init_fixture(&s, &ctx);
-    /* fill_pattern=1 (solid), fill_color=4 (red), draw_color=15 (white).
-     * filled_borders OFF.  Then [ filled-rect-ext.  Outline pixel must
-     * be the fill color, not the draw color. */
+    /* fill_pattern=1 (solid), fill_color=4 (red), draw_color=15 (white),
+     * filled_borders OFF.  With the border suppressed, the draw colour
+     * must not appear anywhere in the shape's bounding box. */
     feed_script(&s, &ctx, "!|c0F|S0104|N00|");
-    /* [ rect with bx0=0A by0=0A bx1=0F by1=0F mode=00 p1=00 p2=00 */
-    feed_script(&s, &ctx, "!|[0A0A0F0F000000|");
-    /* Top-left corner (10, 11) should be fill-color (palette[4]=244) since
-     * outline was suppressed. */
-    outline_pixel = draw_get_pixel(10, 11);
-    interior_pixel = draw_get_pixel(12, 13);
-    if (outline_pixel == s.palette[4] && interior_pixel == s.palette[4])
+    /* cx=2S(100) cy=2S(100) rx=14(40) ry=0K(20) start=00 end=50(180) skew=00 */
+    feed_script(&s, &ctx, "!|[2S2S140K005000|");
+    outline_pixel = 0;
+    for (scan_y = 85; scan_y <= 120; scan_y++)
+        for (scan_x = 55; scan_x <= 145; scan_x++)
+            if (draw_get_pixel((int16_t)scan_x, (int16_t)scan_y) == s.palette[15])
+                outline_pixel = 1;
+    interior_pixel = draw_get_pixel(100, 105);
+    if (!outline_pixel && interior_pixel == s.palette[4])
         PASS();
     else
-        FAIL("rect outline drew despite N00");
+        FAIL("pie-slice outline drew despite N00");
 }
 
 static void test_filled_border_helper_always_sets_copy_mode(void) {
@@ -2366,7 +2416,7 @@ static void test_icon_style_tile_mode_repeats(void) {
     }
     /* ICON_STYLE box (0,0)-(15,7) — 16x8 box, mode=01 (tile),
      * align=00 scale=00.  Each field is 2 chars. */
-    feed_script(&s, &ctx, "!|&00000F0701000000|");
+    feed_script(&s, &ctx, "!|3&00000F0701000000|");
     if (!s.icon_style_active) { FAIL("setup: & not active"); return; }
     feed_script(&s, &ctx, "!|1I000000000TILEME|");
     /* In tile mode the 4x4 icon should appear at multiple cell origins
@@ -2654,7 +2704,7 @@ static void test_save_icon_slot_out_of_range_is_noop(void) {
     init_fixture(&s, &ctx);
     draw_set_color(0x55);
     draw_rect(0, 0, 1, 1, true);
-    feed_script(&s, &ctx, "!|<00000000|");
+    feed_script(&s, &ctx, "!|1C000000000|");
     /* slot 36 ("10" in MegaNum) is just past RIP_ICON_SLOT_MAX (36). */
     feed_script(&s, &ctx, "!|J10|");
     int any_valid = 0;
@@ -2674,8 +2724,8 @@ static void test_stamp_icon_unset_slot_falls_back_to_clipboard(void) {
     init_fixture(&s, &ctx);
     draw_set_color(0x44);
     draw_rect(2, 2, 1, 1, true);
-    feed_script(&s, &ctx, "!|<02020202|");
-    if (!s.clipboard.valid) { FAIL("setup: <"); return; }
+    feed_script(&s, &ctx, "!|1C020202020|");
+    if (!s.clipboard.valid) { FAIL("setup: |1C"); return; }
     /* Stamp slot 03 (never saved) at (20, 20).  Should use clipboard. */
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|.030K0K000000|");
@@ -2693,8 +2743,8 @@ static void test_save_and_stamp_icon_slot(void) {
     init_fixture(&s, &ctx);
     draw_set_color(88);
     draw_rect(2, 2, 2, 2, true);
-    feed_script(&s, &ctx, "!|<02020202|");
-    feed_script(&s, &ctx, "!|J05|");
+    feed_script(&s, &ctx, "!|1C020202020|");
+    feed_script(&s, &ctx, "!|3J05|");
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|.050U0U000000|");
     if (draw_get_pixel(30, 34) == 88)
@@ -2707,24 +2757,24 @@ static void test_save_icon_slot_updates_load_alias(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("J save-icon updates the SLOTnn load alias");
+    TEST("|3J save-icon updates the SLOTnn load alias");
     init_fixture(&s, &ctx);
     draw_set_color(88);
     draw_rect(2, 2, 2, 2, true);
-    feed_script(&s, &ctx, "!|<02020202|");
-    feed_script(&s, &ctx, "!|J05|");
+    feed_script(&s, &ctx, "!|1C020202020|");
+    feed_script(&s, &ctx, "!|3J05|");
 
     draw_set_color(99);
     draw_rect(2, 2, 2, 2, true);
-    feed_script(&s, &ctx, "!|<02020202|");
-    feed_script(&s, &ctx, "!|J05|");
+    feed_script(&s, &ctx, "!|1C020202020|");
+    feed_script(&s, &ctx, "!|3J05|");
 
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|1I0A0A00000SLOT05|");
     if (draw_get_pixel(10, 11) == 99)
         PASS();
     else
-        FAIL("J left stale pixels in the SLOTnn load alias");
+        FAIL("|3J left stale pixels in the SLOTnn load alias");
 }
 
 static void test_l0_copy_region_scales_destination_rect(void) {
@@ -3242,19 +3292,44 @@ static void test_l0_no_more_hash(void) {
     PASS();
 }
 
-static void test_l0_region_text_t(void) {
+/* Region text is '|1t' (Level 1), not level-0 '|t'.  Corrected 2026-08-12
+ * (B8): the driver's level-0 '|t' handler sits beside '|z' with an identical
+ * body and applies a write mode — it is RIP_POLY_BEZIER_LINE, a drawing
+ * command.  This test previously exercised region text through '|t'. */
+static void test_l1_region_text_t(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|t renders justified text inside a text block");
+    TEST("|1t renders justified text inside a text block");
     init_fixture(&s, &ctx);
-    /* 1T begins a text block (10,10)-(50,30) so that L0 |t can render. */
+    /* 1T begins a text block (10,10)-(50,30) so that |1t can render. */
     feed_script(&s, &ctx, "!|1T0A0A1E1E00|");
     if (!s.text_block.active) { FAIL("setup: 1T missed"); return; }
-    feed_script(&s, &ctx, "!|t0X|");
+    feed_script(&s, &ctx, "!|1t0X|");
     int found = 0;
     for (int x = 8; x < 30 && !found; x++)
         for (int y = 8; y < 40 && !found; y++)
             if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) found = 1;
-    if (found) PASS(); else FAIL("|t drew nothing");
+    if (found) PASS(); else FAIL("|1t drew nothing");
+}
+
+/* D-2: each poly-bezier letter accepts three signatures selected by length.
+ * Before the fix, only one layout parsed and the others silently drew wrong. */
+static void test_poly_bezier_signature_dispatch(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|z accepts the move-to and curve-to signatures (D-2)");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|z0004|\r\n");            /*  4 chars: header    */
+    feed_script(&s, &ctx, "!|z10A0A|\r\n");           /*  5 chars: move-to   */
+    if (!s.bez_valid || s.bez_x != 10) { FAIL("move-to did not set the pen"); return; }
+    /* 13 chars: count:1 then six 2-char values —
+     * c1=(14,1E) c2=(28,32) end=(3C,46).  "3C" base-36 = 120. */
+    feed_script(&s, &ctx, "!|z1141E28323C46|\r\n");
+    if (s.bez_x != 120) { FAIL("curve-to did not advance the pen to the endpoint"); return; }
+    int lit = 0;
+    for (int x = 0; x < 200; x++)
+        for (int y = 0; y < 200; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) lit++;
+    if (lit > 0) PASS();
+    else FAIL("curve-to drew nothing");
 }
 
 static void test_l0_custom_fill_pattern_s(void) {
@@ -3360,16 +3435,17 @@ static void test_ext_animation_frame_brace(void) {
 
 static void test_ext_kill_mouse_in_region_K(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|K removes mouse regions intersecting rect");
+    TEST("|1k removes mouse regions enclosed by rect");
     init_fixture(&s, &ctx);
     /* Define a region at (10,10)-(50,50) */
     feed_script(&s, &ctx, "!|1M000A0A1E1E0000000X|");
     if (s.num_mouse_regions != 1) { FAIL("setup: 1M missed"); return; }
-    /* Kill any region intersecting (0,0)-(60,60) — should drop ours.
-     * x0:2 y0:2 x1:2 y1:2 = "00"+"00"+"1O"+"1O" where "1O"=60. */
-    feed_script(&s, &ctx, "!|K00001O1O|");
+    /* Kill enclosed fields with |1k, the command that actually does this.
+     * '|K' is RIP_FILLED_RECTANGLE and no longer touches mouse state.
+     * x0:2 y0:2 x1:2 y1:2 res:4, flags bit 1 = delete contained fields. */
+    feed_script(&s, &ctx, "!|1k00001O1O0001|");
     if (s.num_mouse_regions == 0) PASS();
-    else FAIL("|K did not remove intersecting region");
+    else FAIL("|1k did not remove the enclosed region");
 }
 
 static void test_ext_mouse_region_ext_colon(void) {
@@ -3382,14 +3458,305 @@ static void test_ext_mouse_region_ext_colon(void) {
     else FAIL("|: did not add region");
 }
 
-static void test_ext_button_ext_semicolon(void) {
+/* The skewed-oval family, checked against TeleGrafix's own demo.
+ *
+ * ICONS/NEWCMDS.RIP strokes a coordinate grid and places one shape on each
+ * intersection, so the payloads below (copied verbatim from that file) say
+ * where each shape must land.  The assertion is BOUNDING BOX containment,
+ * not centroid: an arc, pie slice or chord covers only part of its ellipse,
+ * so its centroid is legitimately off-centre and only its extent is
+ * predictable.  Get a field slot wrong and the box moves or changes size.
+ *
+ * A centroid check was tried first and had to be abandoned -- against the
+ * real file it "passed" for every shape because NEWCMDS.RIP opens with '|*',
+ * which fills the screen, so a window centred on the expected point is
+ * uniformly painted and its centroid is trivially the window centre.  It
+ * was measuring the background. */
+static void check_shape_extent(rip_state_t *s, comp_context_t *ctx,
+                               const char *script, const char *what,
+                               int cx, int cy, int rx, int ry) {
+    int minx = 9999, maxx = -1, miny = 9999, maxy = -1;
+    int xx, yy;
+    long painted = 0;
+
+    TEST(what);
+    init_fixture(s, ctx);
+    feed_script(s, ctx, "!|c0F|S0104|");
+    feed_script(s, ctx, script);
+
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) {
+                painted++;
+                if (xx < minx) minx = xx;
+                if (xx > maxx) maxx = xx;
+                if (yy < miny) miny = yy;
+                if (yy > maxy) maxy = yy;
+            }
+
+    if (maxx < 0) { FAIL("nothing painted"); return; }
+    /* These shapes carry skew=58, so their axis-aligned box is NOT rx by ry:
+     * a rotated ellipse spans hypot(rx*sin, ry*cos) vertically, which here is
+     * 46 against an ry of 25.  The bound that holds under any rotation is the
+     * enclosing circle, radius max(rx,ry), plus a little for line width.
+     * (A per-axis rx/ry bound was tried and failed on exactly this, which is
+     * itself evidence the rotation is being applied.) */
+    {
+        int r = (rx > ry ? rx : ry) + 3;
+        if (minx < cx - r || maxx > cx + r ||
+            miny < cy - r || maxy > cy + r) {
+            FAIL("painted outside the enclosing circle of the declared radii");
+            return;
+        }
+    }
+    /* ...and must be a real shape rather than a stray pixel.  Count, not
+     * span: how far a partial sweep reaches depends on its start and end
+     * angles -- the 72..216 degree arc here spans only about 25 px in x
+     * against an rx of 52 -- so any span floor ends up encoding the sweep
+     * geometry instead of testing it.  A pixel count is sweep-independent. */
+    if (painted < 20) {
+        FAIL("too few pixels painted to be the declared shape");
+        return;
+    }
+    PASS();
+}
+
+static void test_skewed_oval_family_extents(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|; adds extended button + region");
+
+    /* Centres and radii as decoded, y and ry through scale_y (y*8/7). */
+    check_shape_extent(&s, &ctx, "!|&20151G0M1M|",
+                       "|& SKEWED_OVAL lands on its declared ellipse",
+                       72, 46, 52, 25);
+    check_shape_extent(&s, &ctx, "!|-203F1G0M1M|",
+                       "|- FILLED_SKEWED_OVAL lands on its declared ellipse",
+                       72, 140, 52, 25);
+    check_shape_extent(&s, &ctx, "!|]50151G0M20601M|",
+                       "|] SKEWED_OVAL_ARC lands on its declared ellipse",
+                       180, 46, 52, 25);
+    check_shape_extent(&s, &ctx, "!|[503F1G0M20601M|",
+                       "|[ SKEWED_OVAL_PIE_SLICE lands on its declared ellipse",
+                       180, 140, 52, 25);
+    check_shape_extent(&s, &ctx, "!|+803F1G0M20601M|",
+                       "|+ SKEWED_OVAL_CHORD lands on its declared ellipse",
+                       288, 140, 52, 25);
+    /* start=324 end=216 wraps through 0 -- a 252 degree sweep.  This one
+     * drew nothing until rip_skewed_oval_points() learned to wrap. */
+    check_shape_extent(&s, &ctx, "!|_B03F90601G0M|",
+                       "|_ FILLED_OVAL_CHORD draws its wrapping sweep",
+                       396, 140, 52, 25);
+}
+
+static void test_ext_poly_marker_semicolon(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|; draws a marker and adds no mouse region");
     init_fixture(&s, &ctx);
-    /* x0:2 y0:2 x1:2 y1:2 style:2 lx:2 ly:2 = 14 chars min */
-    feed_script(&s, &ctx, "!|;05050F0F00000000|");
-    if (s.num_mouse_regions == 1) PASS();
-    else FAIL("|; did not add region");
+    feed_script(&s, &ctx, "!|c0F|");
+    /* x=2S(100) y=2S(100) marker=05 w=0K(20) h=0K(20) rot=00 flags=00 */
+    feed_script(&s, &ctx, "!|;2S2S050K0K0000|");
+    /* The marker must paint, and -- the point of the fix -- must NOT
+     * manufacture a clickable region.  The corpus issues 361 of these. */
+    if (s.num_mouse_regions != 0) {
+        FAIL("|; created a phantom mouse region");
+        return;
+    }
+    {
+        int painted = 0, xx, yy;
+        /* The glyph is an outline, so scan its bounding box rather than
+         * betting on which pixel an edge lands in. */
+        for (yy = 95; yy <= 135 && !painted; yy++)
+            for (xx = 80; xx <= 120 && !painted; xx++)
+                if (draw_get_pixel((int16_t)xx, (int16_t)yy) == s.palette[15])
+                    painted = 1;
+        if (painted)
+            PASS();
+        else
+            FAIL("|; painted no marker");
+    }
+}
+
+/* Count painted pixels for one marker number, so glyphs can be compared. */
+static long marker_pixels(rip_state_t *s, comp_context_t *ctx, const char *script) {
+    long n = 0;
+    int xx, yy;
+
+    init_fixture(s, ctx);
+    feed_script(s, ctx, "!|c0F|");
+    feed_script(s, ctx, script);
+    for (yy = 60; yy < 170; yy++)
+        for (xx = 40; xx < 170; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0)
+                n++;
+    return n;
+}
+
+static long text_extent_px(rip_state_t *s, comp_context_t *ctx,
+                           const char *setup) {
+    int xx, yy, minx = 9999, maxx = -1;
+
+    init_fixture(s, ctx);
+    feed_script(s, ctx, "!|c0F|Y010003|");   /* font 1 (stroke), dir 0, size 3 */
+    if (setup) feed_script(s, ctx, setup);
+    /* y=2S(100): vertical justification 0 subtracts the text height, so a
+     * near-zero y would place the run off the top of the framebuffer. */
+    feed_script(s, ctx, "!|@0A2SMMMM|");     /* four wide glyphs */
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) {
+                if (xx < minx) minx = xx;
+                if (xx > maxx) maxx = xx;
+            }
+    return (maxx < 0) ? 0 : (maxx - minx + 1);
+}
+
+/* Return the bounding box of everything painted, as (minx,miny,maxx,maxy). */
+static void painted_bbox(int *bx0, int *by0, int *bx1, int *by1) {
+    int xx, yy;
+    *bx0 = 9999; *by0 = 9999; *bx1 = -1; *by1 = -1;
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) {
+                if (xx < *bx0) *bx0 = xx;
+                if (yy < *by0) *by0 = yy;
+                if (xx > *bx1) *bx1 = xx;
+                if (yy > *by1) *by1 = yy;
+            }
+}
+
+static void test_wide_coordinates_render_the_same_shape(void) {
+    rip_state_t s; comp_context_t ctx;
+    int ax0, ay0, ax1, ay1, bx0, by0, bx1, by1;
+
+    TEST("|n3 wide coordinates decode to the same rectangle as width 2");
+    /* '|n' selects the width of every argument the driver types as a
+     * coordinate.  RIPlib reads fixed 2-digit fields at fixed offsets in
+     * 262 places, so before D-11 a width of 3 desynchronised from the first
+     * coordinate onward.  The payload is now normalised to 2-digit fields
+     * before dispatch, so both of these must draw the SAME rectangle. */
+
+    /* width 2: |R x0=0A y0=0A x1=2S y1=1E  -> (10,10)-(100,50) */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|n2000|");
+    feed_script(&s, &ctx, "!|R0A0A2S1E|");
+    painted_bbox(&ax0, &ay0, &ax1, &ay1);
+
+    /* width 3: the same four values as 3-digit fields */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|n3000|");
+    feed_script(&s, &ctx, "!|R00A00A02S01E|");
+    painted_bbox(&bx0, &by0, &bx1, &by1);
+
+    if (ax1 < 0) { FAIL("width-2 baseline painted nothing"); return; }
+    if (bx1 < 0) { FAIL("width-3 stream painted nothing"); return; }
+    if (ax0 == bx0 && ay0 == by0 && ax1 == bx1 && ay1 == by1)
+        PASS();
+    else
+        FAIL("width-3 stream drew a different rectangle");
+}
+
+static void test_char_spacing_changes_text_extent(void) {
+    rip_state_t s; comp_context_t ctx;
+    long normal, wide;
+
+    TEST("|y character spacing widens the rendered run");
+    /* '|y' carries a character-spacing percentage that RIPlib decoded and
+     * then had nowhere to put -- every text path used the glyph's own
+     * width, so condensed or expanded text rendered identically to normal.
+     * Field 8 sits at offset 16; base 64, so "1a" is 100 and "3S" is 250. */
+    normal = text_extent_px(&s, &ctx, NULL);
+    wide   = text_extent_px(&s, &ctx,
+                            "!|y" "1" "0" "0000" "00" "00" "00" "00" "00" "3S" "00" "000000" "|");
+    if (normal == 0 || wide == 0) { FAIL("no text rendered"); return; }
+    if (wide > normal)
+        PASS();
+    else
+        FAIL("character spacing had no effect on the rendered width");
+}
+
+static void test_bezier_honours_stream_step_count(void) {
+    rip_state_t s; comp_context_t ctx;
+    long coarse = 0, fine = 0;
+    int xx, yy;
+
+    TEST("|z honours the nsteps field the stream supplies");
+    /* The 4-char header form is count:2 steps:2.  RIPlib parsed nsteps and
+     * then ignored it -- outlines always used the adaptive estimate -- so a
+     * stream asking for coarse geometry silently got smooth curves. */
+    /* header is 4 chars (count:2 steps:2), move-to 5, curve-to 13. */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|z0102|");            /* nsteps = 2  */
+    feed_script(&s, &ctx, "!|z10A5A|");               /* move-to     */
+    feed_script(&s, &ctx, "!|z10A0A5A0A5A5A|");       /* curve-to    */
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) coarse++;
+
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|z011S|");            /* nsteps = 64 */
+    feed_script(&s, &ctx, "!|z10A5A|");
+    feed_script(&s, &ctx, "!|z10A0A5A0A5A5A|");
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) fine++;
+
+    if (coarse == 0 || fine == 0) { FAIL("curve painted nothing"); return; }
+    /* Two straight chords cannot cover the same pixels as a 64-segment
+     * flattening of the same curve. */
+    if (coarse == fine) {
+        FAIL("nsteps had no effect on the rendered curve");
+        return;
+    }
+    PASS();
+}
+
+static void test_poly_marker_glyphs_differ(void) {
+    rip_state_t s; comp_context_t ctx;
+    long m0, m1, m6, m20, m34;
+
+    TEST("|; renders a distinct glyph per marker number");
+    /* cx=2S(100) cy=2S(100) marker=NN w=1E(50) h=1E(50) rot=00 flags=00.
+     * The 36 outlines come from the driver's own descriptor table; before
+     * they were extracted every marker number drew the same placeholder,
+     * so the property worth asserting is that they now DIFFER. */
+    m0  = marker_pixels(&s, &ctx, "!|;2S2S001E1E0000|");   /* circle      */
+    m1  = marker_pixels(&s, &ctx, "!|;2S2S011E1E0000|");   /* plus/cross  */
+    m6  = marker_pixels(&s, &ctx, "!|;2S2S061E1E0000|");   /* triangle    */
+    m20 = marker_pixels(&s, &ctx, "!|;2S2S0K1E1E0000|");   /* triangle 2  */
+    m34 = marker_pixels(&s, &ctx, "!|;2S2S0Y1E1E0000|");   /* 16-pt star  */
+
+    if (m0 == 0 || m1 == 0 || m6 == 0 || m20 == 0 || m34 == 0) {
+        FAIL("a marker number painted nothing");
+        return;
+    }
+    /* Marker 0 is the circle: the driver dispatches it to the ellipse
+     * generator rather than the glyph table. */
+    if (m0 == m1 || m1 == m6 || m6 == m34 || m1 == m34) {
+        FAIL("marker numbers still render identical glyphs");
+        return;
+    }
+    /* 6 and 20 are both triangles but different sizes, so they must not be
+     * byte-identical either. */
+    if (m6 == m20) {
+        FAIL("markers 6 and 20 should differ in size");
+        return;
+    }
+    PASS();
+}
+
+static void test_ext_poly_marker_rejects_bad_fields(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|; rejects the fields the driver rejects");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|");
+    /* marker=10(36) is out of range: the handler reports "Invalid marker
+     * number" for >= 0x24, so nothing may be drawn. */
+    feed_script(&s, &ctx, "!|;2S2S100K0K0000|");
+    /* rotation=A0(360) trips "Invalid marker rotation angle (>=360)". */
+    feed_script(&s, &ctx, "!|;2S2S050K0KA000|");
+    if (draw_get_pixel(100, 104) == 0 && draw_get_pixel(100, 114) == 0)
+        PASS();
+    else
+        FAIL("|; drew despite an out-of-range field");
 }
 
 static void test_ext_ext_text_window_b(void) {
@@ -3400,6 +3767,149 @@ static void test_ext_ext_text_window_b(void) {
     feed_script(&s, &ctx, "!|b05050F0F0F00000A04000|");
     if (s.tw_active && s.etw_fore_col == 15) PASS();
     else FAIL("|b did not activate ext text window");
+}
+
+/* Commands recovered from the driver's dispatch table 2026-08-12, completing
+ * coverage across all four levels. */
+/* |1k = RIP_KillEnclosedMouseFields, identified from RIPSCRIP.HLP's function
+ * name table (segment 12 class G).  Kills only the fields wholly inside the
+ * rectangle — the selective counterpart to |1K, which kills all of them. */
+static void test_level1_kill_enclosed_mouse_fields(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1k honours its flags field (0 = kill nothing, 1 = contained)");
+    init_fixture(&s, &ctx);
+    /* two fields: one inside (10,10)-(50,50), one well outside */
+    feed_script(&s, &ctx, "!|1M0A0A1414000000inside|\r\n");
+    feed_script(&s, &ctx, "!|1M64646E6E000000outside|\r\n");
+    if (s.num_mouse_regions != 2) { FAIL("setup: expected two regions"); return; }
+    /* flags=0 must kill NOTHING — the TeleGrafix reference is explicit that
+     * one of 1/2/4 must be supplied for any field to be deleted. */
+    feed_script(&s, &ctx, "!|1k0A0A32320000|\r\n");
+    if (s.num_mouse_regions != 2) { FAIL("|1k with flags=0 deleted fields"); return; }
+    /* flags=1 kills only the completely-contained field */
+    feed_script(&s, &ctx, "!|1k0A0A32320001|\r\n");
+    if (s.num_mouse_regions != 1) {
+        FAIL("|1k flags=1 did not remove exactly the contained field"); return;
+    }
+    /* the survivor must be the outside one */
+    if (s.mouse_regions[0].x0 >= 100) PASS();
+    else FAIL("|1k removed the wrong field");
+}
+
+static void test_level3_goto_url_records_without_launching(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G records the URL and launches nothing");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|3Ghttp://example.com/x|");
+    if (strcmp(s.goto_url, "http://example.com/x") != 0) {
+        FAIL("|3G did not record the URL"); return;
+    }
+    /* Security: RIPlib never launches. Nothing may be sent to the host. */
+    tx_reset();
+    feed_script(&s, &ctx, "!|3Ghttp://evil.example/y|");
+    if (tx_len == 0) PASS();
+    else FAIL("|3G emitted host traffic");
+}
+
+/* The opt-in compromise: no handler = inert; handler = invoked, but only for
+ * URLs that already passed RIPlib's scheme allow-list. */
+static int url_cb_calls;
+static char url_cb_last[128];
+static void url_cb(const char *u, int n) {
+    url_cb_calls++;
+    int c = n < (int)sizeof(url_cb_last) - 1 ? n : (int)sizeof(url_cb_last) - 1;
+    memcpy(url_cb_last, u, (size_t)c);
+    url_cb_last[c] = '\0';
+}
+
+static void test_level3_url_handler_opt_in(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G invokes a handler only when one is registered");
+    init_fixture(&s, &ctx);
+    url_cb_calls = 0;
+    /* default: no handler -> stored, never invoked */
+    feed_script(&s, &ctx, "!|3Ghttp://a.example/1|\r\n");
+    if (url_cb_calls != 0) { FAIL("handler ran without being registered"); return; }
+    if (strcmp(s.goto_url, "http://a.example/1") != 0) {
+        FAIL("URL not stored in the default configuration"); return;
+    }
+    rip_set_url_handler(&s, url_cb);
+    feed_script(&s, &ctx, "!|3Ghttp://a.example/2|\r\n");
+    if (url_cb_calls == 1 && strcmp(url_cb_last, "http://a.example/2") == 0) PASS();
+    else FAIL("registered handler was not invoked with the URL");
+}
+
+static void test_level3_url_scheme_allowlist(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G refuses dangerous URL schemes even with a handler registered");
+    init_fixture(&s, &ctx);
+    rip_set_url_handler(&s, url_cb);
+    url_cb_calls = 0;
+    feed_script(&s, &ctx, "!|3Gjavascript:alert(1)|\r\n");
+    feed_script(&s, &ctx, "!|3Gfile:///etc/passwd|\r\n");
+    feed_script(&s, &ctx, "!|3Gdata:text/html;base64,AAA|\r\n");
+    feed_script(&s, &ctx, "!|3Gvbscript:x|\r\n");
+    if (url_cb_calls != 0) { FAIL("a dangerous scheme reached the handler"); return; }
+    if (s.goto_url[0] != '\0') { FAIL("a dangerous scheme was stored"); return; }
+    feed_script(&s, &ctx, "!|3GHTTPS://ok.example/z|\r\n");   /* case-insensitive */
+    if (url_cb_calls == 1) PASS();
+    else FAIL("uppercase HTTPS was refused");
+}
+
+static void test_level3_goto_url_rejects_control_chars(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G rejects control characters in the URL");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|3Ghttp://ok.example|\r\n");
+    feed_script(&s, &ctx, "!|3Gbad\007url|\r\n");
+    if (strcmp(s.goto_url, "http://ok.example") == 0) PASS();
+    else FAIL("|3G accepted an invalid URL character");
+}
+
+static void test_level3_encoded_stream_announcement(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3U records the encoded-stream announcement");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|3U050010|");
+    if (s.encoded_stream_type == 5) PASS();   /* mega2("05") = 5 */
+    else FAIL("|3U did not record the stream type");
+}
+
+static void test_level2_switch_palette_slot(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|2A records the palette slot and rejects out-of-range");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2A500|\r\n");            /* slot 5 */
+    if (s.rip2_state.cur_palette_slot != 5) {
+        FAIL("|2A did not record slot 5"); return;
+    }
+    feed_script(&s, &ctx, "!|2AZ00|\r\n");            /* slot 35 = max valid */
+    if (s.rip2_state.cur_palette_slot == 35) PASS();
+    else FAIL("|2A rejected a valid slot");
+}
+
+static void test_level1_copy_blit(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1g COPY_BLIT copies a region");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|S0104|B0A0A1414|");      /* filled source block */
+    feed_script(&s, &ctx, "!|1g0A0A14143C3C00|");     /* blit it elsewhere */
+    /* dest is mega2("3C") = 120 in x, scale_y(120) in y */
+    int lit = 0;
+    for (int x = 118; x < 150; x++)
+        for (int y = 130; y < 175; y++)
+            if (draw_get_pixel((int16_t)x, (int16_t)y) != 0) lit++;
+    if (lit > 0) PASS();
+    else FAIL("|1g copied nothing");
+}
+
+static void test_level1_image_style(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1i RIP_ImageStyle sets the image area and mode");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|1i0A0A32320002|");
+    if (s.icon_style_active && s.icon_style_x0 == 10 && s.image_style == 2) PASS();
+    else FAIL("|1i did not record the image style");
 }
 
 /* D-5: the four commands present in the driver's dispatch table but missing
@@ -3442,14 +3952,65 @@ static void test_cmd_x_filled_poly_bezier(void) {
     else FAIL("|x produced no filled region");
 }
 
+/* '|d' and '|D' are base-64 commands.  These payloads are taken verbatim
+ * from TeleGrafix's ICONS/TUNNEL.RIP, which writes a 64-entry ramp whose
+ * indices step by one and whose RGB steps by four -- a sequence that only
+ * comes out right in base 64.  Decoded as base 36 the '#' and '&' digits
+ * become 0 and collapse onto palette entry 0.  See D-12. */
+static void test_cmd_d_palette_uses_base64(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|d decodes index and RGB in base 64");
+    init_fixture(&s, &ctx);
+    /* "0#" = 62, bits = 8, "001u" = 120.  '#' is digit 62, which the
+     * base-36 decoder would read as 0. */
+    feed_script(&s, &ctx, "!|d0#8001u|");
+    /* rgb 120 = (r 0, g 0, b 120) -> rgb565 (120 & 0xF8) >> 3 = 15 */
+    if (palette_read_rgb565(62) != 15) {
+        FAIL("|d wrote the wrong palette entry or colour");
+        return;
+    }
+    if (palette_read_rgb565(0) != 0) {
+        FAIL("|d clobbered entry 0, so '#' decoded as digit 0");
+        return;
+    }
+    PASS();
+}
+
+static void test_cmd_D_palette_block_uses_base64(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|D writes a palette block in base 64");
+    init_fixture(&s, &ctx);
+    /* start "0z" = 61, count "02" = 2, bits 8, then two 24-bit RGB values.
+     * "00#0" uses digit '#' = 62, so the value is 62 << 6 = 3968; "001u"
+     * uses 'u' = 56, giving 1*64 + 56 = 120.  Both digits are outside the
+     * base-36 alphabet, which is the point. */
+    feed_script(&s, &ctx, "!|D0z028" "00#0" "001u" "|");
+    /* entry 61 gets 3968 = 0x000F80 -> r 0, g 15, b 128
+     *   rgb565 = ((0&0xF8)<<8) | ((15&0xFC)<<3) | ((128&0xF8)>>3) = 96 + 16 */
+    if (palette_read_rgb565(61) != (uint16_t)((((0 & 0xF8) << 8)) |
+                                              (((15 & 0xFC) << 3)) |
+                                              (((128 & 0xF8) >> 3)))) {
+        FAIL("|D first block entry decoded wrong");
+        return;
+    }
+    if (palette_read_rgb565(62) != 15) {
+        FAIL("|D second block entry decoded wrong");
+        return;
+    }
+    PASS();
+}
+
 static void test_cmd_y_extended_font_style(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|y RIP_EXTENDED_FONT_STYLE parses the 26-char layout");
     init_fixture(&s, &ctx);
-    /* widths 1,1,4,2,2,2,2,2,2,2,6 = 26 chars.
-     * font=1 .. arg5 rotation=90 (offset 10), arg8 spacing=64 (offset 16) */
-    feed_script(&s, &ctx, "!|y" "1" "0" "0000" "00" "00" "2I" "00" "00" "1S" "00" "000000" "|");
-    if (s.char_spacing != 64) { FAIL("|y did not record character spacing"); return; }
+    /* widths 1,1,4,2,2,2,2,2,2,2,6 = 26 chars.  '|y' is one of the four
+     * commands the dispatch table marks as always BASE 64, so the fields
+     * below are base-64 encoded: "1Q" = 90 (rotation), "1a" = 100 (spacing
+     * as a percentage -- exactly what every |y in the shipped corpus
+     * carries).  See D-12. */
+    feed_script(&s, &ctx, "!|y" "1" "0" "0000" "00" "00" "1Q" "00" "00" "1a" "00" "000000" "|");
+    if (s.char_spacing != 100) { FAIL("|y did not record character spacing"); return; }
     if (s.font_dir != 3)      { FAIL("|y rotation 90 did not map to dir 3"); return; }
     PASS();
 }
@@ -3618,12 +4179,12 @@ static void test_world_frame_f_not_font_attrib(void) {
 
 static void test_ext_fill_pattern_ext_D(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|D installs user fill pattern, sets fill_pattern=12");
+    TEST("|s installs user fill pattern, sets fill_pattern=12");
     init_fixture(&s, &ctx);
     /* 8 pattern bytes (mega2 each = 16 chars) + color:2 = 18 chars */
-    feed_script(&s, &ctx, "!|D2U2U2U2U2U2U2U2U07|");
+    feed_script(&s, &ctx, "!|s2U2U2U2U2U2U2U2U07|");
     if (s.fill_pattern == 12 && s.fill_color == 7) PASS();
-    else FAIL("|D did not install user fill pattern");
+    else FAIL("|s did not install user fill pattern");
 }
 
 /* ── Level 1 ──────────────────────────────────────────────────────── */
@@ -3791,11 +4352,11 @@ static void test_var_ripver_returns_a2gspu(void) {
 
 static void test_var_compat_returns_one(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$COMPAT$ expands to \"1\"");
+    TEST("$RLCOMPAT$ expands to \"1\"");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "<<IF $COMPAT$=1>>!|X1200|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $RLCOMPAT$=1>>!|X1200|<<ENDIF>>");
     if (draw_get_pixel(38, 0) != 0) PASS();
-    else FAIL("$COMPAT$ did not return \"1\"");
+    else FAIL("$RLCOMPAT$ did not return \"1\"");
 }
 
 static void test_var_ispalette_returns_one(void) {
@@ -3809,12 +4370,12 @@ static void test_var_ispalette_returns_one(void) {
 
 static void test_var_prot_reflects_resolution_mode(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("$PROT$ expands to s->resolution_mode");
+    TEST("$RLPROT$ expands to s->resolution_mode");
     init_fixture(&s, &ctx);
     s.resolution_mode = 2;
-    feed_script(&s, &ctx, "<<IF $PROT$=2>>!|X1400|<<ENDIF>>");
+    feed_script(&s, &ctx, "<<IF $RLPROT$=2>>!|X1400|<<ENDIF>>");
     if (draw_get_pixel(40, 0) != 0) PASS();
-    else FAIL("$PROT$ did not match resolution_mode");
+    else FAIL("$RLPROT$ did not match resolution_mode");
 }
 
 static void test_var_coordsize_reflects_state(void) {
@@ -3930,7 +4491,7 @@ static void test_icon_style_stretch_mode(void) {
         FAIL("setup: cache"); return;
     }
     /* |& sets style box (5,5)-(25,25), mode=00 (stretch), align=00, scale=00 */
-    feed_script(&s, &ctx, "!|&050519190000000000|");
+    feed_script(&s, &ctx, "!|3&050519190000000000|");
     feed_script(&s, &ctx, "!|1I000000000MINI|");
     if (draw_get_pixel(15, 15) != 0) PASS();
     else FAIL("stretch mode left center empty");
@@ -3950,7 +4511,7 @@ static void test_icon_style_center_mode(void) {
     /* style box (10,10)-(50,50), mode=02 (center).  scale_y(10)=11,
      * scale_y1(50)=58 → effective box (10,11)-(50,58).  Centering 2×2
      * in a 41×48 box → top-left at (29, 34). */
-    feed_script(&s, &ctx, "!|&0A0A1E1E0200000000|");
+    feed_script(&s, &ctx, "!|3&0A0A1E1E0200000000|");
     feed_script(&s, &ctx, "!|1I000000000CTR|");
     if (draw_get_pixel(29, 34) != 0 || draw_get_pixel(30, 34) != 0) PASS();
     else FAIL("center mode missed expected location");
@@ -4440,7 +5001,7 @@ static void test_icon_style_proportional_mode(void) {
     if (!rip_icon_cache_pixels(&s.icon_state, "WIDE", 4, pixels, 2, 1)) {
         FAIL("setup: cache"); return;
     }
-    feed_script(&s, &ctx, "!|&0A0A1E1E0300000000|");
+    feed_script(&s, &ctx, "!|3&0A0A1E1E0300000000|");
     feed_script(&s, &ctx, "!|1I000000000WIDE|");
     int found = 0;
     for (int y = 10; y < 30 && !found; y++)
@@ -4687,6 +5248,8 @@ int main(void) {
     test_l1_mouse_region_define();
     test_l1_button_registers_region();
     test_l1_image_style_stored();
+    test_l3_delay_is_recorded_not_slept();
+    test_n_flags_unsupported_coordinate_width();
     test_l1_viewport_ext();
     test_l1_query_ext_returns_app_var();
     test_l1_define_query_and_expand_generic_var();
@@ -4823,7 +5386,8 @@ int main(void) {
     test_l0_erase_window_e();
     test_l0_erase_eol();
     test_l0_no_more_hash();
-    test_l0_region_text_t();
+    test_l1_region_text_t();
+    test_poly_bezier_signature_dispatch();
     test_l0_custom_fill_pattern_s();
     test_l0_fill_style_S_pattern_clamped();
     test_soh_introducer_starts_command();
@@ -4835,11 +5399,28 @@ int main(void) {
     test_ext_animation_frame_brace();
     test_ext_kill_mouse_in_region_K();
     test_ext_mouse_region_ext_colon();
-    test_ext_button_ext_semicolon();
+    test_skewed_oval_family_extents();
+    test_ext_poly_marker_semicolon();
+    test_wide_coordinates_render_the_same_shape();
+    test_char_spacing_changes_text_extent();
+    test_bezier_honours_stream_step_count();
+    test_poly_marker_glyphs_differ();
+    test_ext_poly_marker_rejects_bad_fields();
     test_ext_ext_text_window_b();
+    test_level1_kill_enclosed_mouse_fields();
+    test_level3_goto_url_records_without_launching();
+    test_level3_url_handler_opt_in();
+    test_level3_url_scheme_allowlist();
+    test_level3_goto_url_rejects_control_chars();
+    test_level3_encoded_stream_announcement();
+    test_level2_switch_palette_slot();
+    test_level1_copy_blit();
+    test_level1_image_style();
     test_cmd_j_point();
     test_cmd_r_text_metric();
     test_cmd_x_filled_poly_bezier();
+    test_cmd_d_palette_uses_base64();
+    test_cmd_D_palette_block_uses_base64();
     test_cmd_y_extended_font_style();
     test_cmd_y_rejects_zero_spacing();
     test_ext_one_drawing_palette_d();

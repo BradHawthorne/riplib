@@ -116,6 +116,12 @@ void draw_arc(int16_t cx, int16_t cy, int16_t r, int16_t start_deg, int16_t end_
 void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color);
 void draw_bezier(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
                  int16_t x2, int16_t y2, int16_t x3, int16_t y3);
+/* Same, but with the segment count fixed by the caller rather than
+ * estimated.  RIPscrip's bezier commands carry an `nsteps` field; this is
+ * how it is honoured.  Clamped to 2..64. */
+void draw_bezier_steps(int16_t x0, int16_t y0, int16_t x1, int16_t y1,
+                       int16_t x2, int16_t y2, int16_t x3, int16_t y3,
+                       int steps);
 void draw_polyline(const int16_t *points, int n);
 void draw_polygon(const int16_t *points, int n, bool fill);
 void draw_pie(int16_t cx, int16_t cy, int16_t r,

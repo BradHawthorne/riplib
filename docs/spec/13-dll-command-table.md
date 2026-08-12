@@ -3,7 +3,8 @@
 ==      SEGMENT 13: THE DLL COMMAND DISPATCH TABLE (VERBATIM)      ==
 =====================================================================
 
-Extracted from RIPSCRIP.DLL v3.0.7 (MD5 bade8b1f4e467ac7ad4edb2639738d4c)
+Extracted from RIPSCRIP.DLL (MD5 bade8b1f4e467ac7ad4edb2639738d4c; the
+binary self-reports version 3.00.04 — see segment 12, "Version labelling")
 at RVA 0x080820 - 129 entries, 40 bytes each.  Regenerate with:
 
      python scripts/dll-dispatch-table.py <path>/Ripscrip.dll

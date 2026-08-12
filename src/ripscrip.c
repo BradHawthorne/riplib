@@ -55,6 +55,12 @@
 #define mega2      rip_mega2
 #define mega3      rip_mega3
 #define mega4      rip_mega4    /* extracted MegaNum decoder (C-002 step 3) */
+/* Base-64 forms, for the four commands the dispatch table marks as always
+ * base 64 ('|D', '|d', '|h', '|y').  Never use these on any other command,
+ * and never use the base-36 forms on these -- see rip_meganum.h and D-12. */
+#define mega_digit64 rip_mega_digit64
+#define mega2_64     rip_mega2_64
+#define mega4_64     rip_mega4_64
 #include "rip_clipboard.h"  /* extracted clipboard + blit (C-002 step 6) */
 #include "rip_internal.h"   /* shared inline helpers (rip_strnlen, rip_filename_is_safe) */
 /* rip_raf: stubbed in riplib */
@@ -143,6 +149,534 @@ static int16_t scale_y(int16_t y) {
 }
 static int16_t scale_y1(int16_t y) {
     return (int16_t)((y * 8 + 6) / 7);
+}
+
+/* -- Skewed-oval geometry -------------------------------------------------
+ * RIPscrip's skewed-oval family ('&', '-', '[', ']', '+', '_') is rendered
+ * by the driver as a point-per-degree polygon, not by a GDI ellipse call.
+ * The generator at RVA 0x010160 walks start..end inclusive and emits
+ *
+ *     X  = rx * cos(t) >> 14         Y  = ry * sin(t) >> 14
+ *     px = cx + (X * cos(skew) - Y * sin(skew)) >> 14
+ *     py = cy - (X * sin(skew) + Y * cos(skew)) >> 14
+ *
+ * an axis-aligned ellipse point rotated by `skew` degrees, Y inverted for
+ * screen coordinates.  `skew` is therefore a rotation angle in whole
+ * degrees, not a shear factor.  The driver then hands the run to Polygon()
+ * (filled variants) or strokes it (open variants).
+ *
+ * The table below is the driver's own Q14 sine table, transcribed verbatim
+ * from RVA 0x07b638 by scripts/dll-disasm.py.  The driver carries a second
+ * cosine table at RVA 0x07b098; it equals sin(t+90) for 358 of its 360
+ * entries and differs by one LSB on the remaining two, so a single table
+ * serves both with a worst-case error of 1/16384 of a radius. */
+#define RIP_Q14           14
+#define RIP_OVAL_MAX_PTS  121   /* a full turn at 3 deg steps */
+
+static const int16_t rip_sin_q14[360] = {
+          0,     285,     571,     857,    1142,    1427,    1712,    1996,    2280,    2563,
+       2845,    3126,    3406,    3685,    3963,    4240,    4516,    4790,    5062,    5334,
+       5603,    5871,    6137,    6401,    6663,    6924,    7182,    7438,    7691,    7943,
+       8191,    8438,    8682,    8923,    9161,    9397,    9630,    9860,   10086,   10310,
+      10531,   10748,   10963,   11173,   11381,   11585,   11785,   11982,   12175,   12365,
+      12550,   12732,   12910,   13084,   13254,   13420,   13582,   13740,   13894,   14043,
+      14188,   14329,   14466,   14598,   14725,   14848,   14967,   15081,   15190,   15295,
+      15395,   15491,   15582,   15668,   15749,   15825,   15897,   15964,   16025,   16082,
+      16135,   16182,   16224,   16261,   16294,   16321,   16344,   16361,   16374,   16381,
+      16384,   16381,   16374,   16361,   16344,   16321,   16294,   16261,   16224,   16182,
+      16135,   16082,   16025,   15964,   15897,   15825,   15749,   15668,   15582,   15491,
+      15395,   15295,   15190,   15081,   14967,   14848,   14725,   14598,   14466,   14329,
+      14188,   14043,   13894,   13740,   13582,   13420,   13254,   13084,   12910,   12732,
+      12550,   12365,   12175,   11982,   11785,   11585,   11381,   11173,   10963,   10748,
+      10531,   10310,   10086,    9860,    9630,    9397,    9161,    8923,    8682,    8438,
+       8191,    7943,    7691,    7438,    7182,    6924,    6663,    6401,    6137,    5871,
+       5603,    5334,    5062,    4790,    4516,    4240,    3963,    3685,    3406,    3126,
+       2845,    2563,    2280,    1996,    1712,    1427,    1142,     857,     571,     285,
+          0,    -285,    -571,    -857,   -1142,   -1427,   -1712,   -1996,   -2280,   -2563,
+      -2845,   -3126,   -3406,   -3685,   -3963,   -4240,   -4516,   -4790,   -5062,   -5334,
+      -5603,   -5871,   -6137,   -6401,   -6663,   -6924,   -7182,   -7438,   -7691,   -7943,
+      -8191,   -8438,   -8682,   -8923,   -9161,   -9397,   -9630,   -9860,  -10086,  -10310,
+     -10531,  -10748,  -10963,  -11173,  -11381,  -11585,  -11785,  -11982,  -12175,  -12365,
+     -12550,  -12732,  -12910,  -13084,  -13254,  -13420,  -13582,  -13740,  -13894,  -14043,
+     -14188,  -14329,  -14466,  -14598,  -14725,  -14848,  -14967,  -15081,  -15190,  -15295,
+     -15395,  -15491,  -15582,  -15668,  -15749,  -15825,  -15897,  -15964,  -16025,  -16082,
+     -16135,  -16182,  -16224,  -16261,  -16294,  -16321,  -16344,  -16361,  -16374,  -16381,
+     -16384,  -16381,  -16374,  -16361,  -16344,  -16321,  -16294,  -16261,  -16224,  -16182,
+     -16135,  -16082,  -16025,  -15964,  -15897,  -15825,  -15749,  -15668,  -15582,  -15491,
+     -15395,  -15295,  -15190,  -15081,  -14967,  -14848,  -14725,  -14598,  -14466,  -14329,
+     -14188,  -14043,  -13894,  -13740,  -13582,  -13420,  -13254,  -13084,  -12910,  -12732,
+     -12550,  -12365,  -12175,  -11982,  -11785,  -11585,  -11381,  -11173,  -10963,  -10748,
+     -10531,  -10310,  -10086,   -9860,   -9630,   -9397,   -9161,   -8923,   -8682,   -8438,
+      -8192,   -7943,   -7691,   -7438,   -7182,   -6924,   -6663,   -6401,   -6137,   -5871,
+      -5603,   -5334,   -5062,   -4790,   -4516,   -4240,   -3963,   -3685,   -3406,   -3126,
+      -2845,   -2563,   -2280,   -1996,   -1712,   -1427,   -1142,    -857,    -571,    -285,
+};
+
+static int32_t rip_sin14(int a) {
+    return rip_sin_q14[((a % 360) + 360) % 360];
+}
+static int32_t rip_cos14(int a) {
+    return rip_sin14(a + 90);
+}
+
+/* Emit the skewed-oval outline over [start,end] degrees inclusive as x,y
+ * pairs.  Steps one degree at a time where the span fits the buffer and
+ * coarsens uniformly when it does not, then always lands exactly on `end`
+ * so an arc terminates where the stream said it should.  Callers pass
+ * coordinates already run through scale_y(); this routine is pure geometry.
+ * Returns the number of POINTS written (not the number of int16_t). */
+static int rip_skewed_oval_points(int16_t cx, int16_t cy,
+                                  int16_t rx, int16_t ry, int16_t skew,
+                                  int start, int end,
+                                  int16_t *pts, int max_pts)
+{
+    int32_t cs, sn, X, Y;
+    int span, step, n = 0, t, last = start;
+
+    if (max_pts < 2)
+        return 0;
+
+    /* A sweep may wrap through 0.  TeleGrafix's own demo does exactly this:
+     * '|_' RIP_FILLED_OVAL_CHORD is issued with start=324 end=216, meaning
+     * 324 deg -> 360/0 -> 216 deg, a 252 degree arc.  Bailing out when
+     * end < start drew nothing at all for that command.  The driver handles
+     * it by normalising against 360 (RVA 0x100125C0); adding a turn here is
+     * the same thing, and rip_sin14()/rip_cos14() already reduce mod 360. */
+    if (end < start)
+        end += 360;
+
+    cs   = rip_cos14(skew);
+    sn   = rip_sin14(skew);
+    span = end - start;
+    step = span / (max_pts - 1) + 1;
+
+    for (t = start; t <= end && n < max_pts; t += step) {
+        X = ((int32_t)rx * rip_cos14(t)) >> RIP_Q14;
+        Y = ((int32_t)ry * rip_sin14(t)) >> RIP_Q14;
+        pts[2 * n]     = (int16_t)(cx + ((X * cs - Y * sn) >> RIP_Q14));
+        pts[2 * n + 1] = (int16_t)(cy - ((X * sn + Y * cs) >> RIP_Q14));
+        last = t;
+        n++;
+    }
+    if (n > 0 && n < max_pts && last != end) {
+        X = ((int32_t)rx * rip_cos14(end)) >> RIP_Q14;
+        Y = ((int32_t)ry * rip_sin14(end)) >> RIP_Q14;
+        pts[2 * n]     = (int16_t)(cx + ((X * cs - Y * sn) >> RIP_Q14));
+        pts[2 * n + 1] = (int16_t)(cy - ((X * sn + Y * cs) >> RIP_Q14));
+        n++;
+    }
+    return n;
+}
+
+/* Defined further down with the other fill helpers; the skewed-oval renderer
+ * needs them here so the family honours |N the same way |O and |I do. */
+static bool rip_begin_filled_border(rip_state_t *s, uint8_t *saved_mode);
+static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode);
+
+/* -- Multi-contour (poly-polygon) fill ------------------------------------
+ * '|<' RIP_POLY_POLYGON submits several closed contours as ONE shape, and
+ * the interior is decided by the even-odd rule across all of them together:
+ * where contours overlap, the overlap is a HOLE.  TeleGrafix's own demo
+ * (ICONS/POLYPOLY.RIP) draws a circle behind the shape and comments "so you
+ * can see the transparency aspect", so the holes are the point of the
+ * command -- filling each contour independently would paint them solid and
+ * lose exactly the effect being demonstrated.
+ *
+ * Contours are stored back-to-back in `pts` with `starts[i]`/`counts[i]`
+ * delimiting each one. */
+/* Sized for the stack, not for generosity.  RIPlib runs on Cortex-M parts
+ * whose whole stack is 4-8 KB, and this command needs two buffers live at
+ * once: the point array plus the scanline intersection list.  128 points
+ * across 32 contours is comfortably more than real content uses --
+ * TeleGrafix's ICONS/POLYPOLY.RIP, the only shipped scene exercising '|<',
+ * submits 5 contours totalling 18 points. */
+#define RIP_POLYPOLY_MAX_CONTOURS  32
+#define RIP_POLYPOLY_MAX_PTS      128
+
+static void rip_fill_poly_polygon(const int16_t *pts,
+                                  const int16_t *starts, const int16_t *counts,
+                                  int ncontours)
+{
+    int16_t xs[RIP_POLYPOLY_MAX_PTS];
+    int16_t ymin = 32767, ymax = -32768;
+    int c, i, y, n, a, b;
+
+    for (c = 0; c < ncontours; c++) {
+        for (i = 0; i < counts[c]; i++) {
+            int16_t py = pts[2 * (starts[c] + i) + 1];
+            if (py < ymin) ymin = py;
+            if (py > ymax) ymax = py;
+        }
+    }
+    if (ymin > ymax)
+        return;
+
+    for (y = ymin; y <= ymax; y++) {
+        n = 0;
+        for (c = 0; c < ncontours; c++) {
+            int cnt = counts[c];
+            for (i = 0; i < cnt && n < RIP_POLYPOLY_MAX_PTS; i++) {
+                const int16_t *p0 = &pts[2 * (starts[c] + i)];
+                const int16_t *p1 = &pts[2 * (starts[c] + (i + 1) % cnt)];
+                int16_t y0 = p0[1], y1 = p1[1];
+
+                /* Half-open rule: count an edge only where y0 <= y < y1 (or
+                 * the mirror), so shared vertices are not counted twice. */
+                if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
+                    int32_t dx = (int32_t)p1[0] - p0[0];
+                    int32_t dy = (int32_t)y1 - y0;
+                    xs[n++] = (int16_t)(p0[0] + dx * (y - y0) / dy);
+                }
+            }
+        }
+        /* Insertion sort: spans are short and this avoids pulling in qsort. */
+        for (a = 1; a < n; a++) {
+            int16_t v = xs[a];
+            for (b = a - 1; b >= 0 && xs[b] > v; b--)
+                xs[b + 1] = xs[b];
+            xs[b + 1] = v;
+        }
+        for (a = 0; a + 1 < n; a += 2)
+            draw_line(xs[a], (int16_t)y, xs[a + 1], (int16_t)y);
+    }
+}
+
+/* '|P' RIP_POLYGON, '|p' RIP_FILL_POLYGON and '|l' RIP_POLYLINE.
+ *
+ * Vertex cap, and why it moved.  This used to allow at most 64 vertices and
+ * REJECT anything larger outright -- not truncate, drop the whole command.
+ * Real content exceeds that: TeleGrafix's HAWK.RIP declares a 153-vertex
+ * filled polygon and LGF1.RIP two of 88 and 85, so those shapes rendered as
+ * nothing at all.  The old comment justified the cap as keeping the point
+ * array on the stack and "out of the malloc fallback path inside
+ * draw_polygon", but draw_polygon already handles any n -- 64 intersections
+ * on the stack, malloc above that -- so the cap only ever cost content.
+ *
+ * The array lives here rather than in the command switch for the same
+ * reason '|<' does: inside the switch it would sit in execute_rip_command's
+ * frame and every command in the protocol would pay for it. */
+#define RIP_POLY_MAX_PTS 192      /* corpus maximum is 153 */
+
+static void rip_exec_polygon(rip_state_t *s, char cmd, const char *p, int len)
+{
+    int16_t pts[2 * RIP_POLY_MAX_PTS];
+    int npts, i;
+
+    if (len < 6)
+        return;
+    npts = mega2(p);
+    /* Two vertices is the driver's own floor -- '|<' reports "Must have at
+     * least two vertices to make a polygon" -- and the ceiling is this
+     * buffer.  A stream above it is still refused rather than silently
+     * drawn short, because half a polygon is a wrong shape, not a partial
+     * one. */
+    if (npts < 2 || npts > RIP_POLY_MAX_PTS)
+        return;
+    if (len < 2 + npts * 4)
+        return;
+
+    for (i = 0; i < npts; i++) {
+        pts[i * 2]     = mega2(p + 2 + i * 4);
+        pts[i * 2 + 1] = scale_y(mega2(p + 4 + i * 4));
+    }
+
+    if (cmd == 'l') {
+        draw_polyline(pts, npts);
+    } else if (cmd == 'p') {
+        uint8_t border_mode;
+        if (s->fill_pattern != 0) {
+            draw_set_color(s->palette[s->fill_color & 0x0F]);
+            draw_polygon(pts, npts, true);
+        }
+        if (rip_begin_filled_border(s, &border_mode)) {
+            draw_polygon(pts, npts, false);
+            rip_end_filled_border(s, border_mode);
+        } else {
+            draw_set_color(s->palette[s->draw_color & 0x0F]);
+        }
+    } else {
+        draw_polygon(pts, npts, false);
+    }
+}
+
+/* '|<' RIP_POLY_POLYGON, kept out of the command switch purely for STACK.
+ *
+ * Its point array and contour index tables total several hundred bytes, and
+ * inside the switch those bytes sit in execute_rip_command's frame — so
+ * every command in the protocol pays for them on every call.  Measured with
+ * arm-none-eabi-gcc -fstack-usage for cortex-m4, leaving them there pushed
+ * the dispatcher from 648 to 1024 bytes.  Here they are live only while
+ * this one command runs.
+ *
+ * Dispatch slot 13 (RVA 0x01e80a), VARIABLE length.  The handler reads
+ * arg[0] as a count and walks the rest; its own diagnostics are "Must have
+ * at least two vertices to make a polygon" and "Insufficient vertices (2)".
+ * Wire layout read off TeleGrafix's ICONS/POLYPOLY.RIP, which labels itself
+ * RIP_POLY_POLYGON on screen:
+ *
+ *     count:2  then per contour  nverts:2  followed by nverts * (x:2 y:2)
+ */
+static void rip_exec_poly_polygon(rip_state_t *s, const char *p, int len)
+{
+    int16_t pts[2 * RIP_POLYPOLY_MAX_PTS];
+    /* int16_t, not int: 32 contours x two tables costs 256 bytes as int
+     * and 128 as int16_t, and neither index can exceed
+     * RIP_POLYPOLY_MAX_PTS. */
+    int16_t starts[RIP_POLYPOLY_MAX_CONTOURS];
+    int16_t counts[RIP_POLYPOLY_MAX_CONTOURS];
+    int npolys, off = 2, ncontours = 0, total = 0, c, i;
+    uint8_t border_mode;
+
+    if (len < 2)
+        return;
+    npolys = mega2(p);
+    if (npolys > RIP_POLYPOLY_MAX_CONTOURS)
+        npolys = RIP_POLYPOLY_MAX_CONTOURS;
+
+    for (c = 0; c < npolys; c++) {
+        int nv;
+
+        if (off + 2 > len)
+            break;
+        nv = mega2(p + off);
+        off += 2;
+        /* The driver rejects a contour with fewer than two vertices by
+         * name; do the same rather than emitting a degenerate edge list. */
+        if (nv < 2 || off + 4 * nv > len ||
+            total + nv > RIP_POLYPOLY_MAX_PTS)
+            break;
+
+        starts[ncontours] = (int16_t)total;
+        counts[ncontours] = (int16_t)nv;
+        for (i = 0; i < nv; i++) {
+            pts[2 * (total + i)]     = mega2(p + off + 4 * i);
+            pts[2 * (total + i) + 1] = scale_y(mega2(p + off + 4 * i + 2));
+        }
+        total += nv;
+        off   += 4 * nv;
+        ncontours++;
+    }
+
+    if (ncontours == 0)
+        return;
+
+    if (s->fill_pattern != 0) {
+        draw_set_color(s->palette[s->fill_color & 0x0F]);
+        rip_fill_poly_polygon(pts, starts, counts, ncontours);
+    }
+    if (rip_begin_filled_border(s, &border_mode)) {
+        for (c = 0; c < ncontours; c++)
+            draw_polygon(&pts[2 * starts[c]], counts[c], false);
+        rip_end_filled_border(s, border_mode);
+    } else {
+        draw_set_color(s->palette[s->draw_color & 0x0F]);
+    }
+}
+
+/* Generated by scripts/dll-marker-glyphs.py -- do not edit by hand.
+ *
+ * The 36 RIP_PolyMarker glyph outlines, extracted from the driver's
+ * descriptor table at RVA 0x07ca48.  Coordinates are in a normalised
+ * space of +/-50 which the caller scales by the marker's half-width and
+ * half-height and rotates by its skew.  Marker 0 has no outline: the
+ * driver draws it with the shared ellipse generator, so it is a circle. */
+static const int8_t rip_marker_pts[][2] = {
+    {  -8, -50},{   8, -50},{   8,  -8},{  50,  -8},{  50,   8},{   8,   8},{   8,  50},{  -8,  50},
+    {  -8,   8},{ -50,   8},{ -50,  -8},{  -8,  -8},{  -8, -50},{   8, -50},{   8, -13},{  41, -30},
+    {  48, -16},{  11,   3},{  32,  36},{  23,  45},{   0,  13},{ -23,  45},{ -32,  36},{ -11,   3},
+    { -48, -16},{ -41, -30},{  -8, -13},{ -50, -50},{ -34, -50},{   0,  -9},{  34, -50},{  50, -50},
+    {   9,   0},{  50,  50},{  34,  50},{   0,   9},{ -34,  50},{ -50,  50},{  -9,   0},{ -34, -50},
+    {  34, -50},{  34, -34},{  50, -34},{  50,  34},{  34,  34},{  34,  50},{ -34,  50},{ -34,  34},
+    { -50,  34},{ -50, -34},{ -34, -34},{  -8, -50},{   8, -50},{   8, -23},{  23, -23},{  23,  -8},
+    {  50,  -8},{  50,   8},{  23,   8},{  23,  23},{   8,  23},{   8,  50},{  -8,  50},{  -8,  23},
+    { -23,  23},{ -23,   8},{ -50,   8},{ -50,  -8},{ -23,  -8},{ -23, -23},{  -8, -23},{   0, -25},
+    {  50,  26},{ -50,  26},{   0, -50},{  35,   0},{   0,  50},{ -35,   0},{ -27, -20},{  50, -20},
+    {  27,  20},{ -50,  20},{ -50, -20},{  27, -20},{  50,  20},{ -27,  20},{ -27, -20},{  27, -20},
+    {  50,  20},{ -50,  20},{   0, -50},{  18, -31},{   0,   0},{  31, -18},{  50,   0},{  31,  18},
+    {   0,   0},{  18,  31},{   0,  50},{ -18,  31},{   0,   0},{ -31,  18},{ -50,   0},{ -31, -18},
+    {   0,   0},{ -18, -31},{ -20, -50},{  20, -50},{  10, -25},{  25, -10},{  50, -20},{  50,  20},
+    {  25,  10},{  10,  25},{  20,  50},{ -20,  50},{ -10,  25},{ -25,  10},{ -50,  20},{ -50, -20},
+    { -25, -10},{ -10, -25},{   0, -50},{  12, -38},{   5, -31},{   5,  -5},{  31,  -5},{  38, -12},
+    {  50,   0},{  38,  12},{  31,   5},{   5,   5},{   5,  31},{  12,  38},{   0,  50},{ -12,  38},
+    {  -5,  31},{  -5,   5},{ -31,   5},{ -38,  12},{ -50,   0},{ -38, -12},{ -31,  -5},{  -5,  -5},
+    {  -5, -31},{ -12, -38},{   0, -50},{  29, -15},{   9, -15},{   9,  50},{  -9,  50},{  -9, -15},
+    { -29, -15},{   0, -50},{  29, -15},{   9, -15},{   9,  19},{  18,  30},{  18,  50},{   9,  39},
+    {  -9,  39},{ -18,  50},{ -18,  30},{  -9,  19},{  -9, -15},{ -29, -15},{   0, -50},{  50,  50},
+    {   0,  30},{ -50,  50},{   0, -50},{  12, -35},{   5, -35},{   5,  35},{  12,  35},{   0,  50},
+    { -12,  35},{  -5,  35},{  -5, -35},{ -12, -35},{   0, -50},{  15, -35},{   5, -35},{   5,  -5},
+    {  35,  -5},{  35, -15},{  50,   0},{  35,  15},{  35,   5},{   5,   5},{   5,  35},{  15,  35},
+    {   0,  50},{ -15,  35},{  -5,  35},{  -5,   5},{ -35,   5},{ -35,  15},{ -50,   0},{ -35, -15},
+    { -35,  -5},{  -5,  -5},{  -5, -35},{ -15, -35},{   0, -50},{  10, -40},{   5, -40},{   5, -15},
+    {  24, -32},{  21, -35},{  35, -35},{  35, -21},{  32, -24},{  15,  -5},{  40,  -5},{  40, -10},
+    {  50,   0},{  40,  10},{  40,   5},{  15,   5},{  32,  24},{  35,  21},{  35,  35},{  21,  35},
+    {  24,  32},{   5,  15},{   5,  40},{  10,  40},{   0,  50},{ -10,  40},{  -5,  40},{  -5,  15},
+    { -24,  32},{ -21,  35},{ -35,  35},{ -35,  21},{ -32,  24},{ -15,   5},{ -40,   5},{ -40,  10},
+    { -50,   0},{ -40, -10},{ -40,  -5},{ -15,  -5},{ -32, -24},{ -35, -21},{ -35, -35},{ -21, -35},
+    { -24, -32},{  -5, -15},{  -5, -40},{ -10, -40},{   0, -50},{  44,  25},{ -44,  25},{ -50, -50},
+    {  50, -50},{  50,  50},{ -50,  50},{   0, -50},{  48, -15},{  33,  38},{ -33,  38},{ -48, -15},
+    { -25, -43},{  25, -43},{  50,   0},{  25,  43},{ -25,  43},{ -50,   0},{   0, -50},{  39, -32},
+    {  48,  11},{  22,  45},{ -22,  45},{ -48,  11},{ -39, -32},{ -22, -50},{  22, -50},{  50, -22},
+    {  50,  22},{  22,  50},{ -22,  50},{ -50,  22},{ -50, -22},{ -17, -47},{  17, -47},{  43, -25},
+    {  49,   8},{  33,  38},{   0,  50},{ -33,  38},{ -49,   8},{ -43, -25},{ -16, -47},{  16, -47},
+    {  41, -30},{  50,   0},{  41,  30},{  16,  47},{ -16,  47},{ -41,  30},{ -50,   0},{ -41, -30},
+    {   0, -50},{  11, -16},{  47, -16},{  18,   6},{  29,  41},{   0,  19},{ -29,  41},{ -18,   6},
+    { -47, -16},{ -11, -16},{   0, -50},{  19, -25},{  43, -25},{  28,   0},{  43,  25},{  19,  25},
+    {   0,  50},{ -19,  25},{ -43,  25},{ -28,   0},{ -43, -25},{ -19, -25},{   0, -50},{  11, -30},
+    {  36, -36},{  30, -11},{  50,   0},{  30,  11},{  36,  36},{  11,  30},{   0,  50},{ -11,  30},
+    { -36,  36},{ -30,  11},{ -50,   0},{ -30, -11},{ -36, -36},{ -11, -30},{   0, -50},{   8, -24},
+    {  29, -41},{  21, -16},{  48, -16},{  26,   0},{  48,  16},{  21,  16},{  29,  41},{   8,  24},
+    {   0,  50},{  -8,  24},{ -29,  41},{ -21,  16},{ -48,  16},{ -26,   0},{ -48, -16},{ -21, -16},
+    { -29, -41},{  -8, -24},{   0, -50},{   7, -25},{  26, -43},{  18, -18},{  43, -26},{  25,  -7},
+    {  50,   0},{  25,   7},{  43,  26},{  18,  18},{  26,  43},{   7,  25},{   0,  50},{  -7,  25},
+    { -26,  43},{ -18,  18},{ -43,  26},{ -25,   7},{ -50,   0},{ -25,  -7},{ -43, -26},{ -18, -18},
+    { -26, -43},{  -7, -25},{   0, -50},{   6, -26},{  22, -46},{  16, -20},{  39, -32},{  23, -12},
+    {  50, -12},{  25,   0},{  50,  12},{  23,  12},{  39,  32},{  16,  20},{  22,  46},{   6,  26},
+    {   0,  50},{  -6,  26},{ -22,  46},{ -16,  20},{ -39,  32},{ -23,  12},{ -50,  12},{ -25,   0},
+    { -50, -12},{ -23, -12},{ -39, -32},{ -16, -20},{ -22, -46},{  -6, -26},{   0, -50},{   5, -25},
+    {  19, -46},{  14, -21},{  36, -36},{  21, -14},{  46, -19},{  25,  -5},{  50,   0},{  25,   5},
+    {  46,  19},{  21,  14},{  36,  36},{  14,  21},{  19,  46},{   5,  25},{   0,  50},{  -5,  25},
+    { -19,  46},{ -14,  21},{ -36,  36},{ -21,  14},{ -46,  19},{ -25,   5},{ -50,   0},{ -25,  -5},
+    { -46, -19},{ -21, -14},{ -36, -36},{ -14, -21},{ -19, -46},{  -5, -25},{   0, -50},{  10, -30},
+    {  50, -50},{  30, -10},{  50,   0},{  30,  10},{  50,  50},{  10,  30},{   0,  50},{ -10,  30},
+    { -50,  50},{ -30,  10},{ -50,   0},{ -30, -10},{ -50, -50},{ -10, -30},
+};
+
+static const struct { uint16_t off; uint8_t n; } rip_marker_glyph[36] = {
+    {    0,  0 },   /*  0 */
+    {    0, 12 },   /*  1 */
+    {   12, 15 },   /*  2 */
+    {   27, 12 },   /*  3 */
+    {   39, 12 },   /*  4 */
+    {   51, 20 },   /*  5 */
+    {   71,  3 },   /*  6 */
+    {   74,  4 },   /*  7 */
+    {   78,  4 },   /*  8 */
+    {   82,  4 },   /*  9 */
+    {   86,  4 },   /* 10 */
+    {   90, 16 },   /* 11 */
+    {  106, 16 },   /* 12 */
+    {  122, 24 },   /* 13 */
+    {  146,  7 },   /* 14 */
+    {  153, 13 },   /* 15 */
+    {  166,  4 },   /* 16 */
+    {  170, 10 },   /* 17 */
+    {  180, 24 },   /* 18 */
+    {  204, 48 },   /* 19 */
+    {  252,  3 },   /* 20 */
+    {  255,  4 },   /* 21 */
+    {  259,  5 },   /* 22 */
+    {  264,  6 },   /* 23 */
+    {  270,  7 },   /* 24 */
+    {  277,  8 },   /* 25 */
+    {  285,  9 },   /* 26 */
+    {  294, 10 },   /* 27 */
+    {  304, 10 },   /* 28 */
+    {  314, 12 },   /* 29 */
+    {  326, 16 },   /* 30 */
+    {  342, 20 },   /* 31 */
+    {  362, 24 },   /* 32 */
+    {  386, 28 },   /* 33 */
+    {  414, 32 },   /* 34 */
+    {  446, 16 },   /* 35 */
+};
+
+
+
+/* How the point run from rip_skewed_oval_points() is closed. */
+typedef enum {
+    RIP_OVAL_OUTLINE,   /* open run, stroked as a polyline (arc)          */
+    RIP_OVAL_CLOSED,    /* run closed end-to-start (full oval, chord)     */
+    RIP_OVAL_PIE        /* run closed through the centre (pie slice)      */
+} rip_oval_close_t;
+
+/* Shared renderer for the skewed-oval family.  `fill` requests the interior
+ * be painted with the current fill state before the border is stroked, which
+ * mirrors the driver handing the same point run to Polygon() twice. */
+static void rip_draw_skewed_oval(rip_state_t *s,
+                                 int16_t cx, int16_t cy,
+                                 int16_t rx, int16_t ry, int16_t skew,
+                                 int start, int end,
+                                 rip_oval_close_t close, bool fill)
+{
+    int16_t pts[2 * (RIP_OVAL_MAX_PTS + 1)];
+    uint8_t border_mode;
+    int n;
+
+    n = rip_skewed_oval_points(cx, cy, rx, ry, skew, start, end,
+                               pts, RIP_OVAL_MAX_PTS);
+    if (n < 2)
+        return;
+
+    if (close == RIP_OVAL_PIE) {
+        pts[2 * n]     = cx;          /* close through the centre */
+        pts[2 * n + 1] = cy;
+        n++;
+    }
+
+    if (fill && s->fill_pattern != 0) {
+        draw_set_color(s->palette[s->fill_color & 0x0F]);
+        draw_polygon(pts, n, true);
+    }
+
+    if (close == RIP_OVAL_OUTLINE) {
+        draw_set_color(s->palette[s->draw_color & 0x0F]);
+        draw_polyline(pts, n);
+        return;
+    }
+
+    if (fill) {
+        /* Filled variants honour the border flag the same way the other
+         * filled primitives do, so |N00 suppresses the outline. */
+        if (rip_begin_filled_border(s, &border_mode)) {
+            draw_polygon(pts, n, false);
+            rip_end_filled_border(s, border_mode);
+        } else {
+            draw_set_color(s->palette[s->draw_color & 0x0F]);
+        }
+    } else {
+        draw_set_color(s->palette[s->draw_color & 0x0F]);
+        draw_polygon(pts, n, false);
+    }
+}
+
+/* Draw one RIP_PolyMarker glyph.
+ *
+ * Marker 0 has no outline in the driver's table: it is dispatched to the
+ * shared ellipse generator with a full 0..360 sweep, so it is a circle.
+ * Every other number indexes the table above, whose coordinates live in a
+ * normalised +/-50 space; the driver scales them by the command's half-width
+ * and half-height and rotates by its skew, which is what happens here. */
+static void rip_draw_marker(rip_state_t *s, int16_t cx, int16_t cy,
+                            int num, int16_t hw, int16_t hh, int16_t rot)
+{
+    int16_t pts[2 * 48];
+    int32_t cs, sn;
+    int n, i;
+
+    if (num < 0 || num >= 36)
+        return;
+
+    if (rip_marker_glyph[num].n == 0) {
+        /* Marker 0: the circle, drawn by the same generator the skewed-oval
+         * family uses -- which is exactly what the driver does. */
+        rip_draw_skewed_oval(s, cx, cy, hw, hh, rot, 0, 360,
+                             RIP_OVAL_CLOSED, false);
+        return;
+    }
+
+    n  = rip_marker_glyph[num].n;
+    cs = rip_cos14(rot);
+    sn = rip_sin14(rot);
+    for (i = 0; i < n && i < 48; i++) {
+        const int8_t *g = rip_marker_pts[rip_marker_glyph[num].off + i];
+        /* Normalised /50, then scaled to the requested half-extent. */
+        int32_t X = ((int32_t)g[0] * hw) / 50;
+        int32_t Y = ((int32_t)g[1] * hh) / 50;
+        pts[2 * i]     = (int16_t)(cx + ((X * cs - Y * sn) >> RIP_Q14));
+        pts[2 * i + 1] = (int16_t)(cy + ((X * sn + Y * cs) >> RIP_Q14));
+    }
+    draw_set_color(s->palette[s->draw_color & 0x0F]);
+    draw_polygon(pts, i, false);
 }
 
 static void clamp_ega_rect(int16_t *x0, int16_t *y0,
@@ -600,7 +1134,6 @@ void rip_session_reset(rip_state_t *s) {
     s->cmd_len = 0;
     s->cmd_char = '\0';
     clear_levels(s);
-    s->line_cont = false;
     s->last_char = 0;
     s->esc_detect = 0;
     s->utf8_pipe_pending = false;
@@ -758,9 +1291,20 @@ static uint16_t rip_line_style_to_pattern(uint8_t style, uint16_t user_pat) {
  * Returns unescaped length (always <= input length, in-place safe).
  * ══════════════════════════════════════════════════════════════════ */
 
-static int unescape_text(const char *src, int len, char *dst) {
+/* `dst_max` is the capacity of dst and is enforced here rather than left to
+ * each caller.
+ *
+ * It was previously left to callers, and four of the six clamped their
+ * length argument by hand while two did not.  Those two wrote into a
+ * 256-byte buffer and were safe only because cmd_buf happened to be 256, so
+ * `len` could never exceed 255 — the sizes matched by accident, not by
+ * design.  Widening cmd_buf to hold the corpus's longest command turned
+ * that into an immediate stack-smash.  Bounding the function removes the
+ * whole class instead of adding two more hand clamps. */
+static int unescape_text(const char *src, int len, char *dst, int dst_max) {
     int j = 0;
-    for (int i = 0; i < len; i++) {
+    if (dst_max <= 0) return 0;
+    for (int i = 0; i < len && j < dst_max; i++) {
         if (src[i] == '\\' && i + 1 < len) {
             char next = src[i + 1];
             if (next == '!' || next == '|' || next == '\\' || next == '^') {
@@ -1177,7 +1721,7 @@ static void rip_render_text(rip_state_t *s, const char *raw, int raw_len) {
     int tlen;
 
     if (raw_len <= 0) return;
-    tlen = unescape_text(raw, raw_len, tbuf);
+    tlen = unescape_text(raw, raw_len, tbuf, (int)sizeof(tbuf));
     tlen = rip_expand_variables(s, tbuf, tlen, vbuf, sizeof(vbuf));
     if (tlen <= 0) return;
 
@@ -1364,10 +1908,376 @@ void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
         comp_set_cursor(c, 0, 0);
 }
 
+/* Scheme allow-list for '|3G' RIP_GotoURL.
+ *
+ * Only http:// and https:// are permitted.  This is a categorical refusal
+ * rather than a policy knob: javascript:, data:, file:, vbscript: and the
+ * like are the payloads that convert "open a link" into code execution or
+ * local-file disclosure, and an embedder should not have to know that list
+ * to be safe.  A host that wants a broader set can read s->goto_url itself.
+ *
+ * Case-insensitive, since schemes are. */
+static bool rip_url_scheme_allowed(const char *u, int len) {
+    static const char *const allowed[] = { "http://", "https://" };
+    for (size_t k = 0; k < sizeof(allowed) / sizeof(allowed[0]); k++) {
+        int n = (int)strlen(allowed[k]);
+        if (len <= n)
+            continue;                     /* scheme alone is not a URL */
+        int match = 1;
+        for (int i = 0; i < n; i++) {
+            char c = u[i];
+            if (c >= 'A' && c <= 'Z')
+                c = (char)(c - 'A' + 'a');
+            if (c != allowed[k][i]) { match = 0; break; }
+        }
+        if (match)
+            return true;
+    }
+    return false;
+}
+
+void rip_set_url_handler(rip_state_t *s, rip_url_handler_t handler) {
+    if (s)
+        s->url_handler = handler;
+}
+
+uint32_t rip_take_delay(rip_state_t *s) {
+    uint32_t d;
+
+    if (!s)
+        return 0;
+    d = s->delay_ticks;
+    s->delay_ticks = 0;
+    return d;
+}
+
+/* Poly-bezier family — '|t' (line), '|x' (filled), '|z' (outline).
+ *
+ * D-2, fixed 2026-08-12.  The driver accepts THREE distinct signatures for
+ * each of these letters, selected by ARGUMENT LENGTH, and their handlers sit
+ * adjacent in .text with structurally identical bodies:
+ *
+ *      4 chars   count:2  steps:2                    header  (no geometry)
+ *      5 chars   count:1  x:XY y:XY                  move-to (start point)
+ *     13 chars   count:1  x:XY y:XY x:XY y:XY x:XY y:XY
+ *                                                    curve-to: two control
+ *                                                    points plus an endpoint,
+ *                                                    continuing from the
+ *                                                    current point
+ *
+ * That is an ordinary poly-bezier stream: a header, a move, then a run of
+ * curve-to segments each contributing three points to a cubic whose first
+ * point is wherever the pen already is.
+ *
+ * RIPlib previously bound ONE layout per letter, so every other accepted form
+ * shifted each subsequent field and rendered silently wrong — a wrong length
+ * does not error, it just draws the wrong picture.  Dispatching on length
+ * removes that whole class of failure.
+ *
+ * RIPlib's own variable-length form (nsegs:2 nsteps:2 then four XY pairs per
+ * segment) is what its existing content and fixtures use, so it is kept and
+ * handled last.
+ *
+ * mode: 0 = line ('|t'), 1 = filled ('|x'), 2 = outline ('|z').
+ */
+/* The step count the stream asked for, or 0 to let the renderer estimate.
+ *
+ * '|t', '|x' and '|z' carry `nsteps` in their 4-character header form.
+ * RIPlib recorded it and then ignored it: filled curves always flattened to
+ * 12 segments and outlines always used draw_bezier()'s adaptive estimate,
+ * so a stream asking for coarse geometry got smooth curves regardless.
+ * Clamped to the range the drawing layer accepts. */
+static int rip_bez_steps(const rip_state_t *s) {
+    int n = (int)s->bez_steps;
+    if (n <= 0)  return 0;          /* unset -- keep the adaptive estimate */
+    if (n < 2)   return 2;
+    if (n > 64)  return 64;
+    return n;
+}
+
+static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
+                                   int mode) {
+    if (len == 4) {                       /* header: count, steps */
+        s->bez_steps = (uint16_t)mega2(p + 2);
+        return;
+    }
+    if (len == 5) {                       /* move-to */
+        s->bez_x = mega2(p + 1);
+        s->bez_y = scale_y(mega2(p + 3));
+        s->bez_valid = true;
+        return;
+    }
+    if (len == 13) {                      /* curve-to from the current point */
+        int16_t c1x = mega2(p + 1),  c1y = scale_y(mega2(p + 3));
+        int16_t c2x = mega2(p + 5),  c2y = scale_y(mega2(p + 7));
+        int16_t ex  = mega2(p + 9),  ey  = scale_y(mega2(p + 11));
+        int16_t sx = s->bez_valid ? s->bez_x : c1x;
+        int16_t sy = s->bez_valid ? s->bez_y : c1y;
+
+        if (mode == 1) {
+            /* Filled: flatten the segment and hand the closed outline to the
+             * scanline filler, matching how '|x' renders its long form. */
+            int16_t pts[2 * 65];
+            int steps = rip_bez_steps(s);
+            int n = 0;
+            if (steps == 0) steps = 12;      /* unset: the historical default */
+            for (int k = 0; k <= steps && n < 65; k++, n++) {
+                float t = (float)k / (float)steps, mt = 1.0f - t;
+                float a = mt*mt*mt, b = 3.0f*mt*mt*t, c = 3.0f*mt*t*t, d = t*t*t;
+                pts[n*2]     = (int16_t)(a*sx + b*c1x + c*c2x + d*ex);
+                pts[n*2 + 1] = (int16_t)(a*sy + b*c1y + c*c2y + d*ey);
+            }
+            if (n >= 3)
+                draw_polygon(pts, n, s->fill_pattern != 0);
+        } else {
+            {
+                int steps = rip_bez_steps(s);
+                if (steps)
+                    draw_bezier_steps(sx, sy, c1x, c1y, c2x, c2y, ex, ey, steps);
+                else
+                    draw_bezier(sx, sy, c1x, c1y, c2x, c2y, ex, ey);
+            }
+        }
+        s->bez_x = ex;
+        s->bez_y = ey;
+        s->bez_valid = true;
+        return;
+    }
+
+    /* RIPlib's multi-segment form: nsegs:2 nsteps:2 then 4 XY pairs each. */
+    if (len >= 4) {
+        int nsegs = mega2(p), offset = 4;
+        for (int seg = 0; seg < nsegs && offset + 16 <= len; seg++) {
+            int16_t bx0 = mega2(p + offset),      by0 = scale_y(mega2(p + offset + 2));
+            int16_t bx1 = mega2(p + offset + 4),  by1 = scale_y(mega2(p + offset + 6));
+            int16_t bx2 = mega2(p + offset + 8),  by2 = scale_y(mega2(p + offset + 10));
+            int16_t bx3 = mega2(p + offset + 12), by3 = scale_y(mega2(p + offset + 14));
+            if (mode == 1) {
+                int16_t pts[2 * 65];
+                int steps = rip_bez_steps(s);
+                int n = 0;
+                if (steps == 0) steps = 12;
+                for (int k = 0; k <= steps && n < 65; k++, n++) {
+                    float t = (float)k / (float)steps, mt = 1.0f - t;
+                    float a = mt*mt*mt, b = 3.0f*mt*mt*t, c = 3.0f*mt*t*t, d = t*t*t;
+                    pts[n*2]     = (int16_t)(a*bx0 + b*bx1 + c*bx2 + d*bx3);
+                    pts[n*2 + 1] = (int16_t)(a*by0 + b*by1 + c*by2 + d*by3);
+                }
+                if (n >= 3)
+                    draw_polygon(pts, n, s->fill_pattern != 0);
+            } else {
+                {
+                    int steps = rip_bez_steps(s);
+                    if (steps)
+                        draw_bezier_steps(bx0, by0, bx1, by1, bx2, by2, bx3, by3, steps);
+                    else
+                        draw_bezier(bx0, by0, bx1, by1, bx2, by2, bx3, by3);
+                }
+            }
+            s->bez_x = bx3; s->bez_y = by3; s->bez_valid = true;
+            offset += 16;
+        }
+    }
+}
+
+/* Generated by scripts/dll-argtypes.py -- do not edit by hand.
+ *
+ * Commands containing at least one argument whose width is negotiated
+ * rather than literal: 0xFF takes its width from '|n', 0xFE from '|M'.
+ * Everything else has fixed widths and never needs rewriting, so it is
+ * deliberately absent. */
+#define RIP_ARGTYPE_MAX 16
+typedef struct {
+    uint8_t letter;   /* command character            */
+    uint8_t level;    /* 0..3                         */
+    uint8_t n;        /* argument count               */
+    uint8_t t[RIP_ARGTYPE_MAX];
+} rip_argtypes_t;
+
+static const rip_argtypes_t rip_argtypes[] = {
+    { '"', 0,  5, {0xFF,0xFF,0xFF,0xFF,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '&', 0,  5, {0xFF,0xFF,0x02,0x02,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '+', 0,  7, {0xFF,0xFF,0xFF,0xFF,0x02,0x02,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { ',', 0, 10, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '-', 0,  5, {0xFF,0xFF,0xFF,0xFF,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '.', 0,  6, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { ':', 0, 11, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x01,0x00,0x00,0x00,0x00,0x00} },
+    { ';', 0,  7, {0xFF,0xFF,0x02,0xFF,0xFF,0x02,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '@', 0,  2, {0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'A', 0,  5, {0xFF,0xFF,0x02,0x02,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'B', 0,  4, {0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'b', 0,  9, {0xFF,0xFF,0xFF,0xFF,0x02,0x02,0x01,0x04,0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'C', 0,  3, {0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'c', 0,  1, {0xFE,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'f', 0,  2, {0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'G', 0,  3, {0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'g', 0,  2, {0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'I', 0,  5, {0xFF,0xFF,0x02,0x02,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'i', 0,  6, {0xFF,0xFF,0x02,0x02,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'j', 0,  2, {0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'K', 0,  4, {0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'k', 0,  1, {0xFE,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'L', 0,  4, {0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'm', 0,  2, {0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'O', 0,  6, {0xFF,0xFF,0x02,0x02,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'o', 0,  4, {0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'R', 0,  4, {0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'S', 0,  2, {0x02,0xFE,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 's', 0,  9, {0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0xFE,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'U', 0,  5, {0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'u', 0,  5, {0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'V', 0,  6, {0xFF,0xFF,0x02,0x02,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'v', 0,  4, {0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'X', 0,  2, {0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'Z', 0,  9, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '[', 0,  7, {0xFF,0xFF,0xFF,0xFF,0x02,0x02,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { ']', 0,  7, {0xFF,0xFF,0xFF,0xFF,0x02,0x02,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '_', 0,  6, {0xFF,0xFF,0x02,0x02,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '`', 0, 11, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x01,0x00,0x00,0x00,0x00,0x00} },
+    { '{', 1,  6, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'B', 1, 16, {0xFF,0xFF,0x02,0x04,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x01,0x05} },
+    { 'b', 1,  9, {0xFF,0xFF,0xFF,0xFF,0x01,0x01,0x02,0x02,0x04,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'C', 1,  5, {0xFF,0xFF,0xFF,0xFF,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'e', 1,  9, {0xFF,0xFF,0xFF,0xFF,0x01,0x01,0x04,0x02,0x08,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'G', 1,  7, {0xFF,0xFF,0xFF,0xFF,0x01,0x01,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'g', 1,  8, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'I', 1,  7, {0xFF,0xFF,0x01,0x01,0x01,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'i', 1,  6, {0xFF,0xFF,0xFF,0xFF,0x04,0x0C,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'k', 1,  5, {0xFF,0xFF,0xFF,0xFF,0x04,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'M', 1,  9, {0x02,0xFF,0xFF,0xFF,0xFF,0x01,0x01,0x02,0x03,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'P', 1,  4, {0xFF,0xFF,0x02,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'T', 1,  6, {0xFF,0xFF,0xFF,0xFF,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'U', 1,  7, {0xFF,0xFF,0xFF,0xFF,0x02,0x01,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'C', 2, 12, {0x01,0xFF,0xFF,0xFF,0xFF,0x01,0xFF,0xFF,0xFF,0xFF,0x01,0x05,0x00,0x00,0x00,0x00} },
+    { 'P', 2,  7, {0x01,0xFF,0xFF,0xFF,0xFF,0x04,0x04,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { 'W', 2,  7, {0x01,0xFF,0xFF,0xFF,0xFF,0x02,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+};
+#define RIP_ARGTYPES_COUNT 56
+
+/* Rewrite a command payload so that every argument is exactly two MegaNum
+ * digits, which is what RIPlib's handlers read.
+ *
+ * The driver resolves argument widths at decode time: a type byte of 0xFF
+ * takes its width from '|n' SET_COORDINATE_SIZE and 0xFE from '|M'
+ * SET_COLOR_MODE (resolver at RVA 0x039DE0).  RIPlib instead reads fixed
+ * 2-digit fields at fixed offsets, in 262 places, so a stream that
+ * negotiates any other width desynchronises from its first coordinate.
+ *
+ * Normalising here rather than making all 262 sites width-aware keeps the
+ * change contained to one function, and -- more importantly -- keeps the
+ * default path untouched: when the negotiated widths are already 2 this is
+ * never called.
+ *
+ * LOSSY ONLY ABOVE 1295, the largest value two digits can hold.  That bound
+ * is acceptable specifically for RIPlib: it renders into a fixed 640x400
+ * device space and deliberately does not apply a world-to-device transform
+ * (see D-1), so a coordinate above 1295 is off-screen whatever width
+ * carried it.  A port that grows a world transform must revisit this.
+ *
+ * Returns the rewritten length, or -1 when the command is not in the table
+ * -- variable-length commands, and every command whose widths are all
+ * literal and therefore already correct.
+ */
+static int rip_normalise_widths(const rip_state_t *s, char *buf, int len,
+                                char letter, uint8_t level)
+{
+    static const char DIG[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const rip_argtypes_t *e = NULL;
+    int coord_w, color_w, i, si = 0, oi = 0;
+
+    for (i = 0; i < RIP_ARGTYPES_COUNT; i++) {
+        if (rip_argtypes[i].letter == (uint8_t)letter &&
+            rip_argtypes[i].level  == level) {
+            e = &rip_argtypes[i];
+            break;
+        }
+    }
+    if (!e)
+        return -1;
+
+    coord_w = s->coordinate_size ? s->coordinate_size : 2;
+    color_w = (s->color_mode != 0 && s->color_bits > 8) ? 4 : 2;
+    if (coord_w < 2) coord_w = 2;
+    if (coord_w > 5) coord_w = 5;
+
+    /* MEASURE FIRST.  The rewrite below is in place, so a mid-way bail-out
+     * would leave the payload half-converted and the handler would then
+     * decode garbage.  Walk the type list once to confirm every field is
+     * present at its negotiated width, and only then touch the buffer.
+     * (This is not hypothetical: the first version of this function
+     * rewrote as it went and corrupted any command whose payload was
+     * shorter than the negotiated widths implied.) */
+    for (i = 0; i < e->n; i++) {
+        uint8_t ty = e->t[i];
+        int w = (ty == 0xFF) ? coord_w : (ty == 0xFE) ? color_w : (int)ty;
+        if (w < 1)
+            return -1;
+        si += w;
+    }
+    if (si > len)
+        return -1;                             /* not a payload for these widths */
+    si = 0;
+
+    /* Rewritten IN PLACE.  Only the negotiated-width fields shrink (from
+     * coord_w >= 2 down to 2); literal-width fields are copied byte for byte
+     * at their own width, so the write cursor can never overtake the read
+     * cursor and no scratch buffer is needed.
+     *
+     * Copying literals verbatim also matters for correctness, not just for
+     * the buffer: re-emitting a mega1 or mega4 field as two digits would
+     * corrupt it.  Only 0xFF and 0xFE are width-negotiated. */
+    for (i = 0; i < e->n; i++) {
+        uint8_t ty = e->t[i];
+        int w, k;
+
+        if (ty != 0xFF && ty != 0xFE) {
+            w = (int)ty;                       /* literal width: copy as-is */
+            if (w < 1 || si + w > len)
+                return -1;
+            for (k = 0; k < w; k++)
+                buf[oi++] = buf[si++];
+            continue;
+        }
+
+        w = (ty == 0xFF) ? coord_w : color_w;
+        if (si + w > len)
+            return -1;                         /* truncated: leave it alone */
+        {
+            int32_t v = 0;
+            for (k = 0; k < w; k++)
+                v = v * 36 + mega_digit(buf[si + k]);
+            si += w;
+            if (v > 1295) v = 1295;            /* two-digit ceiling */
+            buf[oi++] = DIG[(v / 36) % 36];
+            buf[oi++] = DIG[v % 36];
+        }
+    }
+
+    /* Anything after the typed arguments is free text and moves verbatim. */
+    while (si < len)
+        buf[oi++] = buf[si++];
+    return oi;
+}
+
 static void execute_rip_command(rip_state_t *s, void *ctx) {
     comp_context_t *c = (comp_context_t *)ctx;
     const char *p = s->cmd_buf;
     int len = s->cmd_len;
+
+    /* Negotiated argument widths (D-11).  Handlers below read fixed 2-digit
+     * fields at fixed offsets, so when '|n' or '|M' has selected any other
+     * width the payload is rewritten to 2-digit form first and the handlers
+     * never see the difference.  With the default widths this is skipped
+     * entirely, so the common path is unchanged. */
+    if (s->coordinate_size != 0 && s->coordinate_size != 2) {
+        uint8_t lvl = s->is_level3 ? 3 : s->is_level2 ? 2 : s->is_level1 ? 1 : 0;
+        int nlen = rip_normalise_widths(s, s->cmd_buf, len, s->cmd_char, lvl);
+        if (nlen >= 0) {
+            len = nlen;
+            s->cmd_len = (uint16_t)nlen;
+            s->coord_size_unsupported = false;   /* handled after all */
+        }
+    }
 
     /* Mark that RIP commands have drawn — prevents ANSI ESC[2J fallback
      * from clearing the framebuffer after the menu is rendered. */
@@ -1377,15 +2287,181 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     apply_draw_state(s);
 
     if (s->is_level3) {
-        /* Level 3 commands (prefixed with '3') — RIPscrip 3.0 extensions.
-         * DLL command table: 5 entries at level 3 (entries 125-129 of 129
-         * total).  Command letters and argument counts are not publicly
-         * documented and no real-world BBS is known to send them.
+        /* Level 3 commands (prefixed with '3').
          *
-         * INTENTIONAL: accept and silently discard so a stray Level 3
-         * command does not poison the stream and trigger ERROR_RECOVERY,
-         * which would consume the next several !|... frames as resync. */
-        (void)s->cmd_char;
+         * IMPLEMENTED 2026-08-12.  This block previously discarded every
+         * Level 3 command on the grounds that the letters were "not publicly
+         * documented".  They are now recovered from the driver's own dispatch
+         * table (docs/spec/13-dll-command-table.md), with argument widths from
+         * each entry's type bytes and field meanings from each handler's
+         * validation diagnostics.  Discarding them silently meant a stream
+         * using any of the five rendered nothing with no diagnosis. */
+        switch (s->cmd_char) {
+
+        case 'G': /* RIP_GotoURL — url:string
+                   * Handler RVA 0x0251CB.  Diagnostics: "No URL string
+                   * present", "Invalid URL character found", "URL too long".
+                   *
+                   * SECURITY: RIPlib does NOT launch anything.  The existing
+                   * $GOTOURL$ path is deliberately neutered (see "Fix SV-2/S2"
+                   * below in this file) precisely so a hostile stream cannot
+                   * make the terminal open a URL or spawn a process.  That
+                   * decision governs here too: the URL is validated and stored
+                   * for the embedder to display or act on under its own policy,
+                   * and nothing is launched.  A host that wants click-through
+                   * reads s->goto_url and decides for itself. */
+            if (len > 0 && len < (int)sizeof(s->goto_url)) {
+                /* "URL too long" is a rejection, not a truncation: silently
+                 * shortening a URL can change which host it points at. */
+                int ok = 1;
+                for (int i = 0; i < len; i++) {
+                    /* "Invalid URL character found": a URL field carries no
+                     * control bytes and no whitespace. */
+                    if ((unsigned char)p[i] < 0x21 || (unsigned char)p[i] > 0x7E) {
+                        ok = 0;
+                        break;
+                    }
+                }
+                /* Scheme allow-list.  Everything except http/https is refused
+                 * outright -- javascript:, data:, file:, vbscript: and friends
+                 * are what turn "open a link" into code execution, and no host
+                 * policy should have to re-litigate them. */
+                if (ok && !rip_url_scheme_allowed(p, len))
+                    ok = 0;
+                if (ok) {
+                    memcpy(s->goto_url, p, (size_t)len);
+                    s->goto_url[len] = '\0';
+                    /* Opt-in only.  With no handler registered the URL is
+                     * merely stored -- RIPlib itself launches nothing, ever. */
+                    if (s->url_handler)
+                        s->url_handler(s->goto_url, len);
+                }
+            }
+            break;
+
+        case 'U': /* RIP_BeginEncodedStream — type:2 length:4
+                   * Handler RVA 0x0252C0.  "Illegal type parameter 1".
+                   * The encoded-stream payload format is not recovered, so
+                   * RIPlib records the announcement rather than attempting to
+                   * decode a stream it cannot interpret. */
+            if (len >= 6) {
+                s->encoded_stream_type = (uint16_t)mega2(p);
+                s->encoded_stream_len  = (uint32_t)mega4(p + 2);
+            }
+            break;
+
+        case 'R': /* Register text variable — id:4 flags:2 name:string
+                   * Handler RVA 0x0252F2.  Diagnostics: "Can't register text
+                   * variable - invalid variable name".  Maps onto RIPlib's
+                   * existing user-variable store. */
+            if (len >= 6) {
+                const char *nm = p + 6;
+                int nlen = len - 6;
+                if (nlen > 0)
+                    (void)rip_user_var_set(s, nm, nlen, "", 0);
+            }
+            break;
+
+        case 'e': /* RIP_BAUD_EMULATION — rate:4
+                   *
+                   * CORRECTED 2026-08-12.  This was implemented as
+                   * "style-slot protection" on the strength of diagnostics
+                   * ("Cannot protect style slot #0") that turned out to have
+                   * bled in from a neighbouring handler when the extraction
+                   * used loose bounds.  The bbs-land reconstruction binds
+                   * level 3 'e' to RIP_BAUD_EMULATION (evidence: 2.A0), and
+                   * RIP_BaudEmulation is present in the driver's own function
+                   * name table, so the letter is theirs.
+                   *
+                   * Sets a baud-rate emulation for local RIP playback — the
+                   * driver throttles rendering to simulate a slower link.
+                   * RIPlib renders as fast as its host drives it and applies
+                   * no artificial delay, so the requested rate is recorded
+                   * for an embedder that wants to honour it.
+                   *
+                   * Width: the reference documents rate:4 while the driver's
+                   * dispatch entry records a single 2-digit field.  Both are
+                   * accepted; see docs/spec §12.13. */
+            if (len >= 4)      s->baud_emulation = (uint32_t)mega4(p);
+            else if (len >= 2) s->baud_emulation = (uint32_t)mega2(p);
+            break;
+
+        case 'D': /* RIP_DELAY — ticks:4, in sixtieths of a second.
+                   *
+                   * RESOLVED 2026-08-12.  Two slots carry 'D' (122 and 125).
+                   * Slot 122 (RVA 0x038BD2) is a five-instruction thunk that
+                   * passes arg[0] straight to 0x100282CA, which busy-waits on
+                   * WINMM!timeGetTime.  Its arithmetic fixes the unit beyond
+                   * doubt: it splits the count into chunks of 3900, waits
+                   * 0xFDE8 = 65000 ms per chunk (3900/60 = 65 s), then waits
+                   * remainder * 1000 / 60 ms.  So the field is 1/60 s ticks.
+                   *
+                   * Slot 125 (RVA 0x024AF4) is a different command: it copies
+                   * a TEXT parameter into a 256-byte buffer, looks it up, and
+                   * on a result of 2 calls RIP_Suspend (0x10006C01, which
+                   * names itself).  It never touches the decoded argument
+                   * array, so it does not match its own argc=1/mega4 row —
+                   * that row is the mis-associated one, and slot 122 is the
+                   * reading '|3D' actually supports.  See §12.12.
+                   *
+                   * RIPlib does NOT busy-wait.  A rendering library that
+                   * blocks the caller for up to 65 seconds a chunk is
+                   * unusable on a cooperative or single-threaded host, which
+                   * is most of RIPlib's targets.  The request is recorded and
+                   * the host decides; rip_take_delay() hands it over. */
+            if (len >= 4)
+                s->delay_ticks = (uint32_t)mega4(p);
+            else if (len >= 2)
+                s->delay_ticks = (uint32_t)mega2(p);
+            break;
+
+        /* RIPlib extensions.  '&' and '-' were previously bound at Level 0,
+         * where the driver's dispatch table assigns the skewed-oval family
+         * instead.  The two capabilities are kept here rather than dropped;
+         * neither letter appears among the driver's Level 3 commands
+         * (D, e, ESC, G, R, U), so nothing in the protocol is displaced. */
+        case '&': /* icon display style -- x0:2 y0:2 x1:2 y1:2 style:2 align:2 scale:2 */
+            if (len >= 14) {
+                int16_t x0 = mega2(p),     y0 = scale_y(mega2(p + 2));
+                int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
+                if (x0 > x1) { int16_t tmp = x0; x0 = x1; x1 = tmp; }
+                if (y0 > y1) { int16_t tmp = y0; y0 = y1; y1 = tmp; }
+                s->icon_style_x0 = x0;
+                s->icon_style_y0 = y0;
+                s->icon_style_x1 = x1;
+                s->icon_style_y1 = y1;
+                s->icon_style_style = (uint8_t)(mega2(p + 8) & 0x03);
+                s->icon_style_align = (uint8_t)(mega2(p + 10) & 0x03);
+                s->icon_style_scale = (uint8_t)(mega2(p + 12) & 0xFF);
+                s->icon_style_active = true;
+            } else {
+                s->icon_style_active = false;
+            }
+            break;
+
+        case 'J': /* save current clipboard into an icon slot -- slot:2
+                   * Displaced from Level 0 '|J', which the driver defines as
+                   * RIP_SetBaseMath.  The slot mechanism is RIPlib's own (it
+                   * backs '.' RIP_STAMP_ICON and the SLOTnn load alias), so
+                   * it keeps a home here rather than being dropped. */
+            if (len >= 2)
+                (void)rip_save_clipboard_slot(s, (uint16_t)mega2(p));
+            break;
+
+        case '-': /* bounded text box -- x0:2 y0:2 x1:2 y1:2 flags:2 text */
+            if (len >= 10) {
+                int16_t bx0 = mega2(p),     by0 = scale_y(mega2(p + 2));
+                int16_t bx1 = mega2(p + 4), by1 = scale_y1(mega2(p + 6));
+                uint8_t bflags = (uint8_t)(mega2(p + 8) & 0xFF);
+                rip_render_text_box(s, bx0, by0, bx1, by1, bflags,
+                                    p + 10, len - 10);
+            }
+            break;
+
+        default:
+            /* Unknown Level 3 letter: consume without poisoning the stream. */
+            break;
+        }
         return;
     }
 
@@ -1590,7 +2666,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 /* Draw display label centered (or below icon if icon present) */
                 if (label_len > 0) {
                     char lbuf[128];
-                    int llen = unescape_text(label_text, label_len > 127 ? 127 : label_len, lbuf);
+                    int llen = unescape_text(label_text, label_len, lbuf, (int)sizeof(lbuf));
                     if (llen > 0) {
                         uint8_t tc = s->palette[bs->dfore & 0x0F];
                         int16_t tx = (int16_t)(bx0 + (bw - llen * 8) / 2);
@@ -1670,7 +2746,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 if (tstart < len) {
                     char tbuf[256];
                     char vbuf[256];
-                    int tlen = unescape_text(p + tstart, len - tstart, tbuf);
+                    int tlen = unescape_text(p + tstart, len - tstart, tbuf, (int)sizeof(tbuf));
                     tlen = rip_expand_variables(s, tbuf, tlen, vbuf, sizeof(vbuf));
                     uint8_t tc = s->palette[s->draw_color & 0x0F];
                     draw_text(s->text_block.x0, s->text_block.cur_y,
@@ -1735,6 +2811,173 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 }
             }
             break;
+        /* ── Level 1 commands recovered from the driver 2026-08-12 ──────
+         *
+         * These eight were in the driver's dispatch table but absent from
+         * RIPlib.  Argument widths come from each entry's type bytes, field
+         * meanings from each handler's validation diagnostics
+         * (docs/spec §13.5).  Where RIPlib has the machinery the command is
+         * performed; where the command is a host filesystem or windowing
+         * operation the library deliberately does not have, it is validated
+         * the way the driver validates it and recorded, not faked. */
+
+        case 'g': /* COPY_BLIT — sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY
+                   *             mode:1 res:1     (handler RVA 0x00B7A4,
+                   *             "Illegal mode parameter")
+                   * A real blit, and RIPlib has the machinery for it. */
+            if (len >= 12) {
+                int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
+                int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
+                int16_t dx  = mega2(p + 8),  dy  = scale_y(mega2(p + 10));
+                uint8_t bmode = (len >= 13) ? (uint8_t)mega_digit(p[12]) : 0;
+                if (bmode <= DRAW_MODE_NOT && sx1 >= sx0 && sy1 >= sy0) {
+                    uint8_t saved = s->write_mode;
+                    draw_set_write_mode(bmode);
+                    draw_copy_rect(sx0, sy0, dx, dy,
+                                   (int16_t)(sx1 - sx0 + 1),
+                                   (int16_t)(sy1 - sy0 + 1));
+                    draw_set_write_mode(saved);
+                }
+            }
+            break;
+
+        case 'i': /* RIP_ImageStyle — x0:XY y0:XY x1:XY y1:XY flags:4 res
+                   * Handler RVA 0x00C39A, "Invalid flags parameter".
+                   * This is the command B8 established exists, against
+                   * RIPlib's previous (non-existent) '1S'. */
+            if (len >= 12) {
+                /* Reuse the existing icon-style rect, which is exactly this
+                 * concept: an image area plus a presentation mode. */
+                s->icon_style_active = true;
+                s->icon_style_x0 = mega2(p);
+                s->icon_style_y0 = scale_y(mega2(p + 2));
+                s->icon_style_x1 = mega2(p + 4);
+                s->icon_style_y1 = scale_y1(mega2(p + 6));
+                s->image_style   = (uint8_t)(mega4(p + 8) & 0xFF);
+            }
+            break;
+
+        case 'c': /* RIP_SetMouseCursor — cursor:2 res:4
+                   * Handler RVA 0x00DC96.  RIPlib renders no pointer, so the
+                   * selection is recorded for an embedder that does. */
+            if (len >= 2)
+                s->mouse_cursor_id = (uint8_t)(mega2(p) & 0xFF);
+            break;
+
+        case 'b': /* RIP_LoadBitmap — rect + flags/colour + <filename>
+                   * Handler RVA 0x00C569.  Diagnostics include "Invalid
+                   * flags parameter", "Invalid colour value", "Invalid string
+                   * parameter".  Loading a file needs a filesystem RIPlib
+                   * does not have; the name is validated and queued through
+                   * the same host-request path as the other file commands. */
+            if (len >= 14) {
+                const char *fn = p + 14;
+                int fnlen = len - 14;
+                if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
+                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+                /* rip_filename_is_safe rejects '..', path separators and
+                 * control characters at ingest, so the name that reaches the
+                 * host queue is already constrained to a bare filename.  The
+                 * consumer still owns the trust boundary: RIPlib does not
+                 * open files, and a host that does MUST re-validate against
+                 * its own root.  Same contract as '|1N' (C-013 / ADR-0003). */
+            }
+            break;
+
+        case 'p': /* Image-by-name — res:4 <filename>
+                   * Handler RVA 0x00C2C6, "Invalid image filename". */
+            if (len >= 4) {
+                const char *fn = p + 4;
+                int fnlen = len - 4;
+                if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
+                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+            }
+            break;
+
+        case 'e': /* RIP_BeginExtendedText — rect + font/flags + search words
+                   * Handler RVA 0x00A5ED.  Diagnostics: "Invalid column
+                   * number", "Invalid highlight colour", "No search words
+                   * encountered", "Too many search words (8 max)".
+                   * The search-word highlighting layer is not implemented;
+                   * the text block itself reuses the existing '1T' path so
+                   * the text still renders rather than vanishing. */
+            if (len >= 8) {
+                s->text_block.active = true;
+                s->text_block.x0 = mega2(p);
+                s->text_block.y0 = scale_y(mega2(p + 2));
+                s->text_block.x1 = mega2(p + 4);
+                s->text_block.y1 = scale_y1(mega2(p + 6));
+                s->text_block.cur_y = s->text_block.y0;
+            }
+            break;
+
+        case 'k': /* RIP_KILL_ENCLOSED_MOUSE_FIELDS — x0:XY y0:XY x1:XY y1:XY res:4
+                   *
+                   * IDENTIFIED 2026-08-12 from RIPSCRIP.HLP, the driver's own
+                   * help resource, which carries an ordered function-name
+                   * table grouped by level.  Its Level 1 group contains
+                   * RIP_KillEnclosedMouseFields alongside RIP_KillMouseFields
+                   * (the plain '|1K' RIPlib already had), and the handler
+                   * (RVA 0x00C474) matches exactly: it orders the two
+                   * coordinate pairs, applies the same transform '|j' uses,
+                   * assembles a RECT via USER32!SetRect and passes it to a
+                   * routine, bracketed by the drawing lock/dirty pair.
+                   *
+                   * Kills every mouse field wholly enclosed by the rectangle,
+                   * leaving the rest registered — the selective counterpart
+                   * to '|1K', which kills all of them. */
+                  /*
+                   * The flags:4 field selects WHICH fields to destroy, and
+                   * the TeleGrafix reference (bbs-land, 2.0 §4.2, evidence
+                   * "2.00a4") documents the bits:
+                   *
+                   *     1  kill only fields completely contained
+                   *     2  kill only fields that intersect the rectangle
+                   *     4  kill fields entirely outside the rectangle
+                   *
+                   * "If 1, 2 and 4 are not present, then NO fields are
+                   * deleted."  That default matters: a first implementation
+                   * here ignored the flags and always killed the enclosed
+                   * set, which destroys fields on a command whose documented
+                   * behaviour with flags=0 is to destroy nothing. */
+            if (len >= 12) {
+                int16_t kx0 = mega2(p),     ky0 = scale_y(mega2(p + 2));
+                int16_t kx1 = mega2(p + 4), ky1 = scale_y1(mega2(p + 6));
+                uint32_t kflags = (uint32_t)mega4(p + 8);
+                if (kx1 < kx0) { int16_t t = kx0; kx0 = kx1; kx1 = t; }
+                if (ky1 < ky0) { int16_t t = ky0; ky0 = ky1; ky1 = t; }
+
+                if (kflags & 0x07u) {          /* none of 1/2/4 -> kill nothing */
+                    uint16_t kept = 0;
+                    for (uint16_t i = 0; i < s->num_mouse_regions; i++) {
+                        rip_mouse_region_t *r = &s->mouse_regions[i];
+                        bool contained = (r->x0 >= kx0 && r->x1 <= kx1 &&
+                                          r->y0 >= ky0 && r->y1 <= ky1);
+                        bool overlaps  = !(r->x1 < kx0 || r->x0 > kx1 ||
+                                           r->y1 < ky0 || r->y0 > ky1);
+                        bool intersects = overlaps && !contained;
+                        bool outside    = !overlaps;
+
+                        bool kill = ((kflags & 1u) && contained)
+                                 || ((kflags & 2u) && intersects)
+                                 || ((kflags & 4u) && outside);
+                        if (!kill) {
+                            if (kept != i)
+                                s->mouse_regions[kept] = *r;
+                            kept++;
+                        }
+                    }
+                    s->num_mouse_regions = kept;
+                }
+            }
+            break;
+
+        case 'w': /* mode:1 <string> — handler RVA 0x00D24E, "Invalid string
+                   * parameter", "Unable to create temp buffer".  The
+                   * reconstruction reads this letter as RIP_PLAY_AUDIO;
+                   * RIPlib performs no audio, so the request is consumed. */
+            break;
+
         case 'W': /* RIP_WRITE_ICON — cache current clipboard under a filename */
             if (len > 0 && s->clipboard.valid && s->clipboard.data) {
                 const char *name = p;
@@ -1786,13 +3029,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Image display style ────────────────────────────────── */
-        case 'S': /* RIP_IMAGE_STYLE — set icon/image display mode.
-                   * DLL GFXSTYLE.imageStyle field (rip_defaults.c).
-                   * Format: mode:2 (0=stretch, 1=tile, 2=center, 3=proportional)
-                   * Stored in s->image_style; honoured by subsequent icon blits. */
-            if (len >= 2)
-                s->image_style = (uint8_t)(mega2(p) & 0x03);
-            break;
+        /* '1S' is NOT a command.  Neither 'S' nor 's' appears anywhere in
+         * the driver's Level 1 band, and image style is '|1i'
+         * RIP_ImageStyle (slot 98, RVA 0x00c39a, 6 args) — handled above,
+         * and the form real scenes actually use.  The duplicate handler
+         * that lived here is removed rather than kept as an alias:
+         * accepting an opcode the protocol does not define is how a stream
+         * desynchronises silently. */
 
         /* ── Icon search path ────────────────────────────────────── */
         case 'N': /* RIP_SET_ICON_DIR — set icon search directory.
@@ -2024,7 +3267,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int tstart = (len >= 5) ? 5 : 0;
                 if (tstart < len) {
                     char tbuf[128];
-                    int tlen = unescape_text(p + tstart, len - tstart > 127 ? 127 : len - tstart, tbuf);
+                    int tlen = unescape_text(p + tstart, len - tstart, tbuf, (int)sizeof(tbuf));
                     int eq = -1;
                     bool handled_define = false;
                     for (int i = 0; i < tlen; i++) {
@@ -2080,8 +3323,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     }
                     if (!handled_define) {
                         char rawbuf[128];
-                        int rawlen = unescape_text(p, len > 127 ? 127 : len,
-                                                   rawbuf);
+                        int rawlen = unescape_text(p, len, rawbuf,
+                                                   (int)sizeof(rawbuf));
                         int raw_eq = -1;
                         for (int i = 0; i < rawlen; i++) {
                             if (rawbuf[i] == '=') { raw_eq = i; break; }
@@ -2175,12 +3418,35 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     /* Received $FILEDEL$ — silently ignore, do not delete anything */
                     rlen = 0;
 
-                /* Fix SV-2/S2: $GOTOURL$ — do not launch processes.
-                 * Display the URL in the status area only; never exec/ShellExecute. */
+                /* Fix SV-2/S2: $GOTOURL$ — RIPlib never launches a process or
+                 * opens a URL itself.  Since 2026-08-12 this route is routed
+                 * through the SAME opt-in path as '|3G', so the two ways a
+                 * stream can ask for a URL behave identically instead of one
+                 * being a dead end and the other not:
+                 *   - same scheme allow-list (http/https only),
+                 *   - same control-character rejection,
+                 *   - stored in s->goto_url,
+                 *   - handler invoked ONLY if the embedder registered one.
+                 * The response to the stream stays zero-length either way, so
+                 * a hostile host learns nothing about whether a handler
+                 * exists. */
                 } else if (vlen >= 10 &&
                     memcmp(vname, "$GOTOURL$", 9) == 0) {
-                    /* URL follows after the variable name — display as status text */
-                    /* No process launch; just acknowledge with zero-length response */
+                    const char *u = vname + 9;
+                    int ulen = vlen - 9;
+                    if (ulen > 0 && ulen < (int)sizeof(s->goto_url)) {
+                        int ok = 1;
+                        for (int i = 0; i < ulen; i++) {
+                            if ((unsigned char)u[i] < 0x21 ||
+                                (unsigned char)u[i] > 0x7E) { ok = 0; break; }
+                        }
+                        if (ok && rip_url_scheme_allowed(u, ulen)) {
+                            memcpy(s->goto_url, u, (size_t)ulen);
+                            s->goto_url[ulen] = '\0';
+                            if (s->url_handler)
+                                s->url_handler(s->goto_url, ulen);
+                        }
+                    }
                     rlen = 0;
 
                 } else {
@@ -2572,38 +3838,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* ── Polygon / Polyline ──────────────────────────────────── */
     case 'P': /* RIP_POLYGON (outline) */
     case 'p': /* RIP_FILL_POLYGON */
-    case 'l': /* RIP_POLYLINE */ {
-        if (len >= 6) {
-            int npts = mega2(p);
-            /* Cap at 64 points to keep `pts[]` on the stack and out of the
-             * malloc fallback path inside draw_polygon. */
-            if (npts < 2 || npts > 64) break;
-            if (len < 2 + npts * 4) break;
-            int16_t pts[128]; /* max 64 points × 2 coords */
-            for (int i = 0; i < npts; i++) {
-                pts[i * 2]     = mega2(p + 2 + i * 4);
-                pts[i * 2 + 1] = scale_y(mega2(p + 4 + i * 4));
-            }
-            if (s->cmd_char == 'l') {
-                draw_polyline(pts, npts);
-            } else if (s->cmd_char == 'p') {
-                uint8_t border_mode;
-                if (s->fill_pattern != 0) {
-                    draw_set_color(s->palette[s->fill_color & 0x0F]);
-                    draw_polygon(pts, npts, true);
-                }
-                if (rip_begin_filled_border(s, &border_mode)) {
-                    draw_polygon(pts, npts, false);
-                    rip_end_filled_border(s, border_mode);
-                } else {
-                    draw_set_color(s->palette[s->draw_color & 0x0F]);
-                }
-            } else {
-                draw_polygon(pts, npts, false);
-            }
-        }
+    case 'l': /* RIP_POLYLINE */
+        rip_exec_polygon(s, s->cmd_char, p, len);
         break;
-    }
 
     /* ── Flood fill ──────────────────────────────────────────── */
     case 'F': /* v1.54 spec: '|F' = RIP_FILL — flood fill from (x,y) until hitting border color.
@@ -2643,20 +3880,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* v1.54 spec: 't' = RIP_REGION_TEXT — display a line of text in a
      * previously defined text region (Level 0, used with 'T' begin/end).
      * L16: also missed $variable expansion before this fix. */
-    case 't': /* RIP_REGION_TEXT — justify:1 text */
-        if (s->text_block.active && len >= 1) {
-            int tstart = 1;
-            if (tstart < len) {
-                char tbuf_t[256];
-                char vbuf_t[256];
-                int tlen_t = unescape_text(p + tstart, len - tstart, tbuf_t);
-                tlen_t = rip_expand_variables(s, tbuf_t, tlen_t, vbuf_t, sizeof(vbuf_t));
-                uint8_t tc_t = s->palette[s->draw_color & 0x0F];
-                draw_text(s->text_block.x0, s->text_block.cur_y,
-                          vbuf_t, tlen_t, cp437_8x16, 16, tc_t, 0xFF);
-                s->text_block.cur_y += 16;
-            }
-        }
+    case 't': /* RIP_POLY_BEZIER_LINE — the third member of the bezier family.
+               *
+               * CORRECTED 2026-08-12 (B8).  RIPlib had RIP_REGION_TEXT here.
+               * The driver's '|t' handler (RVA 0x01E4A4) sits adjacent to
+               * '|z' (0x01E449) with a structurally identical body — same
+               * call sequence, plus a write-mode apply — and carries the same
+               * three argument signatures as '|x' and '|z'.  It is a drawing
+               * command, not a text command.
+               *
+               * Region text is '|1t' (Level 1), which RIPlib already
+               * implements, so nothing is lost by correcting this letter. */
+        rip_poly_bezier_family(s, p, len, 0);
         break;
 
     /* ── Fill style + custom fill pattern ───────────────────── */
@@ -2836,44 +4071,45 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Save icon (v2.0+) ----------------------------------------------- */
     /* DLL command table entry 40: 'J' = RIP_SAVE_ICON (1 arg: 2-digit slot) */
-    case 'J': /* RIP_SAVE_ICON -- slot:2 */
-        if (len >= 2)
-            (void)rip_save_clipboard_slot(s, (uint16_t)mega2(p));
+    /* Dispatch slot 40 (RVA 0x01f32e), argc 1, mega2.  The handler names
+     * itself RIP_SetBaseMath and accepts exactly two values -- 0x24 (36)
+     * and 0x40 (64) -- forcing 36 for anything else, then stores the byte
+     * in engine state.  It selects the MegaNum radix for everything after
+     * it, which is why it appears near the top of most real scenes.
+     *
+     * RIPlib records the value and reproduces the driver's validation, but
+     * its decoders stay base 36: the base-64 DIGIT ALPHABET has not been
+     * recovered ('0'-'9' 'A'-'Z' 'a'-'z' is 62 symbols and the remaining
+     * two are unknown), and guessing it would corrupt every numeric field
+     * on a base-64 stream.  All 24 uses in TeleGrafix's shipped corpus are
+     * '|J10' -- base 36 -- so no real content is affected.  See D-10.
+     *
+     * This letter previously ran a clipboard slot save, which had no basis
+     * in the dispatch table and consumed a slot on each of those 24 uses. */
+    case 'J': /* RIP_SET_BASE_MATH -- base:2, accepts 36 or 64 */
+        if (len >= 2) {
+            int16_t base = mega2(p);
+            s->mega_base = (uint8_t)((base == 36 || base == 64) ? base : 36);
+        }
         break;
 
-    /* -- Scroll region (v2.0+) ------------------------------------------- */
-    /* DLL command table entry 7: '+' = RIP_SCROLL (7 args: XY,XY,XY,XY,2,2,2) */
-    case '+': /* RIP_SCROLL -- x0:2 y0:2 x1:2 y1:2 dx:2 dy:2 fill_col:2 */
+    /* -- Skewed-oval family (v2.0+) ---------------------------------------
+     * Six letters share one geometry generator in the driver (RVA 0x010160);
+     * see rip_draw_skewed_oval().  Command identities and argument layouts
+     * come from TeleGrafix's own commented demo ICONS/NEWCMDS.RIP, which
+     * draws a coordinate grid and places each shape on an intersection,
+     * corroborated by the dispatch table's arities and argument-type bytes.
+     * See docs/spec/12-dll-provenance.md section 12.14. */
+
+    /* Dispatch slot 7, argc 7: XY, XY, XY, XY, mega2, mega2, mega2. */
+    case '+': /* RIP_SKEWED_OVAL_CHORD -- cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2 */
         if (len >= 14) {
-            int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
-            int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
-            int16_t dx  = mega2(p + 8);
-            int16_t dy  = scale_y(mega2(p + 10));
-            int16_t fc  = mega2(p + 12) & 0x0F;
-            int16_t rw  = sx1 - sx0 + 1, rh = sy1 - sy0 + 1;
-            if (rw > 0 && rh > 0) {
-                draw_copy_rect(sx0, sy0, sx0 + dx, sy0 + dy, rw, rh);
-                /* Clear the exposed strip(s) left behind by the scroll.
-                 * Clamp strip extent to the source rect so a delta larger
-                 * than the rect (|dx|>=rw or |dy|>=rh) clears just the
-                 * source rect rather than spilling outside. */
-                draw_set_color(s->palette[fc]);
-                if (dy > 0) {
-                    int16_t h = dy < rh ? dy : rh;
-                    draw_rect(sx0, sy0, rw, h, true);
-                } else if (dy < 0) {
-                    int16_t h = -dy < rh ? -dy : rh;
-                    draw_rect(sx0, (int16_t)(sy1 - h + 1), rw, h, true);
-                }
-                if (dx > 0) {
-                    int16_t w = dx < rw ? dx : rw;
-                    draw_rect(sx0, sy0, w, rh, true);
-                } else if (dx < 0) {
-                    int16_t w = -dx < rw ? -dx : rw;
-                    draw_rect((int16_t)(sx1 - w + 1), sy0, w, rh, true);
-                }
-                draw_set_color(s->palette[s->draw_color & 0x0F]);
-            }
+            int16_t cx = mega2(p),      cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4),  ry = scale_y(mega2(p + 6));
+            int16_t sa = mega2(p + 8),  ea = mega2(p + 10);
+            int16_t sk = mega2(p + 12);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, sa, ea,
+                                 RIP_OVAL_CLOSED, true);
         }
         break;
 
@@ -2901,42 +4137,93 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* -- Extended positioned text (v2.0+) -------------------------------- */
-    /* DLL command table entry 9: '-' = RIP_TEXT_XY_EXT (5 args: XY,XY,XY,XY,2 + text).
-     * Route through the shared text renderer inside the supplied box so
-     * escapes, variables, clipping, and justification stay consistent. */
-    case '-': /* RIP_TEXT_XY_EXT -- x0:2 y0:2 x1:2 y1:2 flags:2 text */
+    /* Dispatch slot 9, argc 5: XY, XY, XY, XY, mega2.  The handler at RVA
+     * 0x01c348 is instruction-for-instruction identical to '&' at 0x01f904
+     * apart from frame size -- the filled/outline pair of one shape. */
+    case '-': /* RIP_FILLED_SKEWED_OVAL -- cx:2 cy:2 rx:2 ry:2 skew:2 */
         if (len >= 10) {
-            int16_t bx0 = mega2(p),     by0 = scale_y(mega2(p + 2));
-            int16_t bx1 = mega2(p + 4), by1 = scale_y1(mega2(p + 6));
-            uint8_t flags = (uint8_t)(mega2(p + 8) & 0xFF);
-            rip_render_text_box(s, bx0, by0, bx1, by1, flags, p + 10, len - 10);
+            int16_t cx = mega2(p),     cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4), ry = scale_y(mega2(p + 6));
+            int16_t sk = mega2(p + 8);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, 0, 360,
+                                 RIP_OVAL_CLOSED, true);
         }
         break;
 
     /* -- Header (v2.0+) -------------------------------------------------- */
     /* DLL command table entry 32: 'h' = RIP_HEADER (3 args: 2,4,2) */
-    case 'h': /* RIP_HEADER -- type:2 id:4 flags:2 */
-        /* Scene metadata; no visible output.  A header that resets the
-         * environment also restores filled-object borders by spec. */
+    case 'h': /* RIP_HEADER — six accepted signatures, selected by length.
+               *
+               * D-2, 2026-08-12.  The driver's '|h' carries SIX dispatch
+               * entries on one handler (RVA 0x01CAE1), the most overloaded
+               * command in the table:
+               *
+               *     8 chars  type:2 id:4 flags:2      (RIPlib's original)
+               *     8 chars  a:1 id:4 b:1 c:1 d:1     (ambiguous with above)
+               *     6 chars  a:1 id:4 b:1
+               *     4 chars  a:1 id:2 b:1
+               *     3 chars  a:1 id:2                 (two entries, identical)
+               *
+               * Reading a 4- or 6-character header with the 8-character layout
+               * pulls fields from past the end of the parameters, so the id
+               * and flags came out as noise.  Each length now reads its own
+               * layout.  The two 8-char forms and the two 3-char forms are not
+               * separable by length alone; the driver must select between them
+               * on state we have not recovered, so the first (documented) form
+               * is kept for those and the ambiguity is recorded rather than
+               * guessed — see docs/spec §12.12. */
+        /* Base 64: '|h' carries flag value 2 in its dispatch entry, the same
+         * as '|d', '|D' and '|y' -- see D-12.  No shipped scene uses '|h',
+         * so this is unverified against real content, but decoding it with
+         * the base-36 helpers would contradict the table for no reason. */
         if (len >= 8) {
-            s->header_type = (uint8_t)(mega2(p) & 0xFF);
-            s->header_id = (uint32_t)mega4(p + 2);
-            s->header_flags = (uint8_t)(mega2(p + 6) & 0xFF);
+            s->header_type  = (uint8_t)(mega2_64(p) & 0xFF);
+            s->header_id    = (uint32_t)mega4_64(p + 2);
+            s->header_flags = (uint8_t)(mega2_64(p + 6) & 0xFF);
+            s->filled_borders_enabled = true;
+        } else if (len == 6) {
+            s->header_type  = (uint8_t)mega_digit64(p[0]);
+            s->header_id    = (uint32_t)mega4_64(p + 1);
+            s->header_flags = (uint8_t)mega_digit64(p[5]);
+            s->filled_borders_enabled = true;
+        } else if (len == 4) {
+            s->header_type  = (uint8_t)mega_digit64(p[0]);
+            s->header_id    = (uint32_t)mega2_64(p + 1);
+            s->header_flags = (uint8_t)mega_digit64(p[3]);
+            s->filled_borders_enabled = true;
+        } else if (len == 3) {
+            s->header_type  = (uint8_t)mega_digit64(p[0]);
+            s->header_id    = (uint32_t)mega2_64(p + 1);
             s->filled_borders_enabled = true;
         }
         break;
 
     /* -- Coordinate size (v2.0+) ----------------------------------------- */
     /* DLL command table entry 49: 'n' = RIP_SET_COORDINATE_SIZE (2 args: 1,3) */
-    case 'n': /* RIP_SET_COORDINATE_SIZE -- byte_size:1 res:3 */
-        /* Track the requested coordinate byte width.  The renderer keeps
-         * using its fixed framebuffer coordinate transform, but $COORDSIZE$
-         * and subsequent state snapshots now reflect the negotiated size. */
+    case 'n': /* RIP_SET_COORDINATE_SIZE -- byte_size:1 res:3
+               *
+               * This field is the width of every argument the dispatch table
+               * types 0xFF.  The driver resolves it at RVA 0x039DE0:
+               *
+               *     t = argtype[i]
+               *     t >= 0    -> t                    literal digit count
+               *     t == 0xFF -> (state+2)->[0x39]    this field
+               *     t == 0xFE -> (state+2)->[0x3a]    colour mode, 2 or 4
+               *
+               * RIPlib's decoders are fixed at 2 digits (rip_meganum.h keeps
+               * them stateless static inlines), so any width but 2 would be
+               * mis-read from the first coordinate onward.  Rather than
+               * mis-parse silently, an unsupported width is recorded: a host
+               * can check coord_size_unsupported and stop rather than render
+               * garbage.  All 24 uses of '|n' in TeleGrafix's shipped corpus
+               * request 2, so no real content trips this.  See D-11. */
         if (len >= 4) {
             uint8_t size = (uint8_t)mega_digit(p[0]);
-            if (size >= 2 && size <= 5)
+            if (size >= 2 && size <= 5) {
                 s->coordinate_size = size;
+                if (size != 2)
+                    s->coord_size_unsupported = true;
+            }
             s->coordinate_res = (uint32_t)mega3(p + 1);
         }
         break;
@@ -2970,61 +4257,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Poly-Bezier (v2.0+) --------------------------------------------- */
     /* DLL command table entry 77: 'z' = RIP_POLY_BEZIER (nsegs:2 nsteps:2, then XY pairs) */
-    case 'x': /* RIP_FILLED_POLY_BEZIER -- nsegs:2 nsteps:2 [XY x 4 per seg]
-               *
-               * Added 2026-08-12 (D-5).  The driver has this at slot 71
-               * (RVA 0x01BC1D), immediately adjacent to RIP_FilledPolygon
-               * at 0x01BC78 — the filled counterpart of 'z'.  spec §11.2
-               * Erratum 2 already had the letters right ('x' filled,
-               * 'z' unfilled); only the implementation was missing.
-               *
-               * Flatten every segment to line vertices, then hand the whole
-               * outline to the scanline polygon filler so the fill spans the
-               * complete curve rather than each segment separately. */
-        if (len >= 4) {
-            int nsegs  = mega2(p);
-            int offset = 4;
-            int16_t pts[128];   /* 64 vertices x 2 coords, matching '|P' */
-            int npts = 0;
-            for (int seg = 0; seg < nsegs && offset + 16 <= len; seg++) {
-                int16_t bx0 = mega2(p + offset),       by0 = scale_y(mega2(p + offset + 2));
-                int16_t bx1 = mega2(p + offset + 4),   by1 = scale_y(mega2(p + offset + 6));
-                int16_t bx2 = mega2(p + offset + 8),   by2 = scale_y(mega2(p + offset + 10));
-                int16_t bx3 = mega2(p + offset + 12),  by3 = scale_y(mega2(p + offset + 14));
-                /* Fixed 12-step flattening: enough for the curve sizes this
-                 * protocol carries, and keeps the vertex budget bounded. */
-                for (int k = (seg == 0 ? 0 : 1); k <= 12; k++) {
-                    float t  = (float)k / 12.0f;
-                    float mt = 1.0f - t;
-                    float a = mt * mt * mt, b = 3.0f * mt * mt * t;
-                    float c = 3.0f * mt * t * t, dd = t * t * t;
-                    if (npts >= 64) break;
-                    pts[npts * 2]     = (int16_t)(a * bx0 + b * bx1 + c * bx2 + dd * bx3);
-                    pts[npts * 2 + 1] = (int16_t)(a * by0 + b * by1 + c * by2 + dd * by3);
-                    npts++;
-                }
-                offset += 16;
-            }
-            if (npts >= 3)
-                draw_polygon(pts, npts, s->fill_pattern != 0);
-        }
+    case 'x': /* RIP_FILLED_POLY_BEZIER — filled.
+               * Driver slot 71 (RVA 0x01BC1D), adjacent to RIP_FilledPolygon;
+               * spec §11.2 Erratum 2 had the letters right ('x' filled,
+               * 'z' unfilled).  All three driver signatures plus RIPlib's
+               * long form go through the shared family helper (D-2). */
+        rip_poly_bezier_family(s, p, len, 1);
         break;
 
-    case 'z': /* RIP_POLY_BEZIER -- nsegs:2 nsteps:2 [XY x 4 per segment] */
-        /* Multi-segment cubic Bezier.  nsteps = subdivision hint (ignored).
-         * Each segment is 4 XY pairs = 16 MegaNum chars. */
-        if (len >= 4) {
-            int nsegs  = mega2(p);
-            int offset = 4; /* skip nsegs:2 + nsteps:2 */
-            for (int seg = 0; seg < nsegs && offset + 16 <= len; seg++) {
-                int16_t bx0 = mega2(p + offset),       by0 = scale_y(mega2(p + offset + 2));
-                int16_t bx1 = mega2(p + offset + 4),   by1 = scale_y(mega2(p + offset + 6));
-                int16_t bx2 = mega2(p + offset + 8),   by2 = scale_y(mega2(p + offset + 10));
-                int16_t bx3 = mega2(p + offset + 12),  by3 = scale_y(mega2(p + offset + 14));
-                draw_bezier(bx0, by0, bx1, by1, bx2, by2, bx3, by3);
-                offset += 16;
-            }
-        }
+    case 'z': /* RIP_POLY_BEZIER — outline.
+               * All three driver signatures plus RIPlib's long form are
+               * handled by the shared family helper; see D-2. */
+        rip_poly_bezier_family(s, p, len, 2);
         break;
 
     /* -- Group markers (v2.0+) ------------------------------------------- */
@@ -3059,7 +4303,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 char vbuf[256];
                 draw_clip_state_t saved_clip;
                 int16_t cx0, cy0, cx1, cy1;
-                int outlen = unescape_text(tp, tlen > 255 ? 255 : tlen, tbuf);
+                int outlen = unescape_text(tp, tlen, tbuf, (int)sizeof(tbuf));
                 outlen = rip_expand_variables(s, tbuf, outlen, vbuf, sizeof(vbuf));
                 uint8_t tc = s->palette[s->draw_color & 0x0F];
                 int char_w = 8, char_h = 16;
@@ -3096,60 +4340,41 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* DLL binary: '[' = RIP_FILLED_POLYGON_EXT (args: XY,XY,XY,XY,2,2,2) */
-    case '[': /* RIP_FILLED_POLYGON_EXT -- x0:2 y0:2 x1:2 y1:2 mode:2 p1:2 p2:2 */
-        /* Extended filled polygon with rendering mode override.
-         * Simplified to a two-corner filled rectangle using current fill state. */
-        if (len >= 8) {
-            int16_t ex0 = mega2(p),     ey0 = scale_y(mega2(p + 2));
-            int16_t ex1 = mega2(p + 4), ey1 = scale_y1(mega2(p + 6));
-            uint8_t border_mode;
-            /* mode:2 at p+8, param1:2 at p+10, param2:2 at p+12 -- ignored */
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
-                draw_rect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1, true);
-            }
-            if (rip_begin_filled_border(s, &border_mode)) {
-                draw_rect(ex0, ey0, ex1 - ex0 + 1, ey1 - ey0 + 1, false);
-                rip_end_filled_border(s, border_mode);
-            } else {
-                draw_set_color(s->palette[s->draw_color & 0x0F]);
-            }
+    /* Dispatch slot 62, argc 7: XY, XY, XY, XY, mega2, mega2, mega2. */
+    case '[': /* RIP_SKEWED_OVAL_PIE_SLICE -- cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2 */
+        if (len >= 14) {
+            int16_t cx = mega2(p),      cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4),  ry = scale_y(mega2(p + 6));
+            int16_t sa = mega2(p + 8),  ea = mega2(p + 10);
+            int16_t sk = mega2(p + 12);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, sa, ea,
+                                 RIP_OVAL_PIE, true);
         }
         break;
 
-    /* DLL binary: ']' = RIP_POLYLINE_EXT (args: XY,XY,XY,XY,2,2,2) */
-    case ']': /* RIP_POLYLINE_EXT -- x0:2 y0:2 x1:2 y1:2 mode:2 p1:2 p2:2 */
-        /* Extended polyline with rendering mode override.
-         * Simplified to a line segment between the two corner points. */
-        if (len >= 8) {
-            int16_t ex0 = mega2(p),     ey0 = scale_y(mega2(p + 2));
-            int16_t ex1 = mega2(p + 4), ey1 = scale_y(mega2(p + 6));
-            /* mode:2 at p+8 -- ignored, current write mode applies */
-            if (s->line_thick > 1)
-                draw_thick_line(ex0, ey0, ex1, ey1);
-            else
-                draw_line(ex0, ey0, ex1, ey1);
+    /* Dispatch slot 63, argc 7: XY, XY, XY, XY, mega2, mega2, mega2.
+     * An arc is the open member of the family -- stroked, never filled. */
+    case ']': /* RIP_SKEWED_OVAL_ARC -- cx:2 cy:2 rx:2 ry:2 start:2 end:2 skew:2 */
+        if (len >= 14) {
+            int16_t cx = mega2(p),      cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4),  ry = scale_y(mega2(p + 6));
+            int16_t sa = mega2(p + 8),  ea = mega2(p + 10);
+            int16_t sk = mega2(p + 12);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, sa, ea,
+                                 RIP_OVAL_OUTLINE, false);
         }
         break;
 
-    /* DLL binary: '_' = RIP_DRAW_TO (6 args: XY,XY,2,2,XY,XY) */
-    case '_': /* RIP_DRAW_TO -- x0:2 y0:2 mode:2 param:2 x1:2 y1:2 */
-        /* Cursor move with optional line draw.
-         * mode=0: move only, mode!=0: draw line then move. */
+    /* Dispatch slot 95, argc 6: XY, XY, mega2, mega2, XY, XY.  The angles
+     * sit in the middle here, matching the layout riplib already uses for
+     * 'V' RIP_OVAL_ARC.  Not a skewed variant -- there is no skew field. */
+    case '_': /* RIP_FILLED_OVAL_CHORD -- cx:2 cy:2 start:2 end:2 rx:2 ry:2 */
         if (len >= 12) {
-            int16_t nx0  = mega2(p),     ny0 = scale_y(mega2(p + 2));
-            int16_t draw = mega2(p + 4); /* mode:2 */
-            /* param:2 at p+6 -- style hint, ignored */
-            int16_t nx1  = mega2(p + 8), ny1 = scale_y(mega2(p + 10));
-            if (draw) {
-                if (s->line_thick > 1)
-                    draw_thick_line(nx0, ny0, nx1, ny1);
-                else
-                    draw_line(nx0, ny0, nx1, ny1);
-            }
-            s->draw_x = nx1;
-            s->draw_y = ny1;
+            int16_t cx = mega2(p),     cy = scale_y(mega2(p + 2));
+            int16_t sa = mega2(p + 4), ea = mega2(p + 6);
+            int16_t rx = mega2(p + 8), ry = scale_y(mega2(p + 10));
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, 0, sa, ea,
+                                 RIP_OVAL_CLOSED, true);
         }
         break;
 
@@ -3228,22 +4453,36 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL command table entry 42: 'K' = RIP_KILL_MOUSE_FIELDS (4 args: XY,XY,XY,XY).
      * Level 0 'K' removes all mouse regions whose rect intersects (x0,y0)-(x1,y1).
      * Level 1 'K' (above) kills ALL regions unconditionally. */
-    case 'K': /* RIP_KILL_MOUSE_FIELDS — x0:2 y0:2 x1:2 y1:2 */
+    /* Dispatch slot 42 (RVA 0x01bee5), argc 4, all XY — a rectangle, not a
+     * mouse operation.  The handler orders (arg0,arg2) and then (arg1,arg3)
+     * through the pair-ordering helper at 0x1003112e, i.e. it normalises
+     * x0/x1 and y0/y1, which is rectangle setup.  SyncTERM's ripper.c and
+     * bbs-land's reference both bind 'K' to RIP_FILLED_RECTANGLE.
+     *
+     * RIPlib previously ran a mouse-field kill here.  Nothing is lost: the
+     * real killer is '|1k' RIP_KILL_ENCLOSED_MOUSE_FIELDS, which RIPlib
+     * already implements with the flags semantics bbs-land documents. */
+    case 'K': /* RIP_FILLED_RECTANGLE — x0:2 y0:2 x1:2 y1:2 */
         if (len >= 8) {
             int16_t kx0 = mega2(p),     ky0 = scale_y(mega2(p + 2));
             int16_t kx1 = mega2(p + 4), ky1 = scale_y1(mega2(p + 6));
-            uint16_t dst = 0;
-            for (uint16_t i = 0; i < s->num_mouse_regions; i++) {
-                rip_mouse_region_t *r = &s->mouse_regions[i];
-                /* Keep region if it does NOT intersect the kill rectangle */
-                if (r->x1 < kx0 || r->x0 > kx1 ||
-                    r->y1 < ky0 || r->y0 > ky1) {
-                    if (dst != i)
-                        s->mouse_regions[dst] = *r;
-                    dst++;
-                }
+            uint8_t border_mode;
+
+            if (kx0 > kx1) { int16_t t = kx0; kx0 = kx1; kx1 = t; }
+            if (ky0 > ky1) { int16_t t = ky0; ky0 = ky1; ky1 = t; }
+
+            if (s->fill_pattern != 0) {
+                draw_set_color(s->palette[s->fill_color & 0x0F]);
+                draw_rect(kx0, ky0, (int16_t)(kx1 - kx0 + 1),
+                          (int16_t)(ky1 - ky0 + 1), true);
             }
-            s->num_mouse_regions = dst;
+            if (rip_begin_filled_border(s, &border_mode)) {
+                draw_rect(kx0, ky0, (int16_t)(kx1 - kx0 + 1),
+                          (int16_t)(ky1 - ky0 + 1), false);
+                rip_end_filled_border(s, border_mode);
+            } else {
+                draw_set_color(s->palette[s->draw_color & 0x0F]);
+            }
         }
         break;
 
@@ -3251,16 +4490,43 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL command table entry 23: 'D' = RIP_FILL_PATTERN (var, data block).
      * Level 0 'D' supplies a custom 8×8 fill pattern as raw bytes.
      * Level 1 'D' (above) is RIP_DEFINE — distinct command. */
-    case 'D': /* RIP_FILL_PATTERN — 8×2-digit pattern bytes + color:2 */
-        if (len >= 16) {
-            uint8_t pat[8];
-            for (int i = 0; i < 8; i++)
-                pat[i] = (uint8_t)(mega2(p + i * 2));
-            draw_set_user_fill_pattern(pat);
-            if (len >= 18)
-                s->fill_color = mega2(p + 16) & 0x0F;
-            s->fill_pattern = 12; /* BGI USER_FILL */
-            draw_set_fill_style(11, s->palette[s->back_color]);
+    /* Dispatch slot 23 (RVA 0x01f46a), VARIABLE length.  The handler names
+     * itself RIP_SetDrawingPalette and its validation chain gives the whole
+     * layout:
+     *
+     *     argc == count + 3     "Invalid number of parameters"
+     *     count <= 256          "More than 256 entries"
+     *     start <= 255          "Start is out of range"
+     *     bits  == 8            "Invalid number of bits"
+     *
+     * so it is start:2 count:2 bits:1 followed by count × rgb:4 — the block
+     * form of '|d' RIP_OneDrawingPalette, which handles a single entry.
+     *
+     * The 8×8 user fill pattern this letter used to carry is not lost: that
+     * is '|s' RIP_FILL_PATTERN, which RIPlib already implements. */
+    case 'D': /* RIP_SET_DRAWING_PALETTE — start:2 count:2 bits:1 (rgb:4)×count */
+        if (len >= 5) {
+            /* Base 64, same flag as '|d' -- see D-12. */
+            uint16_t start = (uint16_t)mega2_64(p);
+            int      count = mega2_64(p + 2);
+            uint8_t  bits  = (uint8_t)mega_digit64(p[4]);
+            int i;
+
+            /* Reject rather than clamp, matching the driver: a truncated or
+             * over-long block is an error, not a partial palette write. */
+            if (start <= 0xFF && count > 0 && count <= 256 && bits == 8 &&
+                len >= 5 + 4 * count) {
+                for (i = 0; i < count && (int)start + i <= 0xFF; i++) {
+                    uint32_t rgb = (uint32_t)mega4_64(p + 5 + 4 * i);
+                    uint8_t  r8  = (uint8_t)((rgb >> 16) & 0xFF);
+                    uint8_t  g8  = (uint8_t)((rgb >> 8) & 0xFF);
+                    uint8_t  b8  = (uint8_t)(rgb & 0xFF);
+                    uint16_t rgb565 = (uint16_t)(((r8 & 0xF8) << 8) |
+                                                 ((g8 & 0xFC) << 3) |
+                                                 ((b8 & 0xF8) >> 3));
+                    palette_write_rgb565((uint8_t)(start + i), rgb565);
+                }
+            }
         }
         break;
 
@@ -3268,33 +4534,43 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL command table entry 13: '<' = RIP_GET_IMAGE (var, data block).
      * Captures a screen region into the clipboard for later PUT_IMAGE.
      * Minimum data block: x0:2 y0:2 x1:2 y1:2 (8 MegaNum chars). */
-    case '<': /* RIP_GET_IMAGE — x0:2 y0:2 x1:2 y1:2 */
-        if (len >= 8) {
-            int16_t gx0 = mega2(p),     gy0 = scale_y(mega2(p + 2));
-            int16_t gx1 = mega2(p + 4), gy1 = scale_y1(mega2(p + 6));
-            int16_t gw = gx1 - gx0 + 1, gh = gy1 - gy0 + 1;
-            (void)rip_clipboard_capture(s, gx0, gy0, gw, gh);
+    /* Dispatch slot 13 (RVA 0x01e80a), VARIABLE length.  The handler reads
+     * arg[0] as a count and then walks the remaining arguments, and its own
+     * diagnostics are "Must have at least two vertices to make a polygon"
+     * and "Insufficient vertices (2)" — it is a polygon command, not the
+     * fixed rectangle read RIPlib had here.  TeleGrafix's ICONS/POLYPOLY.RIP
+     * exercises it and labels itself RIP_POLY_POLYGON on screen.
+     *
+     * Wire layout, read off that file:
+     *     count:2  then per contour  nverts:2  followed by nverts * (x:2 y:2)
+     *
+     * Clipboard capture is unaffected — '|1G' and the port path still call
+     * rip_clipboard_capture(). */
+    case '<': /* RIP_POLY_POLYGON — count:2 { nverts:2 (x:2 y:2)* }* */
+        if (len >= 2) {
+            rip_exec_poly_polygon(s, p, len);
         }
         break;
 
-    /* ── Icon display style (v2.0+) ──────────────────────────── */
-    /* DLL command table entry 3: '&' = RIP_ICON_STYLE (5 args: XY,XY,2,2,2). */
-    case '&': /* RIP_ICON_STYLE — x0:2 y0:2 x1:2 y1:2 style:2 align:2 scale:2 */
-        if (len >= 14) {
-            int16_t x0 = mega2(p),     y0 = scale_y(mega2(p + 2));
-            int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
-            if (x0 > x1) { int16_t t = x0; x0 = x1; x1 = t; }
-            if (y0 > y1) { int16_t t = y0; y0 = y1; y1 = t; }
-            s->icon_style_x0 = x0;
-            s->icon_style_y0 = y0;
-            s->icon_style_x1 = x1;
-            s->icon_style_y1 = y1;
-            s->icon_style_style = (uint8_t)(mega2(p + 8) & 0x03);
-            s->icon_style_align = (uint8_t)(mega2(p + 10) & 0x03);
-            s->icon_style_scale = (uint8_t)(mega2(p + 12) & 0xFF);
-            s->icon_style_active = true;
-        } else {
-            s->icon_style_active = false;
+    /* Dispatch slot 3, argc 5, types ff ff 02 02 02.  The handler at RVA
+     * 0x01f904 is instruction-for-instruction identical to '-' at 0x01c348
+     * — the outline member of the same shape — and passes (arg0,arg1) and
+     * then (arg2,arg3) to the same coordinate mapper at 0x10031084.
+     *
+     * That the radii are typed mega2 here and coordinate-width in '-' is
+     * not a contradiction: the type byte gives the WIRE WIDTH, the mapper
+     * is SEMANTIC scaling after decode.  '|&' always transmits its radii
+     * as 2 digits; '|-' transmits them at the current coordinate size.  At
+     * the default size of 2 both are 10 characters, which is why
+     * TeleGrafix's demo shows the same payload shape for the pair.
+     * See docs/spec/12 §12.14 and defects D-9 (withdrawn) and D-11. */
+    case '&': /* RIP_SKEWED_OVAL — cx:2 cy:2 rx:2 ry:2 skew:2 */
+        if (len >= 10) {
+            int16_t cx = mega2(p),     cy = scale_y(mega2(p + 2));
+            int16_t rx = mega2(p + 4), ry = scale_y(mega2(p + 6));
+            int16_t sk = mega2(p + 8);
+            rip_draw_skewed_oval(s, cx, cy, rx, ry, sk, 0, 360,
+                                 RIP_OVAL_CLOSED, false);
         }
         break;
 
@@ -3355,20 +4631,46 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * Registers a clickable visual region only; this variant carries no
      * host-command text (text_len stays 0 via the memset), unlike 1U/1M —
      * intentional per the DLL tables (C-016). */
-    case ';': /* RIP_BUTTON_EXT — x0:2 y0:2 x1:2 y1:2 style:2 lx:2 ly:2 rx:2 ry:2 flags:2 tidx:2 */
-        if (len >= 14 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
-            rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
-            memset(r, 0, sizeof(*r));
-            r->x0     = mega2(p);
-            r->y0     = scale_y(mega2(p + 2));
-            r->x1     = mega2(p + 4);
-            r->y1     = scale_y1(mega2(p + 6));
-            /* style:2 at p+8; label xy at p+10/p+12; flags:2 at p+14 */
-            r->flags  = RIP_MF_ACTIVE;
-            r->active = true;
-            draw_rect(r->x0, r->y0,
-                      r->x1 - r->x0 + 1, r->y1 - r->y0 + 1, false);
-            s->num_mouse_regions++;
+    /* Dispatch slot 12 (RVA 0x01e4ff), argc 7:
+     *     XY, XY, mega2, XY, XY, mega2, mega2
+     * The handler names itself RIP_PolyMarker() and validates each field
+     * with its own diagnostic, which gives the whole signature:
+     *
+     *     cmp marker,   0x24  -> "Invalid marker number"
+     *     cmp rotation, 0x168 -> "Invalid marker rotation angle (>=360)"
+     *     cmp flags,    3     -> "Invalid marker flags value"
+     *
+     * so marker < 36, rotation < 360, flags <= 3.  TeleGrafix's own
+     * ICONS/MARKER.RIP ("RIPscrip Markers") exercises exactly numbers
+     * 0..35, rotations 0..300 and sizes from 1x1 upward, which matches.
+     *
+     * RIPlib previously read this letter as a button, adding a MOUSE
+     * REGION per call and stroking a rectangle.  That was not merely a
+     * wrong shape: the corpus issues 361 of these, so a scene of markers
+     * manufactured hundreds of phantom clickable areas.
+     *
+     * GLYPH SHAPES ARE NOT RECOVERED.  The 36 marker designs live behind
+     * the handler's polygon builder and have not been extracted, so every
+     * marker number currently renders the same neutral glyph, correctly
+     * placed, sized and rotated.  Position and geometry are faithful;
+     * which of the 36 shapes you get is not.  See docs/spec/12 §12.15. */
+    case ';': /* RIP_POLY_MARKER — x:2 y:2 marker:2 w:2 h:2 rotation:2 flags:2 */
+        if (len >= 14) {
+            int16_t mx  = mega2(p),     my = scale_y(mega2(p + 2));
+            int16_t num = mega2(p + 4);
+            int16_t mw  = mega2(p + 6), mh = scale_y(mega2(p + 8));
+            int16_t rot = mega2(p + 10);
+            int16_t mfl = mega2(p + 12);
+
+            /* Reject exactly what the driver rejects, rather than clamping
+             * a bad field into a plausible-looking marker. */
+            if (num < 36 && rot < 360 && mfl <= 3 && mw > 0 && mh > 0) {
+                int16_t hw = (int16_t)(mw / 2), hh = (int16_t)(mh / 2);
+
+                if (hw < 1) hw = 1;
+                if (hh < 1) hh = 1;
+                rip_draw_marker(s, mx, my, num, hw, hh, rot);
+            }
         }
         break;
 
@@ -3419,9 +4721,16 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * font state on any stream that set a palette entry, so that
                * behaviour is removed rather than kept pending '|y'. */
         if (len >= 7) {
-            uint16_t pal_index = (uint16_t)mega2(p);
-            uint8_t  pal_bits  = (uint8_t)mega_digit(p[2]);
-            uint32_t pal_rgb   = (uint32_t)mega4(p + 3);
+            /* Base 64: the dispatch entry's flag word marks '|d' as always
+             * using the extended radix.  Decoded as base 36 this command is
+             * wrong in three ways at once -- 'a'..'z' fold onto 10..35,
+             * '#'/'&' become 0, and a 4-digit field can only reach
+             * 1679615 instead of the full 0xFFFFFF the handler validates
+             * against.  TeleGrafix's TUNNEL.RIP writes a 64-entry ramp that
+             * only decodes monotonically this way.  See D-12. */
+            uint16_t pal_index = (uint16_t)mega2_64(p);
+            uint8_t  pal_bits  = (uint8_t)mega_digit64(p[2]);
+            uint32_t pal_rgb   = (uint32_t)mega4_64(p + 3);
 
             /* Match the driver's validation: out-of-range values are an
              * error, not something to clamp into a wrong colour. */
@@ -3503,10 +4812,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * NOT interpreted: their meanings have not been recovered, and
                * assigning them would be a guess.  See docs/spec §12.12. */
         if (len >= 26) {
-            uint8_t  y_font    = (uint8_t)mega_digit(p[0]);
-            uint16_t y_srot    = (uint16_t)mega2(p + 10);   /* arg5 */
-            uint16_t y_crot    = (uint16_t)mega2(p + 12);   /* arg6 */
-            uint16_t y_spacing = (uint16_t)mega2(p + 16);   /* arg8 */
+            /* Base 64: the dispatch entry marks '|y' as always using the
+             * extended radix, and real content proves it -- every |y in the
+             * shipped corpus carries '1a1a' in its two scale fields, which
+             * is 100,100 in base 64 (a clean percentage) and a meaningless
+             * 46,46 in base 36.  See D-12. */
+            uint8_t  y_font    = (uint8_t)mega_digit64(p[0]);
+            uint16_t y_srot    = (uint16_t)mega2_64(p + 10);   /* arg5 */
+            uint16_t y_crot    = (uint16_t)mega2_64(p + 12);   /* arg6 */
+            uint16_t y_spacing = (uint16_t)mega2_64(p + 16);   /* arg8 */
 
             bool rot_ok = (y_srot == 0 || y_srot == 90 ||
                            y_srot == 180 || y_srot == 270) &&
@@ -3518,6 +4832,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     s->font_id = y_font;
                 s->font_ext_id  = y_font;
                 s->char_spacing = y_spacing;
+                /* Percentage of each glyph's natural advance; the driver
+                 * rejects zero, which is why the guard above tests it. */
+                bgi_font_set_char_spacing(y_spacing);
                 /* Same rotation->direction mapping as '|26' SCALABLE_TEXT:
                  * 90 = CW (dir 3), 270 = CCW (dir 2), 180 unsupported by the
                  * stroke renderer so it falls back to horizontal. */

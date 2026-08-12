@@ -300,9 +300,15 @@ int rip_expand_variables(rip_state_t *s,
             /* $USER$ — no login name on embedded card; substitute empty string */
             val[0] = '\0';
             vval_len = 0;
-        } else if (vlen == 4 && memcmp(vname, "PROT", 4) == 0) {
-            /* $PROT$ — negotiated resolution mode (DLL GFXSTYLE resolution_mode).
-             * 0=EGA(640x350), 1=VGA(640x480), 2=SVGA, 3=XGA, 4=HIGH. */
+        /* $RLPROT$ — negotiated resolution mode.
+          * RENAMED from $PROT$ 2026-08-12 (X1).  The driver uses $PROT(...)$
+          * as a PARAMETERIZED ACTION that protects table entries and save
+          * slots; RIPlib was squatting on the bare name with an unrelated
+          * value, so a host's $PROT(...)$ fell through as literal text while
+          * $PROT$ returned something the record never defined.  The RL prefix
+          * cannot collide with a driver name.
+          * 0=EGA(640x350), 1=VGA(640x480), 2=SVGA, 3=XGA, 4=HIGH. */
+        } else if (vlen == 6 && memcmp(vname, "RLPROT", 6) == 0) {
             vval_len = snprintf(val, sizeof(val), "%u", s->resolution_mode);
             if (vval_len < 0) vval_len = 0;
         } else if (vlen == 9 && memcmp(vname, "COLORMODE", 9) == 0) {
@@ -463,7 +469,13 @@ int rip_expand_variables(rip_state_t *s,
         /* $COMPAT$ — compatibility level string.
          * DLL: reports a numeric mode flag used by host to detect capability.
          * RIPlib:return "1" (basic compatibility, level 1 extensions present). */
-        } else if (vlen == 6 && memcmp(vname, "COMPAT", 6) == 0) {
+        /* $RLCOMPAT$ — RIPlib compatibility level.
+          * RENAMED from $COMPAT$ 2026-08-12 (X1).  In the record
+          * $COMPAT(env)$ drops an environment to 1.54 settings — the standard
+          * legacy-mode call, with 21 uses in the shipped corpus.  Occupying
+          * the bare name meant a host could not tell a compliant terminal
+          * from RIPlib. */
+        } else if (vlen == 8 && memcmp(vname, "RLCOMPAT", 8) == 0) {
             vval_len = snprintf(val, sizeof(val), "1");
             if (vval_len < 0) vval_len = 0;
 
@@ -475,9 +487,12 @@ int rip_expand_variables(rip_state_t *s,
             val[0] = '\0';
             vval_len = 0;
 
-        /* $COPY$ — set write mode to COPY(0) via text variable.
-         * DLL: switches GDI ROP back to COPY mode (ripTextVarEngine). */
-        } else if (vlen == 4 && memcmp(vname, "COPY", 4) == 0) {
+        /* $RLCOPY$ — set write mode to COPY(0) via text variable.
+         * RENAMED from $COPY$ 2026-08-12 (X1).  The record uses
+         * $COPY(type,source,dest,...)$ to copy data tables, entries and save
+         * slots; the bare name was RIPlib's own shorthand for "write mode
+         * COPY" and had to move off it. */
+        } else if (vlen == 6 && memcmp(vname, "RLCOPY", 6) == 0) {
             s->write_mode = 0;
             draw_set_write_mode(0);
             val[0] = '\0';

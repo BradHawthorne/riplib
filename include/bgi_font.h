@@ -85,6 +85,12 @@ int16_t bgi_font_draw_string_ex(const bgi_font_t *font,
                                  uint8_t direction, uint8_t attrib);
 
 /* Get the width of a string in pixels at the given scale. */
+/* Inter-character spacing as a percentage of each glyph's natural advance
+ * (100 = normal).  Set from '|y' RIP_EXTENDED_FONT_STYLE, which the driver
+ * enforces non-zero.  Module state rather than a parameter, matching the
+ * other renderer setters. */
+void bgi_font_set_char_spacing(uint16_t pct);
+
 int16_t bgi_font_string_width(const bgi_font_t *font,
                                const char *str, int len,
                                uint8_t scale);

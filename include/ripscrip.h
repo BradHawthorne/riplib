@@ -121,6 +121,51 @@ typedef struct {
     bool     valid;             /* true if clipboard contains data */
 } rip_clipboard_t;
 
+/* Handler for '|3G' RIP_GotoURL.
+ *
+ * RIPlib NEVER opens a URL or spawns a process itself.  A stream is untrusted
+ * input, and a terminal that acts on it directly is a remote-code-execution
+ * surface -- which is why the $GOTOURL$ text-variable path has been neutered
+ * since SV-2/S2.
+ *
+ * But refusing to expose the request at all just means the feature cannot
+ * work.  The compromise is that the EMBEDDER opts in explicitly:
+ *
+ *   - No handler registered (the default) -- the URL is validated and stored
+ *     in rip_state_t.goto_url and nothing else happens.  A host can poll it.
+ *   - Handler registered -- it is invoked with a URL that has already passed
+ *     RIPlib's own checks, and the host applies its own policy on top
+ *     (prompting the user, checking an allow-list, whatever it needs).
+ *
+ * RIPlib's checks are a floor, not a substitute for the host's judgement:
+ * the URL must be printable with no control characters or whitespace, must
+ * fit the buffer, and must begin with http:// or https://.  Every other
+ * scheme is refused outright -- javascript:, data:, file:, vbscript: and
+ * friends are exactly the payloads that turn "open a link" into code
+ * execution, and no host policy should have to re-litigate them.
+ *
+ * The handler is still called with attacker-influenced data.  Treat it as
+ * such: do not pass it to a shell. */
+struct rip_state_s;
+typedef struct rip_state_s rip_state_t;
+
+typedef void (*rip_url_handler_t)(const char *url, int len);
+
+/* Register (or clear, with NULL) the URL handler for this session.
+ * Call after rip_init_first(), which zeroes the state. */
+void rip_set_url_handler(rip_state_t *s, rip_url_handler_t handler);
+
+/* Take any pending '|3D' RIP_DELAY request, in sixtieths of a second, and
+ * clear it.  Returns 0 when none is pending.
+ *
+ * The original driver implements this by busy-waiting on timeGetTime().
+ * RIPlib deliberately does not: blocking a caller for up to 65 seconds per
+ * chunk is unusable on the cooperative and single-threaded hosts RIPlib
+ * targets.  Poll this after feeding a frame and honour it however suits the
+ * host — sleep, defer the next feed, or ignore it.  Ignoring it is safe;
+ * the delay is a pacing hint, not a rendering instruction. */
+uint32_t rip_take_delay(rip_state_t *s);
+
 /* Text block state (1T/1t/1E) */
 typedef struct {
     int16_t  x0, y0, x1, y1;   /* Text region bounds */
@@ -158,6 +203,24 @@ typedef struct {
     uint8_t  port_alpha[36];      /* 0=transparent, 35=fully opaque */
     uint8_t  port_comp_mode[36];  /* Compositing mode per port (0=COPY) */
     uint8_t  port_zorder[36];     /* Z-order per port */
+
+    /* Level 2 resource-slot selection (added 2026-08-12).
+     *
+     * The driver keeps a table of slots for each of these resources and
+     * switches between them with '|2A' / '|2B' / '|2E' / '|2T'.  RIPlib keeps
+     * exactly ONE of each resource, so switching cannot swap a backing store;
+     * what it can do is validate the slot the way the driver does ("Invalid
+     * palette slot number", "Illegal button style slot number", …) and record
+     * which slot the stream believes is active, so the selection is visible
+     * to an embedder and does not silently vanish.
+     *
+     * This is a deliberate partial implementation, not a claim of parity —
+     * see docs/spec §12.12. */
+    uint8_t  cur_palette_slot;
+    uint8_t  cur_button_style_slot;
+    uint8_t  cur_environment_slot;
+    uint8_t  cur_text_window_slot;
+    uint8_t  cur_style_slot;      /* '|2Y' RIP_SwitchStyle — graphics style slot */
 } ripscrip2_state_t;
 
 /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────────── *
@@ -251,10 +314,10 @@ typedef struct {
  * ───────────────────────────────────────────────────────────────── */
 
 /* RIPscrip parser state */
-typedef struct {
+struct rip_state_s {
     uint8_t  state;          /* Current FSM state (RIP_ST_* constants, 0-13) */
     uint8_t  prev_state;     /* Saved state for line-continuation restore */
-    char     cmd_buf[256];   /* Command parameter accumulator */
+    char     cmd_buf[1024];  /* Command parameter accumulator */
     uint16_t cmd_len;        /* Bytes used in cmd_buf; widened from uint8_t
                               * (C-014) so the type range cannot coincide
                               * with sizeof(cmd_buf) == 256 */
@@ -262,7 +325,6 @@ typedef struct {
     bool     is_level1;      /* Currently parsing a Level 1 command */
     bool     is_level2;      /* Currently parsing a Level 2 command */
     bool     is_level3;      /* Currently parsing a Level 3 command */
-    bool     line_cont;      /* Previous byte was '\' — line continuation pending */
 
     /* Drawing state */
     int16_t  draw_x, draw_y; /* Current drawing position */
@@ -305,6 +367,36 @@ typedef struct {
      * request rather than inventing one.  See docs/spec §12.12 D-5. */
     uint8_t  text_metric_mode;
     uint8_t  text_metric_domain;
+
+    /* Level 3 state (added 2026-08-12 with the Level 3 dispatch).
+     *
+     * goto_url: the URL from '|3G' RIP_GotoURL, validated but NEVER acted on.
+     * RIPlib does not launch URLs or spawn processes -- see the $GOTOURL$
+     * policy note in ripscrip.c.  An embedder that wants click-through reads
+     * this and applies its own policy.  Empty means "none received". */
+    char     goto_url[128];
+    /* Opt-in handler; NULL (the default) means the URL is stored only. */
+    rip_url_handler_t url_handler;
+    /* '|3U' RIP_BeginEncodedStream announcement. The payload format has not
+     * been recovered, so the announcement is recorded, not decoded. */
+    uint16_t encoded_stream_type;
+    uint32_t encoded_stream_len;
+    /* '|3e' RIP_BAUD_EMULATION — requested playback rate.  The driver
+     * throttles rendering to simulate a slower link; RIPlib renders as fast
+     * as its host drives it and applies no artificial delay, so the rate is
+     * recorded for an embedder that wants to honour it.  0 = never set. */
+    uint32_t baud_emulation;
+    /* '|1c' RIP_SetMouseCursor selection. RIPlib renders no pointer, so the
+     * choice is recorded for an embedder that does. */
+    uint8_t  mouse_cursor_id;
+
+    /* Poly-bezier family pen state ('|t' '|x' '|z').  The driver's 5-char
+     * signature is a move-to and its 13-char signature is a curve-to that
+     * continues from wherever the pen is, so the current point has to
+     * persist between commands.  See D-2 in docs/spec §12.12. */
+    int16_t  bez_x, bez_y;
+    bool     bez_valid;
+    uint16_t bez_steps;
 
     /* RIP_EXTENDED_FONT_STYLE ('y') character spacing percentage.
      * Non-zero is enforced by the driver ("Character spacing percentage
@@ -354,7 +446,11 @@ typedef struct {
 
     /* ESC[! auto-detect tracking (Synchronet sends this to probe for RIP) */
     uint8_t  esc_detect;               /* 0=idle, 1=got ESC, 2=got ESC[ */
-    bool     utf8_pipe_pending;        /* true after 0xC2 in GOT_BANG, waiting for 0xA6 */
+    /* NOT IMPLEMENTED.  Intended to accept a UTF-8 transcoded introducer,
+     * where '|' has become U+00A6 (0xC2 0xA6).  Nothing in the FSM ever
+     * sets or reads this, so a stream using the broken bar is not
+     * recognised.  See docs/spec/12-dll-provenance.md D-13. */
+    bool     utf8_pipe_pending;
     bool     rip_has_drawn;            /* true after RIP cmds draw; cleared by '*' reset */
     bool     cursor_repositioned;     /* true after VT100 cursor moved to bottom for status bar */
 
@@ -469,6 +565,21 @@ typedef struct {
      * 2=center).  Stored so subsequent icon-load / PUT_IMAGE calls
      * can honour the BBS-requested presentation. */
     uint8_t image_style;
+    /* MegaNum radix selected by '|J' RIP_SET_BASE_MATH: 36 or 64.  Recorded
+     * for capability queries; the decoders are base 36 unconditionally
+     * because the base-64 digit alphabet has not been recovered.  See
+     * docs/spec/12-dll-provenance.md D-10. */
+    uint8_t mega_base;
+    /* '|2R' RIP_SetRefresh reserved field (slot 117, one mega4). */
+    uint32_t refresh_res;
+    /* '|3D' RIP_DELAY request, in sixtieths of a second.  RIPlib never
+     * blocks; read and clear it with rip_take_delay(). */
+    uint32_t delay_ticks;
+    /* Set when '|n' requested a coordinate width RIPlib cannot decode
+     * (anything but 2).  Everything parsed after that point is unreliable,
+     * so a host that cares should stop rather than render it.  See
+     * docs/spec/12-dll-provenance.md D-11. */
+    bool coord_size_unsupported;
 
     /* RIP_ICON_STYLE ('&') parameters for subsequent icon rendering.
      * Coordinates are stored in pixels.  style follows 1S where possible:
@@ -512,7 +623,7 @@ typedef struct {
         int16_t vp_x0, vp_y0, vp_x1, vp_y1;
     } state_stack[8];
     uint8_t state_stack_depth;
-} rip_state_t;
+};
 
 #define RIP_STATE_STACK_MAX 8
 

@@ -22,7 +22,7 @@ LEVEL 0 — Core Drawing (no prefix):
 
      Cmd  Name                   Args  Format
      ---  --------------------   ----  ---------------------------
-     c    SET_COLOR              2     !|c<color>|
+     c    COLOR                  2     !|c<color>|
      k    BACK_COLOR             1     !|k<color>|
      W    WRITE_MODE             2     !|W<mode>|
      S    FILL_STYLE             4     !|S<pat><color>|
@@ -49,7 +49,7 @@ LEVEL 0 — Core Drawing (no prefix):
      A    ARC                    10    !|A<cx><cy><sa><ea><r>|
      V    OVAL_ARC               12    !|V<cx><cy><sa><ea><rx><ry>|
      I    PIE_SLICE              10    !|I<cx><cy><sa><ea><r>|
-     i    OVAL_PIE               12    !|i<cx><cy><sa><ea><rx><ry>|
+     i    OVAL_PIE_SLICE         12    !|i<cx><cy><sa><ea><rx><ry>|
      Z    BEZIER                 18    !|Z<x0><y0>..<x3><y3><steps>|
      P    POLYGON                var   !|P<n><x0><y0>..|
      p    FILL_POLYGON           var   !|p<n><x0><y0>..|
@@ -67,36 +67,36 @@ LEVEL 0 — Extended Commands (v2.0+):
      G    FILLED_CIRCLE          6     !|G<cx><cy><r>|
      U    ROUNDED_RECT           10    !|U<x0><y0><x1><y1><r>|
      u    FILLED_ROUNDED_RECT    10    !|u<x0><y0><x1><y1><r>|
-     +    SCROLL                 14    !|+<x0><y0><x1><y1><dx><dy><fc>|
-     ,    COPY_REGION_EXT        20    !|,<sx0>..<dy1><r><r>|
-     -    TEXT_XY_EXT            var   !|-<x0><y0><x1><y1><fl><text>|
+     +    SKEWED_OVAL_CHORD      14    !|+<cx><cy><rx><ry><st><end><skew>|  (was SCROLL)
+     ,    COPY_REGION            20    !|,<sx0>..<dy1><r><r>|
+     -    FILLED_SKEWED_OVAL     10    !|-<cx><cy><rx><ry><skew>|  (was TEXT_XY_EXT)
      x    FILLED_POLY_BEZIER     var   !|x<nsegs><nsteps><pts..>|
      z    POLY_BEZIER            var   !|z<nsegs><nsteps><pts..>|
      "    BOUNDED_TEXT           var   !|"<x0><y0><x1><y1><fl><text>|
-     [    (contested: skewed-oval family, 7 args)  (unverified)
-     ]    (contested: skewed-oval family, 7 args)  (unverified)
-     _    (contested: 6 args, not a single point)  (unverified)
+     [    SKEWED_OVAL_PIE_SLICE  14    !|[<cx><cy><rx><ry><st><end><skew>|
+     ]    SKEWED_OVAL_ARC        14    !|]<cx><cy><rx><ry><st><end><skew>|
+     _    FILLED_OVAL_CHORD      12    !|_<cx><cy><st><end><rx><ry>|  (was DRAW_TO)
      {    ANIMATION_FRAME        12    !|{<x0><y0><x1><y1><x2><y2>|
      K    FILLED_RECTANGLE       8     !|K<x0><y0><x1><y1>|  (was KILL_MOUSE_EXT)
      :    MOUSE_REGION_EXT       var   !|:<x0><y0><x1><y1><hk><fl>..|
      ;    POLY_MARKER            14    !|;<x><y><num><x2><y2><rot><fl>|  (was BUTTON_EXT)
      b    EXT_TEXT_WINDOW        var   !|b<x0><y0>..<flags>|
-     d    ONE_DRAWING_PALETTE    7     !|d<index><bits><rgb>|  (was EXT_FONT_STYLE)
+     d    ONE_DRAWING_PALETTE    7     !|d<index><bits><rgb>|  (BASE 64; was EXT_FONT_STYLE)
      f    SET_WORLD_FRAME        4     !|f<x_dim><y_dim>|
      j    POINT                  4     !|j<x><y>|
      r    TEXT_METRIC            6     !|r<mode><domain><res>|
-     y    EXT_FONT_STYLE         26    !|y<26 chars>|
-     h    HEADER                 8     !|h<type><id><flags>|
+     y    EXT_FONT_STYLE         26    !|y<26 chars>|          (BASE 64)
+     h    HEADER                 8     !|h<type><id><flags>|   (BASE 64)
      q    FONT_ATTRIB            2     !|q<attrib>|
      n    SET_COORD_SIZE         4     !|n<byte_size><res>|
      M    SET_COLOR_MODE         2     !|M<mode><depth>|
      N    SET_BORDER             2     !|N<borders>|
-     &    ICON_STYLE             14    !|&<x0><y0>..<scale>|
+     &    SKEWED_OVAL            10    !|&<cx><cy><rx><ry><skew>|  (was ICON_STYLE)
      .    STAMP_ICON             12    !|.<slot><x><y><w><h><fl>|
      J    SET_BASE_MATH          2     !|J<base>|      (was SAVE_ICON)
-     D    SET_DRAWING_PALETTE    var   !|D<start><count><bits><rgb..>|  (was FILL_PATTERN_EXT)
+     D    SET_DRAWING_PALETTE    var   !|D<start><count><bits><rgb..>|  (BASE 64; was FILL_PATTERN_EXT)
      <    POLY_POLYGON         var     (variable-length; was GET_IMAGE_EXT)
-     t    REGION_TEXT            var   !|t<justify><text>|
+     t    POLY_BEZIER_LINE       var   !|t<nsegs><nsteps><pts..>|  (was REGION_TEXT, B8)
      `    COMPOSITE_ICON         var   !|`<n><pairs..><mode>|
      !    COMMENT                var   !|!<text>|   (consumed, no output)
      ( )  GROUP_BEGIN / _END     0     !|(|  !|)|  (no-op markers)

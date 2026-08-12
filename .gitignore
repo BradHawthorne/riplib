@@ -1,5 +1,6 @@
 build/
 build-*/
+build2/
 *.pgm
 
 # consumer-handoff/ holds A2GSPU-bound content extracted from RIPlib during
@@ -8,3 +9,9 @@ build-*/
 # downstream A2GSPU project to absorb, and is already excluded from the
 # sync-to-a2gspu script. Kept on local disk, out of version control.
 consumer-handoff/
+
+# MSVC/GCC scratch output that lands in the repo root when a source file
+# is compiled directly rather than through CMake.
+*.pdb
+*.su
+*.obj
