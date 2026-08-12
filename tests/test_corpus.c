@@ -94,16 +94,26 @@ static int load_file(const char *path, unsigned char **out, size_t *n) {
 }
 
 /* Replay one scene.  Returns 1 on success, 0 with `why` set on failure.
- * `*painted` receives the number of non-background pixels, so a scene that
- * parses without complaint but renders nothing is still visible as a
- * failure rather than a pass. */
-static int replay(const char *path, const char **why, long *painted) {
+ *
+ * `*painted` counts FOREGROUND pixels -- everything that is not the single
+ * most common colour -- and `*colours` the number of distinct colours used.
+ *
+ * Counting non-zero pixels instead would be nearly useless: almost every
+ * scene opens with '|*', which fills the framebuffer, so a scene that drew
+ * its background and then nothing else would report a full 640x400 and look
+ * perfectly healthy.  The same mistake made a centroid check pass seven
+ * shapes it was not actually measuring; the fix in both places is to
+ * discount the background before believing the number. */
+static int replay(const char *path, const char **why,
+                  long *painted, int *colours, int *requests) {
     rip_state_t s;
     comp_context_t ctx;
     unsigned char *data;
     size_t n, i;
 
     *painted = 0;
+    *colours = 0;
+    *requests = 0;
     if (!load_file(path, &data, &n)) {
         *why = "could not read file";
         return 0;
@@ -113,9 +123,31 @@ static int replay(const char *path, const char **why, long *painted) {
     for (i = 0; i < n; i++)
         rip_process(&s, &ctx, data[i]);
 
-    for (i = 0; i < (size_t)(W * H); i++)
-        if (fb[i] != 0)
-            (*painted)++;
+    {
+        static long hist[256];
+        long best = 0;
+        int v;
+
+        memset(hist, 0, sizeof(hist));
+        for (i = 0; i < (size_t)(W * H); i++)
+            hist[fb[i]]++;
+        for (v = 0; v < 256; v++) {
+            if (hist[v] > best)
+                best = hist[v];
+            if (hist[v] != 0)
+                (*colours)++;
+        }
+        *painted = (long)(W * H) - best;   /* everything but the background */
+    }
+
+    /* Several shipped scenes draw almost nothing on their own because their
+     * visuals live in external files -- DRAGON.RIP pulls in five .BMPs plus
+     * dragon.txt, SHADMOVE.RIP defers to shadowdo.fn.  The harness supplies
+     * none of them, so low foreground there is expected.  What is NOT
+     * expected is silence: RIPlib must still ASK the host for those assets,
+     * and a scene that neither draws nor requests anything has quietly
+     * dropped its content rather than deferring it. */
+    *requests = s.icon_state.request_count;
 
     /* A well-formed scene must leave the FSM back at idle.  Anything else
      * means a command swallowed the rest of the stream. */
@@ -151,22 +183,29 @@ int main(void) {
         const char *why = "";
         const char *base = strrchr(riplib_corpus_scenes[i], '/');
         long painted = 0;
+        int colours = 0, requests = 0;
 
         base = base ? base + 1 : riplib_corpus_scenes[i];
         TEST(base);
-        if (!replay(riplib_corpus_scenes[i], &why, &painted)) {
+        if (!replay(riplib_corpus_scenes[i], &why, &painted, &colours,
+                    &requests)) {
             FAIL(why);
         } else {
             /* Zero output is not a failure: some shipped scenes are
              * conditional templates that resolve to $NULL$ when their
-             * driving text variable is unset (WIPE.RIP is one).  The count
-             * is reported so a scene that silently stops drawing after a
-             * parser change is still obvious in the diff. */
+             * driving text variable is unset (WIPE.RIP is one).  Both
+             * numbers are reported so a scene that quietly stops drawing
+             * after a parser change shows up in the diff -- foreground
+             * pixels catch a scene reduced to its background, and the
+             * colour count catches one reduced to a single flat fill. */
             tests_passed++;
-            if (painted == 0)
-                printf("PASS        0 px  (no output)\n");
+            if (painted == 0 && requests == 0)
+                printf("PASS        0 fg  (background only, no assets asked for)\n");
+            else if (painted == 0)
+                printf("PASS        0 fg  (%d asset request(s) pending)\n", requests);
             else
-                printf("PASS  %7ld px\n", painted);
+                printf("PASS  %7ld fg  %2d colours  %d req\n",
+                       painted, colours, requests);
         }
     }
 
