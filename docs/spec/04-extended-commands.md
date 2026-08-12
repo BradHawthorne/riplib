@@ -494,13 +494,20 @@ as a coordinate.  The driver resolves that width at decode time:
      coordinate      use this command's byte_size
      colour          use the width from '|M' SET_COLOR_MODE
 
-IMPLEMENTATION LIMIT.  RIPlib's decoders are fixed at 2 digits, so any
-width other than 2 would be mis-read from the first coordinate onward.
-Rather than mis-parse silently, RIPlib records the condition: a width it
-cannot honour sets rip_state_t.coord_size_unsupported, and a host that
-cares can stop instead of rendering garbage.  All 24 uses of '|n' in
-TeleGrafix's shipped content request 2, the default, so no real content
-is affected.  See docs/spec/12-dll-provenance.md D-11.
+RIPlib honours this.  Its handlers read fixed 2-digit fields, so rather
+than make 262 decode sites width-aware, a payload arriving under any
+other negotiated width is rewritten to 2-digit fields before dispatch.
+Literal-width arguments are copied at their own width; only the ones the
+dispatch record types as coordinate or colour are converted.
+
+The conversion saturates at 1295, the largest value two digits hold.
+That is a real bound but not a practical one here: RIPlib renders into a
+fixed 640x400 device space without a world-to-device transform, so a
+coordinate above 1295 is off-screen whatever width carried it.
+
+All 24 uses of '|n' in TeleGrafix's shipped content request 2, the
+default, in which case the rewrite is skipped entirely.  See
+docs/spec/12-dll-provenance.md D-11.
 
 
 ---------------------------------------------------------------------

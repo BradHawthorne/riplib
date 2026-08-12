@@ -3609,6 +3609,51 @@ static long text_extent_px(rip_state_t *s, comp_context_t *ctx,
     return (maxx < 0) ? 0 : (maxx - minx + 1);
 }
 
+/* Return the bounding box of everything painted, as (minx,miny,maxx,maxy). */
+static void painted_bbox(int *bx0, int *by0, int *bx1, int *by1) {
+    int xx, yy;
+    *bx0 = 9999; *by0 = 9999; *bx1 = -1; *by1 = -1;
+    for (yy = 0; yy < 400; yy++)
+        for (xx = 0; xx < 640; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0) {
+                if (xx < *bx0) *bx0 = xx;
+                if (yy < *by0) *by0 = yy;
+                if (xx > *bx1) *bx1 = xx;
+                if (yy > *by1) *by1 = yy;
+            }
+}
+
+static void test_wide_coordinates_render_the_same_shape(void) {
+    rip_state_t s; comp_context_t ctx;
+    int ax0, ay0, ax1, ay1, bx0, by0, bx1, by1;
+
+    TEST("|n3 wide coordinates decode to the same rectangle as width 2");
+    /* '|n' selects the width of every argument the driver types as a
+     * coordinate.  RIPlib reads fixed 2-digit fields at fixed offsets in
+     * 262 places, so before D-11 a width of 3 desynchronised from the first
+     * coordinate onward.  The payload is now normalised to 2-digit fields
+     * before dispatch, so both of these must draw the SAME rectangle. */
+
+    /* width 2: |R x0=0A y0=0A x1=2S y1=1E  -> (10,10)-(100,50) */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|n2000|");
+    feed_script(&s, &ctx, "!|R0A0A2S1E|");
+    painted_bbox(&ax0, &ay0, &ax1, &ay1);
+
+    /* width 3: the same four values as 3-digit fields */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c0F|n3000|");
+    feed_script(&s, &ctx, "!|R00A00A02S01E|");
+    painted_bbox(&bx0, &by0, &bx1, &by1);
+
+    if (ax1 < 0) { FAIL("width-2 baseline painted nothing"); return; }
+    if (bx1 < 0) { FAIL("width-3 stream painted nothing"); return; }
+    if (ax0 == bx0 && ay0 == by0 && ax1 == bx1 && ay1 == by1)
+        PASS();
+    else
+        FAIL("width-3 stream drew a different rectangle");
+}
+
 static void test_char_spacing_changes_text_extent(void) {
     rip_state_t s; comp_context_t ctx;
     long normal, wide;
@@ -5356,6 +5401,7 @@ int main(void) {
     test_ext_mouse_region_ext_colon();
     test_skewed_oval_family_extents();
     test_ext_poly_marker_semicolon();
+    test_wide_coordinates_render_the_same_shape();
     test_char_spacing_changes_text_extent();
     test_bezier_honours_stream_step_count();
     test_poly_marker_glyphs_differ();

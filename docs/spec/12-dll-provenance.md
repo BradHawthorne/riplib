@@ -1049,43 +1049,49 @@ D-9  WITHDRAWN 2026-08-12, THE SAME DAY IT WAS RAISED.  It alleged
      wire-versus-semantics distinction like symptom 1 before suspecting
      the table.
 
-D-11 COORDINATE WIDTH IS RECORDED BUT NOT HONOURED.  Recorded
-     2026-08-12, surfaced while withdrawing D-9.  The dispatch table
-     types many arguments 0xFF ("width per SET_COORDINATE_SIZE"), and
-     '|n' RIP_SET_COORDINATE_SIZE (slot 49, byte_size:1 res:3) selects
-     that width at runtime.  RIPlib parses '|n' and stores the value in
-     rip_state_t.coordinate_size, but every decode site calls the fixed
-     2-digit mega2(); the field is recorded and never consulted.
+D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
+     HONOURED.  The dispatch record types many arguments 0xFF ("width per
+     SET_COORDINATE_SIZE") and a few 0xFE ("width per SET_COLOR_MODE"),
+     and the driver resolves both at decode time (resolver at RVA
+     0x039DE0).  RIPlib parsed '|n' into rip_state_t.coordinate_size and
+     then read fixed 2-digit fields at fixed offsets in 262 places, so a
+     stream selecting any other width desynchronised from its first
+     coordinate.
 
-     A stream that sets any width other than 2 will therefore desync
-     from the first coordinate onward.  Impact on real content is nil:
-     all 24 uses of '|n' across the 35 shipped scenes are byte_size=2,
-     the default — the same situation as '|J10' in D-10.
+     FIXED BY NORMALISING THE PAYLOAD, not by rewriting 262 call sites.
+     Before dispatch, when the negotiated widths are not the default, the
+     command's payload is rewritten so every argument is two digits and
+     the handlers never see the difference.  scripts/dll-argtypes.py
+     emits the per-command type table this needs; only the 56 commands
+     that actually contain a 0xFF or 0xFE argument are carried, because
+     a command whose widths are all literal is already correct.
 
-     THE WIDTH MODEL IS NOW FULLY RECOVERED (2026-08-12).  The resolver
-     at RVA 0x039DE0 takes the engine state and an argument index and
-     returns that argument's digit count:
+     Properties worth stating, because each was a bug on the way here:
 
-          t = argtype[i]                  ; the +0x14 byte of the entry
-          t >= 0      -> t                ; literal count (1, 2, 4)
-          t == 0xFF   -> (state+2)->[0x39] ; SET_COORDINATE_SIZE
-          t == 0xFE   -> (state+2)->[0x3a] ; SET_COLOR_MODE, resolving
-                                            to 2, or 4 via a jump table
-                                            for modes 0x01..0x18
+       - Literal-width fields are copied VERBATIM at their own width.
+         Re-emitting a mega1 or mega4 field as two digits corrupts it.
+       - The rewrite is in place, which is safe only because coord_w >= 2
+         means the negotiated fields shrink and literals do not move.  No
+         scratch buffer, so nothing lands in the dispatcher's stack frame
+         — an earlier version used a 1 KB local, GCC inlined it, and
+         execute_rip_command went from 648 bytes to 1416.
+       - The type list is MEASURED before anything is written.  Bailing
+         out mid-rewrite leaves a half-converted payload, which is worse
+         than not trying; the first version did exactly that and the
+         existing metadata tests caught it.
+       - With the default width the whole path is skipped, so the common
+         case is byte-for-byte unchanged.
 
-     So 0xFF and 0xFE are indirections through two state bytes, and the
-     three state bytes sit adjacent: +0x38 MegaNum base, +0x39 coordinate
-     size, +0x3a colour mode.  That is the complete answer to how the
-     driver sizes an argument.
+     LOSSY ONLY ABOVE 1295, the largest value two digits hold.  That is
+     acceptable for RIPlib specifically: it renders into a fixed 640x400
+     device space and deliberately does not apply a world-to-device
+     transform (D-1), so a coordinate above 1295 is off-screen whatever
+     width carried it.  A port that grows a world transform must revisit
+     this rather than inherit it.
 
-     RIPlib does not implement it.  Closing it means threading the width
-     through src/rip_meganum.h, whose decoders are deliberately stateless
-     static inlines called from several hundred sites, so it is a genuine
-     refactor rather than a patch.  What HAS changed is that the failure
-     is no longer silent: '|n' with any width but 2 sets
-     rip_state_t.coord_size_unsupported, so a host can stop instead of
-     rendering garbage.  Until the refactor lands, read the 0xFF type
-     byte as "2 in practice".
+     rip_state_t.coord_size_unsupported remains, and is now cleared when
+     a command is successfully normalised, so it means what it says: a
+     width this build could not handle.
 
 D-13 STATE RECORDED "FOR THE HOST" THAT NO HOST CAN READ.  Recorded
      2026-08-12 by diffing every field of rip_state_s against its uses:
