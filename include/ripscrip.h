@@ -325,7 +325,6 @@ struct rip_state_s {
     bool     is_level1;      /* Currently parsing a Level 1 command */
     bool     is_level2;      /* Currently parsing a Level 2 command */
     bool     is_level3;      /* Currently parsing a Level 3 command */
-    bool     line_cont;      /* Previous byte was '\' — line continuation pending */
 
     /* Drawing state */
     int16_t  draw_x, draw_y; /* Current drawing position */
@@ -447,7 +446,11 @@ struct rip_state_s {
 
     /* ESC[! auto-detect tracking (Synchronet sends this to probe for RIP) */
     uint8_t  esc_detect;               /* 0=idle, 1=got ESC, 2=got ESC[ */
-    bool     utf8_pipe_pending;        /* true after 0xC2 in GOT_BANG, waiting for 0xA6 */
+    /* NOT IMPLEMENTED.  Intended to accept a UTF-8 transcoded introducer,
+     * where '|' has become U+00A6 (0xC2 0xA6).  Nothing in the FSM ever
+     * sets or reads this, so a stream using the broken bar is not
+     * recognised.  See docs/spec/12-dll-provenance.md D-13. */
+    bool     utf8_pipe_pending;
     bool     rip_has_drawn;            /* true after RIP cmds draw; cleared by '*' reset */
     bool     cursor_repositioned;     /* true after VT100 cursor moved to bottom for status bar */
 

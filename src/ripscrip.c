@@ -927,7 +927,6 @@ void rip_session_reset(rip_state_t *s) {
     s->cmd_len = 0;
     s->cmd_char = '\0';
     clear_levels(s);
-    s->line_cont = false;
     s->last_char = 0;
     s->esc_detect = 0;
     s->utf8_pipe_pending = false;
@@ -3759,24 +3758,28 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * on state we have not recovered, so the first (documented) form
                * is kept for those and the ambiguity is recorded rather than
                * guessed — see docs/spec §12.12. */
+        /* Base 64: '|h' carries flag value 2 in its dispatch entry, the same
+         * as '|d', '|D' and '|y' -- see D-12.  No shipped scene uses '|h',
+         * so this is unverified against real content, but decoding it with
+         * the base-36 helpers would contradict the table for no reason. */
         if (len >= 8) {
-            s->header_type  = (uint8_t)(mega2(p) & 0xFF);
-            s->header_id    = (uint32_t)mega4(p + 2);
-            s->header_flags = (uint8_t)(mega2(p + 6) & 0xFF);
+            s->header_type  = (uint8_t)(mega2_64(p) & 0xFF);
+            s->header_id    = (uint32_t)mega4_64(p + 2);
+            s->header_flags = (uint8_t)(mega2_64(p + 6) & 0xFF);
             s->filled_borders_enabled = true;
         } else if (len == 6) {
-            s->header_type  = (uint8_t)mega_digit(p[0]);
-            s->header_id    = (uint32_t)mega4(p + 1);
-            s->header_flags = (uint8_t)mega_digit(p[5]);
+            s->header_type  = (uint8_t)mega_digit64(p[0]);
+            s->header_id    = (uint32_t)mega4_64(p + 1);
+            s->header_flags = (uint8_t)mega_digit64(p[5]);
             s->filled_borders_enabled = true;
         } else if (len == 4) {
-            s->header_type  = (uint8_t)mega_digit(p[0]);
-            s->header_id    = (uint32_t)mega2(p + 1);
-            s->header_flags = (uint8_t)mega_digit(p[3]);
+            s->header_type  = (uint8_t)mega_digit64(p[0]);
+            s->header_id    = (uint32_t)mega2_64(p + 1);
+            s->header_flags = (uint8_t)mega_digit64(p[3]);
             s->filled_borders_enabled = true;
         } else if (len == 3) {
-            s->header_type  = (uint8_t)mega_digit(p[0]);
-            s->header_id    = (uint32_t)mega2(p + 1);
+            s->header_type  = (uint8_t)mega_digit64(p[0]);
+            s->header_id    = (uint32_t)mega2_64(p + 1);
             s->filled_borders_enabled = true;
         }
         break;

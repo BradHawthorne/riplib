@@ -1087,6 +1087,51 @@ D-11 COORDINATE WIDTH IS RECORDED BUT NOT HONOURED.  Recorded
      rendering garbage.  Until the refactor lands, read the 0xFF type
      byte as "2 in practice".
 
+D-13 STATE RECORDED "FOR THE HOST" THAT NO HOST CAN READ.  Recorded
+     2026-08-12 by diffing every field of rip_state_s against its uses:
+     of 111 fields, 24 are written and never read anywhere in the
+     library.  Most carry a comment along the lines of "recorded so an
+     embedder that cares can act on it".  No embedder can: rip_state_t
+     is INTERNAL by policy (ADR-0001, opaque-by-policy), and the only
+     accessors the public header offers are rip_set_url_handler() and
+     rip_take_delay().  So these fields are, in practice, dead:
+
+          baud_emulation      encoded_stream_type   mouse_cursor_id
+          coordinate_res      encoded_stream_len    refresh_res
+          coord_size_unsupported  header_type       text_metric_mode
+          mega_base           header_id             text_metric_domain
+          viewport_scale      header_flags          char_spacing
+
+     This is not an argument for deleting them — parsing a field and
+     recording it is what keeps a frame in sync and is often the honest
+     alternative to guessing at semantics.  It is an argument that the
+     comments overstate what a consumer can do, and that anything worth
+     recording is worth an accessor.  '|3D' RIP_DELAY is the pattern to
+     follow: the field is recorded AND rip_take_delay() exposes it.
+
+     Two further fields were not "recorded for the host" but simply
+     dead, and both are now dealt with:
+
+       line_cont           REMOVED.  Declared for '\' continuation, only
+                           ever assigned false.  Continuation is real and
+                           works, but through prev_state and the
+                           LINE_CONT FSM state, not this flag.
+
+       utf8_pipe_pending   KEPT, but its comment now says NOT
+                           IMPLEMENTED.  It describes accepting a UTF-8
+                           transcoded introducer where '|' has become
+                           U+00A6 (0xC2 0xA6).  Nothing in the FSM sets
+                           or reads it and no 0xC2/0xA6 handling exists,
+                           so such a stream is not recognised.  That is a
+                           real gap, and the declaration made it look
+                           solved.
+
+     Two more are gaps in RENDERING rather than API: bez_steps, parsed
+     from the bezier commands and never consulted by the curve
+     generator, and char_spacing, which '|y' now decodes correctly (see
+     D-12) but which no text path reads — so the base-64 fix to '|y'
+     corrects the recorded value without yet changing any output.
+
 D-12 RESOLVED 2026-08-12 — THE BASE-64 ALPHABET, AND WHO USES IT.
      This supersedes D-10 below, which is retained for the record of how
      the search went wrong.  The answer was in TeleGrafix's own content,
