@@ -637,6 +637,61 @@ D-3  '!' TRIGGERS ANYWHERE IN A LINE.
 D-4  '|28' GRADIENT IS RIPlib-ORIGINAL, NOT INHERITED.
      Severity: documentation only — corrected in segment 6A.
 
+---------------------------------------------------------------------
+12.13  CLASS G — RIPSCRIP.HLP, THE DRIVER'S OWN NAME TABLE
+---------------------------------------------------------------------
+
+Added 2026-08-12.  The RIPtel 3.1 install ships RIPSCRIP.HLP alongside
+the driver.  Despite the extension it is not a WinHelp file: it opens
+"RIPscrip Help File Resource" and contains two ordered tables the driver
+indexes at runtime —
+
+     * the complete ERROR MESSAGE table, and
+     * a 93-entry FUNCTION NAME table, grouped by command level and
+       alphabetical within each group.
+
+This is a THIRD independent evidence class, and the strongest one for
+naming: unlike the string-table method (class B) it covers handlers that
+emit no diagnostics at all.  It was overlooked until late because the
+analysis had been working from the DLL alone.
+
+     PROVES:     which commands exist, by name, per level.
+     PROVES NOT: the letter each name binds to.  The table is
+                 alphabetical, not dispatch-ordered, so it must be
+                 cross-referenced against the dispatch table.
+
+Cross-referencing it closed three handlers that the binary alone could
+not name, and independently confirmed several earlier identifications
+(RIP_Point = '|j', RIP_CopyBlit = '|1g', RIP_ImageStyle = '|1i'):
+
+  |1k   RIP_KillEnclosedMouseFields.  The Level 1 group carries both
+        RIP_KillMouseFields (the plain '|1K') and this one.  The handler
+        (RVA 0x00C474) matches exactly: it orders the coordinate pairs,
+        applies the same transform '|j' uses, assembles a RECT via
+        USER32!SetRect and passes it onward inside the drawing lock/dirty
+        bracket.  IMPLEMENTED — kills the mouse fields wholly enclosed by
+        the rectangle, the selective counterpart to '|1K'.
+
+  |2Y   RIP_SwitchStyle.  The Level 2 group has exactly twelve names and
+        eleven were already bound; RIP_SwitchStyle was the remainder, and
+        its (slot:1, flags:2) shape matches the other Switch* commands.
+        IMPLEMENTED as the graphics-style slot selector.
+
+  |3ESC RIP_EnterBlockMode, confirmed by a name-string reference inside
+        the handler's tight bounds (0x024B4E..0x0251CB).
+
+Still unbound after this pass: the two '|3D' entries and '|3e'.  The
+remaining unclaimed Level 3 names are BaudEmulation, AudioSupport,
+ProcessFile, CreateDefaultPalette and ResetDefaultPalette.  Evidence so
+far: '|3D' at RVA 0x024AF4 copies its text argument into a 256-byte
+buffer and calls a routine that references the string "ICONS", which is
+consistent with RIP_ProcessFile; '|3D' at 0x038BD2 is a 15-byte thunk.
+Neither is bound tightly enough to assert, and none of the three appears
+in the corpus, so they stay recorded rather than guessed.
+
+
+---------------------------------------------------------------------
+
 D-8  '|1k' AND '|3D' — HOW FAR THE ANALYSIS ACTUALLY GOT.
      Recorded 2026-08-12 after these were re-examined.  An earlier draft
      called their semantics "not recovered", which overstated the effort

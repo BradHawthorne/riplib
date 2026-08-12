@@ -736,7 +736,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     case RIP2_CMD_SWITCH_BUTTON_STYLE:
     case RIP2_CMD_SWITCH_ENVIRONMENT:
     case RIP2_CMD_SWITCH_TEXT_WINDOW:
-    case RIP2_CMD_SLOT_Y: {
+    case RIP2_CMD_SWITCH_STYLE: {
         if (raw_len < 1)
             break;
         uint8_t slot = (uint8_t)mega1(raw + 0);
@@ -747,7 +747,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         case RIP2_CMD_SWITCH_BUTTON_STYLE: s->cur_button_style_slot = slot; break;
         case RIP2_CMD_SWITCH_ENVIRONMENT:  s->cur_environment_slot  = slot; break;
         case RIP2_CMD_SWITCH_TEXT_WINDOW:  s->cur_text_window_slot  = slot; break;
-        default:                           s->cur_slot_y            = slot; break;
+        default:                           s->cur_style_slot        = slot; break;
         }
         break;
     }

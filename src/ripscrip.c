@@ -2057,10 +2057,39 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
-        case 'k': /* rect:XYx4 res:4 — handler RVA 0x00C474, no diagnostics
-                   * recovered and the handler does not name itself.  Accepted
-                   * and consumed so the frame stays in sync; deliberately not
-                   * acted on rather than guessed.  See docs/spec §12.12. */
+        case 'k': /* RIP_KILL_ENCLOSED_MOUSE_FIELDS — x0:XY y0:XY x1:XY y1:XY res:4
+                   *
+                   * IDENTIFIED 2026-08-12 from RIPSCRIP.HLP, the driver's own
+                   * help resource, which carries an ordered function-name
+                   * table grouped by level.  Its Level 1 group contains
+                   * RIP_KillEnclosedMouseFields alongside RIP_KillMouseFields
+                   * (the plain '|1K' RIPlib already had), and the handler
+                   * (RVA 0x00C474) matches exactly: it orders the two
+                   * coordinate pairs, applies the same transform '|j' uses,
+                   * assembles a RECT via USER32!SetRect and passes it to a
+                   * routine, bracketed by the drawing lock/dirty pair.
+                   *
+                   * Kills every mouse field wholly enclosed by the rectangle,
+                   * leaving the rest registered — the selective counterpart
+                   * to '|1K', which kills all of them. */
+            if (len >= 8) {
+                int16_t kx0 = mega2(p),     ky0 = scale_y(mega2(p + 2));
+                int16_t kx1 = mega2(p + 4), ky1 = scale_y1(mega2(p + 6));
+                if (kx1 < kx0) { int16_t t = kx0; kx0 = kx1; kx1 = t; }
+                if (ky1 < ky0) { int16_t t = ky0; ky0 = ky1; ky1 = t; }
+                uint16_t kept = 0;
+                for (uint16_t i = 0; i < s->num_mouse_regions; i++) {
+                    rip_mouse_region_t *r = &s->mouse_regions[i];
+                    bool enclosed = (r->x0 >= kx0 && r->x1 <= kx1 &&
+                                     r->y0 >= ky0 && r->y1 <= ky1);
+                    if (!enclosed) {
+                        if (kept != i)
+                            s->mouse_regions[kept] = *r;
+                        kept++;
+                    }
+                }
+                s->num_mouse_regions = kept;
+            }
             break;
 
         case 'w': /* mode:1 <string> — handler RVA 0x00D24E, "Invalid string

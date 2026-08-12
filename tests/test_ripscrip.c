@@ -3429,6 +3429,26 @@ static void test_ext_ext_text_window_b(void) {
 
 /* Commands recovered from the driver's dispatch table 2026-08-12, completing
  * coverage across all four levels. */
+/* |1k = RIP_KillEnclosedMouseFields, identified from RIPSCRIP.HLP's function
+ * name table (segment 12 class G).  Kills only the fields wholly inside the
+ * rectangle — the selective counterpart to |1K, which kills all of them. */
+static void test_level1_kill_enclosed_mouse_fields(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1k kills only the mouse fields enclosed by the rectangle");
+    init_fixture(&s, &ctx);
+    /* two fields: one inside (10,10)-(50,50), one well outside */
+    feed_script(&s, &ctx, "!|1M0A0A1414000000inside|\r\n");
+    feed_script(&s, &ctx, "!|1M64646E6E000000outside|\r\n");
+    if (s.num_mouse_regions != 2) { FAIL("setup: expected two regions"); return; }
+    feed_script(&s, &ctx, "!|1k0A0A32320000|\r\n");   /* enclose (10,10)-(50,50) */
+    if (s.num_mouse_regions != 1) {
+        FAIL("|1k did not remove exactly the enclosed field"); return;
+    }
+    /* the survivor must be the outside one */
+    if (s.mouse_regions[0].x0 >= 100) PASS();
+    else FAIL("|1k removed the wrong field");
+}
+
 static void test_level3_goto_url_records_without_launching(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|3G records the URL and launches nothing");
@@ -4981,6 +5001,7 @@ int main(void) {
     test_ext_mouse_region_ext_colon();
     test_ext_button_ext_semicolon();
     test_ext_ext_text_window_b();
+    test_level1_kill_enclosed_mouse_fields();
     test_level3_goto_url_records_without_launching();
     test_level3_url_handler_opt_in();
     test_level3_url_scheme_allowlist();

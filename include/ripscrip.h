@@ -209,7 +209,7 @@ typedef struct {
     uint8_t  cur_button_style_slot;
     uint8_t  cur_environment_slot;
     uint8_t  cur_text_window_slot;
-    uint8_t  cur_slot_y;          /* '|2Y': same signature, target unnamed */
+    uint8_t  cur_style_slot;      /* '|2Y' RIP_SwitchStyle — graphics style slot */
 } ripscrip2_state_t;
 
 /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────────── *

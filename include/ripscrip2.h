@@ -57,7 +57,7 @@
 #define RIP2_CMD_SWITCH_BUTTON_STYLE 'B'  /* !|2B — RIP_SwitchButtonStyle  */
 #define RIP2_CMD_SWITCH_ENVIRONMENT  'E'  /* !|2E — RIP_SwitchEnvironment  */
 #define RIP2_CMD_SWITCH_TEXT_WINDOW  'T'  /* !|2T — RIP_SwitchTextWindow   */
-#define RIP2_CMD_SLOT_Y              'Y'  /* !|2Y — same shape, target unnamed */
+#define RIP2_CMD_SWITCH_STYLE        'Y'  /* !|2Y — RIP_SwitchStyle (graphics style slot) */
 #define RIP2_CMD_PORT_WRITE          'W'  /* !|2W — RIP_PortWrite (to bitmap) */
 
 void ripscrip2_init(ripscrip2_state_t *s);
