@@ -472,3 +472,101 @@ To unblock: either restore the DLL (the RIPtel 3.10 installer is catalogued upst
 ### 11.4 Behavior changes needing sign-off
 
 `B1`, `B9` and `X3` all change what appears on screen for existing content. `B1` in particular means any stream authored against RIPlib's current numbering renders differently afterwards. These are the right changes on the evidence, but they are not silent ones, and each wants a CHANGELOG entry and a version bump rather than a quiet fix. `B9` additionally requires regenerating the `fill_and_shapes` fixture hash.
+
+---
+
+## 12. Findings to send upstream (added 2026-08-12)
+
+Section 11.2 above says Phase 3 is blocked because the DLL is unavailable.
+**That is no longer true.** The artifact was located (a RIPtel 3.1 install;
+`RIPSCRIP.DLL`, 592,896 bytes, MD5 `bade8b1f4e467ac7ad4edb2639738d4c`), the
+dispatch table was dumped, and the analysis in this section rests on it plus
+the 35 `.RIP` scenes the same install ships. Sections 11.1–11.2 should be read
+as historical.
+
+These are the items where RIPlib now has evidence bbs-land's reference does
+not, offered as corrections rather than claims. Each cites something
+checkable.
+
+### 12.1 `|1A` is `RIP_SelectArticle`
+
+Their reference carries a row literally titled *"1A (unidentified)"*, noting
+"6 digits observed (layout unresolved)". The handler at RVA `0x00DC58` is
+tightly bounded at 62 bytes and pushes both `'Invalid article number'` and
+`'RIP_SelectArticle()'` — it names itself. Its dispatch entry is
+`mega2 + mega4` = **6 characters**, matching their corpus observation exactly.
+
+### 12.2 The `Switch*` widths are 3 characters, not 6
+
+Recorded in both projects as unresolved. Their reference documents `|2s` as
+`port-num:1 flags:2 res:3` (6 chars) against a dispatch entry of
+`mega1 + mega2` (3). The shipped corpus settles it — all three `|2s` commands
+in it are three characters:
+
+```
+!|2s000     port 0, flags 0
+!|2s002     port 0, flags 2
+!|2s100     port 1, flags 0
+```
+
+There is no `res:3`, and the whole family (slots 111, 112, 114, 118, 119, 121)
+is uniformly `mega1 + mega2`. **This one has a consumer-visible cost**: anyone
+implementing the 6-character layout over-consumes three bytes and
+desynchronises the remainder of the frame.
+
+### 12.3 `|F` RIP_FILL is stubbed out in the 3.0 driver
+
+Its dispatch entry shows `argc=0`, which looks like a table defect. It is
+not: the handler pointer `0x01B2FD` disassembles to a single `ret` — the tail
+of the preceding function — while `0x01B2FE` (`|G`) is a real prologue. Slot
+27 is the only Level 0 row whose handler is a bare `ret`.
+
+Their `x:XY y:XY border:CM` remains the correct **wire** layout and RIPlib
+implements it that way; the 3.0 driver simply declines to act on it. Worth
+noting in their reference, because it explains an anomaly rather than
+changing a signature.
+
+### 12.4 `|3D` is a delay, in sixtieths of a second
+
+Unresolved in both. Slot 122 (`0x038BD2`) is a five-instruction thunk passing
+`arg[0]` to `0x100282CA`, which busy-waits on `WINMM!timeGetTime`. Its
+arithmetic fixes the unit: chunks of 3900, `0xFDE8` = 65000 ms per chunk
+(3900/60 = 65 s), remainder waited as `remainder * 1000 / 60` ms.
+
+Slot 125 (`0x024AF4`) shares the letter but is a different command — it copies
+a **text** parameter into a 256-byte buffer, looks it up, and on a result of 2
+calls `0x10006C01`, which names itself `RIP_Suspend()`. It never reads the
+decoded argument array, so it does not match its own `argc=1/mega4` row.
+
+### 12.5 The skewed-oval family is confirmed, and their record was right
+
+RIPlib had six Level-0 letters bound to unrelated commands. `NEWCMDS.RIP`,
+TeleGrafix's own commented demo, names them, and the arities match the
+dispatch table exactly:
+
+| | | |
+|---|---|---|
+| `\|&` | `RIP_SKEWED_OVAL` | 5 args |
+| `\|-` | `RIP_FILLED_SKEWED_OVAL` | 5 |
+| `\|]` | `RIP_SKEWED_OVAL_ARC` | 7 |
+| `\|[` | `RIP_SKEWED_OVAL_PIE_SLICE` | 7 |
+| `\|+` | `RIP_SKEWED_OVAL_CHORD` | 7 |
+| `\|_` | `RIP_FILLED_OVAL_CHORD` | 6 |
+
+Their record's skewed-oval reading was correct and RIPlib's was not; this is
+a concession, not a correction. What RIPlib adds is the geometry: the
+generator at `0x010160` walks one point per degree over `[start,end]` and
+applies a plain 2-D rotation from Q14 sine/cosine tables (`0x07b638` /
+`0x07b098`), handing the run to `GDI32!Polygon`. So **`skew` is a rotation
+angle in whole degrees**, not a shear factor or an aspect ratio.
+
+### 12.6 Method note
+
+Three of the evidence classes both projects lean on — internal name strings,
+assertion strings, field diagnostics — all key on strings, so a handler that
+pushes none is invisible to all three at once. That is what kept `|3D` open
+across three attempts. Resolving the import directory and asking what a
+handler *calls* got past it, and the same pass corroborated `|<` via
+`GDI32!PolyPolygon` (the only handler in the table that reaches it), `|K` via
+`GDI32!Rectangle`, and `|]` via `GDI32!Polyline` rather than `Polygon` — which
+is how we know the arc is stroked and open.

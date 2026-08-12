@@ -832,13 +832,31 @@ in both directions:
   entry records mega2 + mega4 = 6 characters, matching their corpus
   observation exactly.  Worth sending upstream.
 
-  UNRESOLVED IN BOTH — THE Switch* WIDTHS.  For the resource-switch
-  family their reference and the dispatch table disagree on total width:
-  '|2s' is documented 'port-num:1 flags:2 res:3' (6 chars) where the
-  dispatch entry records mega1 + mega2 (3); '|2T' is documented
-  'window_num:1 res:1' (2) against 3.  Both readings can be true if the
-  trailing reserved bytes are consumed outside the dispatch template.
-  Not resolved here; recorded so neither side treats it as settled.
+  THE Switch* WIDTHS — RESOLVED 2026-08-12, IN THE DISPATCH TABLE'S
+  FAVOUR.  This was recorded as unresolved in both projects.  Their
+  reference documents '|2s' as 'port-num:1 flags:2 res:3' (6 chars)
+  where the dispatch entry records mega1 + mega2 (3), and '|2T' as
+  'window_num:1 res:1' (2) against 3.  The note allowed that both could
+  be true if trailing reserved bytes were consumed outside the template.
+
+  They are not.  The shipped corpus contains three '|2s' commands and
+  every one of them is THREE characters:
+
+       !|2s000     port 0, flags 0
+       !|2s002     port 0, flags 2
+       !|2s100     port 1, flags 0
+
+  There is no res:3.  The dispatch entry is complete, the whole Switch*
+  family is uniformly mega1 + mega2 (slots 111, 112, 114, 118, 119, 121
+  all agree), and RIPlib's reader — port:1 then flags:2 — is correct as
+  written.  Worth sending upstream: a consumer that trusts the
+  6-character layout will over-consume three bytes and desynchronise the
+  rest of the frame.
+
+  Method note: this is the second question this session settled by
+  measuring the corpus rather than reasoning about the binary, after
+  D-1.  Where vendor content exercises a command, it outranks both
+  documents.
 
   ONE OPEN ITEM ON THIS SIDE — SINCE RESOLVED.  '|F' RIP_FILL showed
   argc=0 at RVA 0x01B2FD, one byte before '|G' at 0x01B2FE, and was
@@ -948,7 +966,22 @@ D-5  RESOLVED 2026-08-12.  FOUR DRIVER COMMANDS WERE UNIMPLEMENTED.
      coverage: all 70 distinct opcodes across 12,328 command instances
      in the 35 shipped scenes reach a handler.
 
-D-6  '§A2G.6' BAKES A HOST POLICY INTO THE LIBRARY.
+D-6  MITIGATED 2026-08-12; ONE DECISION LEFT.  The mapping is now
+     RIPLIB_PALETTE_BASE (include/riplib_platform.h), overridable at
+     configure time, range-checked so the 16 EGA entries must fit in
+     0..255, and documented with the reason the offset exists.  A port
+     that owns its framebuffer builds with -DRIPLIB_PALETTE_BASE=0 and
+     gets identity mapping.  So the policy is no longer baked in.
+
+     What remains is the DEFAULT, which is still 240 — the value the
+     first consumer needed.  Flipping it to 0 would make the neutral
+     choice the default, but it silently changes every pixel value a
+     current consumer receives, so it is a deliberate release decision
+     rather than a cleanup.  Recorded, not taken.
+
+     Original text follows.
+
+     '§A2G.6' BAKES A HOST POLICY INTO THE LIBRARY.
      src/ripscrip.c:212 maps every EGA index to framebuffer value
      240 + idx, justified in segment 6 by a conflict with "the xterm-256
      color palette used by the VT100/ANSI text renderer".  That is an
