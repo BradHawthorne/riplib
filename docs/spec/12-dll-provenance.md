@@ -366,20 +366,42 @@ without the latter.  Where each entry now stands in the CODE:
                     circle behind the shape to show the holes.
                     Clipboard capture stays on '|1C'.
 
-  OPEN      |J   arity now matches (one mega2), but RIPlib still calls
-                 it SAVE_ICON where the record says RIP_SET_BASE_MATH.
-                 A naming question, not a rendering bug.
-            |D   RIPlib keeps FILL_PATTERN (8x2 + colour) against a
-                 variable-length entry.  Needs the handler read before
-                 changing; '|d' RIP_OneDrawingPalette is already
-                 separate and correct.
-            |2R  RIPlib's REFRESH takes zero arguments; the entry
-                 records one mega4.
-            |1S  RIPlib keeps IMAGE_STYLE on a letter with no dispatch
-                 entry; the record puts image style on '1i'.
-            |28  RIPlib's GRADIENT_FILL has no entry in this driver.
-                 It may stand as a RIPlib extension, but section 6a
-                 must stop attributing it to TeleGrafix.
+            |J   -> RIP_SET_BASE_MATH.  Not a naming question after all.
+                    Handler 0x01f32e names itself RIP_SetBaseMath and
+                    accepts exactly 0x24 (36) and 0x40 (64), forcing 36
+                    for anything else, then stores the byte in engine
+                    state — it selects the MegaNum RADIX for everything
+                    that follows, which is why it appears near the top of
+                    20 of the 35 shipped scenes.  RIPlib had a clipboard
+                    slot save here, with no dispatch basis, consuming a
+                    slot on each of the corpus's 24 uses.  The slot
+                    mechanism is RIPlib's own and moves to '|3J'.
+                    Radix caveat: see D-10.
+            |D   -> RIP_SET_DRAWING_PALETTE.  Handler 0x01f46a names
+                    itself and validates argc == count + 3, count <= 256,
+                    start <= 255, bits == 8, which gives the layout
+                    outright: start:2 count:2 bits:1 then count * rgb:4 —
+                    the block form of '|d' RIP_OneDrawingPalette.  The
+                    8x8 user fill pattern it displaced is '|s'
+                    RIP_FILL_PATTERN, already implemented, same payload.
+            |1S  -> REMOVED.  Neither 'S' nor 's' exists in the driver's
+                    Level 1 band.  Image style is '|1i' RIP_ImageStyle
+                    (slot 98, RVA 0x00c39a), which RIPlib already
+                    implements and which real scenes use.  The duplicate
+                    is deleted rather than aliased: accepting an opcode
+                    the protocol does not define is how a stream
+                    desynchronises silently.
+            |2R  -> now consumes its res:4.  The entry records one mega4;
+                    RIPlib read it as a zero-argument command.
+
+  NOT A CODE DEFECT
+            |28  RIPlib's GRADIENT_FILL has no entry in this driver, but
+                 section 6a already carries the corrected provenance
+                 (PROVENANCE CORRECTED 2026-08-12): it stands as a RIPlib
+                 extension and is no longer attributed to TeleGrafix.
+                 Nothing further to apply.
+
+Every entry in this register is now applied.
 
 SETTLED BY NAME — 52 handlers name themselves in their own error
 paths (scripts/dll-name-handlers.py; segment 13 carries the full
@@ -914,6 +936,52 @@ D-9  THE DISPATCH PARSER MIS-TYPES SOME ARGUMENTS.  Recorded
      have held up everywhere they have been checked (all six members of
      the skewed-oval family matched TeleGrafix's demo exactly).  Until
      the parser is fixed, prefer handler evidence over recorded types.
+
+D-10 BASE-64 MEGANUM IS ACCEPTED BUT NOT DECODED.  Recorded
+     2026-08-12.  '|J' RIP_SET_BASE_MATH (RVA 0x01f32e) selects the
+     MegaNum radix, and the handler accepts exactly two values: 0x24
+     (36) and 0x40 (64), forcing 36 for anything else.  So the protocol
+     has a base-64 mode.
+
+     RIPlib records the selected base in rip_state_t.mega_base and
+     reproduces the driver's validation, but its decoders
+     (src/rip_meganum.h) are base 36 unconditionally.  The reason is
+     that the base-64 DIGIT ALPHABET has not been recovered: '0'-'9',
+     'A'-'Z' and 'a'-'z' account for only 62 symbols, and which two
+     characters carry the remaining values — and in what order — is not
+     established by anything read so far.  Guessing would silently
+     corrupt every numeric field on a base-64 stream, which is worse
+     than the gap; this is the same reasoning already applied to '|y'
+     (D-5).
+
+     Impact is nil on real content: all 24 uses of '|J' across the 35
+     shipped scenes are '|J10', which is base 36.  A stream that selects
+     base 64 will currently mis-decode, and that is a known, recorded
+     limitation rather than an unnoticed one.
+
+     To close it: 0x1003e8eb, which '|J' calls with the accepted base,
+     turns out only to STORE it — into (state+2)+0x38 and into a second
+     slot at (state+0xe) indexed by (word at +0x0a) * 16 + 5.  The digit
+     decoder itself reads that byte somewhere else and has not been
+     located.  Next step is to find the reader of +0x38 rather than the
+     writer.
+
+     CANDIDATE ALPHABET, NOT ADOPTED.  RVA 0x07eee8 (.data) holds
+     exactly 64 contiguous bytes, ASCII 0x20..0x5F — space through
+     underscore — which would make a base-64 MegaNum digit simply
+     (ch - 0x20), covering 0..63 with no gaps.  That is the right shape
+     and the right length.  It is NOT adopted, for two reasons:
+
+       - it has ZERO references from .text, so nothing observed actually
+         uses it as a lookup table; and
+       - its neighbours in .data are 'USASCII', 'KANJI', 'VERBOSE',
+         'TWOCHAR', 'THREECHAR' — a character-set keyword group — so a
+         printable-ASCII run there is at least as likely to be a charset
+         map as a radix table.
+
+     Adopting it on shape alone is exactly the guess this defect exists
+     to avoid.  It is recorded so the next pass starts here instead of
+     rediscovering it.
 
 
 ---------------------------------------------------------------------

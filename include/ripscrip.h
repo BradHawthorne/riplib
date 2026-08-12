@@ -551,6 +551,13 @@ struct rip_state_s {
      * 2=center).  Stored so subsequent icon-load / PUT_IMAGE calls
      * can honour the BBS-requested presentation. */
     uint8_t image_style;
+    /* MegaNum radix selected by '|J' RIP_SET_BASE_MATH: 36 or 64.  Recorded
+     * for capability queries; the decoders are base 36 unconditionally
+     * because the base-64 digit alphabet has not been recovered.  See
+     * docs/spec/12-dll-provenance.md D-10. */
+    uint8_t mega_base;
+    /* '|2R' RIP_SetRefresh reserved field (slot 117, one mega4). */
+    uint32_t refresh_res;
 
     /* RIP_ICON_STYLE ('&') parameters for subsequent icon rendering.
      * Coordinates are stored in pixels.  style follows 1S where possible:

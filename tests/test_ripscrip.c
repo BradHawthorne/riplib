@@ -775,13 +775,13 @@ static void test_l1_image_style_stored(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("1S stores image display style");
+    TEST("1i stores image display style");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|1S02|");  /* style = 2 (center) */
+    feed_script(&s, &ctx, "!|1i000000000002|");  /* rect 0,0-0,0; flags = 2 (center) */
     if (s.image_style == 2)
         PASS();
     else
-        FAIL("1S image_style not stored");
+        FAIL("1i image_style not stored");
 }
 
 static void test_l1_viewport_ext(void) {
@@ -2700,7 +2700,7 @@ static void test_save_and_stamp_icon_slot(void) {
     draw_set_color(88);
     draw_rect(2, 2, 2, 2, true);
     feed_script(&s, &ctx, "!|1C020202020|");
-    feed_script(&s, &ctx, "!|J05|");
+    feed_script(&s, &ctx, "!|3J05|");
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|.050U0U000000|");
     if (draw_get_pixel(30, 34) == 88)
@@ -2713,24 +2713,24 @@ static void test_save_icon_slot_updates_load_alias(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("J save-icon updates the SLOTnn load alias");
+    TEST("|3J save-icon updates the SLOTnn load alias");
     init_fixture(&s, &ctx);
     draw_set_color(88);
     draw_rect(2, 2, 2, 2, true);
     feed_script(&s, &ctx, "!|1C020202020|");
-    feed_script(&s, &ctx, "!|J05|");
+    feed_script(&s, &ctx, "!|3J05|");
 
     draw_set_color(99);
     draw_rect(2, 2, 2, 2, true);
     feed_script(&s, &ctx, "!|1C020202020|");
-    feed_script(&s, &ctx, "!|J05|");
+    feed_script(&s, &ctx, "!|3J05|");
 
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|1I0A0A00000SLOT05|");
     if (draw_get_pixel(10, 11) == 99)
         PASS();
     else
-        FAIL("J left stale pixels in the SLOTnn load alias");
+        FAIL("|3J left stale pixels in the SLOTnn load alias");
 }
 
 static void test_l0_copy_region_scales_destination_rect(void) {
@@ -3793,12 +3793,12 @@ static void test_world_frame_f_not_font_attrib(void) {
 
 static void test_ext_fill_pattern_ext_D(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|D installs user fill pattern, sets fill_pattern=12");
+    TEST("|s installs user fill pattern, sets fill_pattern=12");
     init_fixture(&s, &ctx);
     /* 8 pattern bytes (mega2 each = 16 chars) + color:2 = 18 chars */
-    feed_script(&s, &ctx, "!|D2U2U2U2U2U2U2U2U07|");
+    feed_script(&s, &ctx, "!|s2U2U2U2U2U2U2U2U07|");
     if (s.fill_pattern == 12 && s.fill_color == 7) PASS();
-    else FAIL("|D did not install user fill pattern");
+    else FAIL("|s did not install user fill pattern");
 }
 
 /* ── Level 1 ──────────────────────────────────────────────────────── */

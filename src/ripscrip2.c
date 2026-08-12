@@ -1014,6 +1014,15 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
 
     /* ── !|2R -- Host-triggered screen refresh ──────────────────── */
     case RIP2_CMD_SET_REFRESH: {
+        /* Dispatch slot 117 (RVA 0x046bd9), argc 1, mega4.  RIPlib read this
+         * as a zero-argument command.  The reserved field is consumed so the
+         * frame stays in sync and recorded for capability queries; the
+         * driver does not otherwise act on it. */
+        if (raw_len >= 4)
+            rs->refresh_res = (uint32_t)(mega1(raw + 0) * 46656 +
+                                         mega1(raw + 1) * 1296 +
+                                         mega1(raw + 2) * 36 +
+                                         mega1(raw + 3));
         /* Mark all rows dirty for refresh — platform-specific */
         draw_mark_all_dirty();
         break;

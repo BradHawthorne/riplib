@@ -1871,6 +1871,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
+        case 'J': /* save current clipboard into an icon slot -- slot:2
+                   * Displaced from Level 0 '|J', which the driver defines as
+                   * RIP_SetBaseMath.  The slot mechanism is RIPlib's own (it
+                   * backs '.' RIP_STAMP_ICON and the SLOTnn load alias), so
+                   * it keeps a home here rather than being dropped. */
+            if (len >= 2)
+                (void)rip_save_clipboard_slot(s, (uint16_t)mega2(p));
+            break;
+
         case '-': /* bounded text box -- x0:2 y0:2 x1:2 y1:2 flags:2 text */
             if (len >= 10) {
                 int16_t bx0 = mega2(p),     by0 = scale_y(mega2(p + 2));
@@ -2452,13 +2461,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Image display style ────────────────────────────────── */
-        case 'S': /* RIP_IMAGE_STYLE — set icon/image display mode.
-                   * DLL GFXSTYLE.imageStyle field (rip_defaults.c).
-                   * Format: mode:2 (0=stretch, 1=tile, 2=center, 3=proportional)
-                   * Stored in s->image_style; honoured by subsequent icon blits. */
-            if (len >= 2)
-                s->image_style = (uint8_t)(mega2(p) & 0x03);
-            break;
+        /* '1S' is NOT a command.  Neither 'S' nor 's' appears anywhere in
+         * the driver's Level 1 band, and image style is '|1i'
+         * RIP_ImageStyle (slot 98, RVA 0x00c39a, 6 args) — handled above,
+         * and the form real scenes actually use.  The duplicate handler
+         * that lived here is removed rather than kept as an alias:
+         * accepting an opcode the protocol does not define is how a stream
+         * desynchronises silently. */
 
         /* ── Icon search path ────────────────────────────────────── */
         case 'N': /* RIP_SET_ICON_DIR — set icon search directory.
@@ -3523,9 +3532,26 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Save icon (v2.0+) ----------------------------------------------- */
     /* DLL command table entry 40: 'J' = RIP_SAVE_ICON (1 arg: 2-digit slot) */
-    case 'J': /* RIP_SAVE_ICON -- slot:2 */
-        if (len >= 2)
-            (void)rip_save_clipboard_slot(s, (uint16_t)mega2(p));
+    /* Dispatch slot 40 (RVA 0x01f32e), argc 1, mega2.  The handler names
+     * itself RIP_SetBaseMath and accepts exactly two values -- 0x24 (36)
+     * and 0x40 (64) -- forcing 36 for anything else, then stores the byte
+     * in engine state.  It selects the MegaNum radix for everything after
+     * it, which is why it appears near the top of most real scenes.
+     *
+     * RIPlib records the value and reproduces the driver's validation, but
+     * its decoders stay base 36: the base-64 DIGIT ALPHABET has not been
+     * recovered ('0'-'9' 'A'-'Z' 'a'-'z' is 62 symbols and the remaining
+     * two are unknown), and guessing it would corrupt every numeric field
+     * on a base-64 stream.  All 24 uses in TeleGrafix's shipped corpus are
+     * '|J10' -- base 36 -- so no real content is affected.  See D-10.
+     *
+     * This letter previously ran a clipboard slot save, which had no basis
+     * in the dispatch table and consumed a slot on each of those 24 uses. */
+    case 'J': /* RIP_SET_BASE_MATH -- base:2, accepts 36 or 64 */
+        if (len >= 2) {
+            int16_t base = mega2(p);
+            s->mega_base = (uint8_t)((base == 36 || base == 64) ? base : 36);
+        }
         break;
 
     /* -- Skewed-oval family (v2.0+) ---------------------------------------
@@ -3905,16 +3931,42 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL command table entry 23: 'D' = RIP_FILL_PATTERN (var, data block).
      * Level 0 'D' supplies a custom 8×8 fill pattern as raw bytes.
      * Level 1 'D' (above) is RIP_DEFINE — distinct command. */
-    case 'D': /* RIP_FILL_PATTERN — 8×2-digit pattern bytes + color:2 */
-        if (len >= 16) {
-            uint8_t pat[8];
-            for (int i = 0; i < 8; i++)
-                pat[i] = (uint8_t)(mega2(p + i * 2));
-            draw_set_user_fill_pattern(pat);
-            if (len >= 18)
-                s->fill_color = mega2(p + 16) & 0x0F;
-            s->fill_pattern = 12; /* BGI USER_FILL */
-            draw_set_fill_style(11, s->palette[s->back_color]);
+    /* Dispatch slot 23 (RVA 0x01f46a), VARIABLE length.  The handler names
+     * itself RIP_SetDrawingPalette and its validation chain gives the whole
+     * layout:
+     *
+     *     argc == count + 3     "Invalid number of parameters"
+     *     count <= 256          "More than 256 entries"
+     *     start <= 255          "Start is out of range"
+     *     bits  == 8            "Invalid number of bits"
+     *
+     * so it is start:2 count:2 bits:1 followed by count × rgb:4 — the block
+     * form of '|d' RIP_OneDrawingPalette, which handles a single entry.
+     *
+     * The 8×8 user fill pattern this letter used to carry is not lost: that
+     * is '|s' RIP_FILL_PATTERN, which RIPlib already implements. */
+    case 'D': /* RIP_SET_DRAWING_PALETTE — start:2 count:2 bits:1 (rgb:4)×count */
+        if (len >= 5) {
+            uint16_t start = (uint16_t)mega2(p);
+            int      count = mega2(p + 2);
+            uint8_t  bits  = (uint8_t)mega_digit(p[4]);
+            int i;
+
+            /* Reject rather than clamp, matching the driver: a truncated or
+             * over-long block is an error, not a partial palette write. */
+            if (start <= 0xFF && count > 0 && count <= 256 && bits == 8 &&
+                len >= 5 + 4 * count) {
+                for (i = 0; i < count && (int)start + i <= 0xFF; i++) {
+                    uint32_t rgb = (uint32_t)mega4(p + 5 + 4 * i);
+                    uint8_t  r8  = (uint8_t)((rgb >> 16) & 0xFF);
+                    uint8_t  g8  = (uint8_t)((rgb >> 8) & 0xFF);
+                    uint8_t  b8  = (uint8_t)(rgb & 0xFF);
+                    uint16_t rgb565 = (uint16_t)(((r8 & 0xF8) << 8) |
+                                                 ((g8 & 0xFC) << 3) |
+                                                 ((b8 & 0xF8) >> 3));
+                    palette_write_rgb565((uint8_t)(start + i), rgb565);
+                }
+            }
         }
         break;
 
