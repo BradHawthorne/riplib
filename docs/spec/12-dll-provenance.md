@@ -1471,11 +1471,27 @@ Requires reading further handler bodies:
        phantom clickable areas.  Now corrected, with the driver's own
        validation reproduced rather than clamping bad fields.
 
-       STILL OPEN, narrowly: the 36 glyph DESIGNS.  They live behind the
-       handler's polygon builder and have not been extracted, so every
-       marker number renders one neutral glyph — correctly placed, sized
-       and rotated, but not the right shape.  Geometry is faithful;
-       glyph identity is not.
+       THE 36 GLYPHS — RECOVERED 2026-08-12, so this is now closed.
+       The handler special-cases marker 0 (`test edi, edi` at 0x01E643)
+       and hands it to the shared ellipse generator at 0x10010160 with a
+       0..360 sweep, so marker 0 is a circle.  Every other number goes to
+       0x1000F3C6, which indexes a descriptor table:
+
+            mov  eax, [ebp+0xc]              ; marker number
+            imul eax, eax, 6                 ; 6 bytes per entry
+            lea  esi, [eax + 0x1007ca48]     ; table base
+
+       Each descriptor is { uint16 count; int32 (*points)[2]; } and each
+       point is a pair of int32 in a normalised +/-50 space, scaled by the
+       command's half-extent and rotated by its skew using the same Q14
+       trig tables as the skewed-oval family.  462 points across 36
+       glyphs; the coordinate range fits int8_t.
+
+       Extracted by scripts/dll-marker-glyphs.py and carried in
+       src/ripscrip.c.  Method note: the three string-based evidence
+       classes had nothing to say here, and the table was found the same
+       way '|3D' was — by following what the handler CALLS and what it
+       pushes, rather than what it says.
 
      * disambiguation of '|d' — settled: it is RIP_OneDrawingPalette
        (12.8, B6), with '|D' the block form (12.12).

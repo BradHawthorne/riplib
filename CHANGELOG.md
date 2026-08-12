@@ -43,7 +43,7 @@ Seven more:
 | --- | --- | --- |
 | `\|K` | KILL_MOUSE_EXT | **RIP_FILLED_RECTANGLE** — reaches `GDI32!Rectangle`, same as `\|B` and `\|R`. The mouse-field kill is `\|1k`, which is separate and real. |
 | `\|<` | GET_IMAGE_EXT | **RIP_POLY_POLYGON** — the only handler reaching `GDI32!PolyPolygon`. Interior is even-odd across all contours, so overlaps cut holes. Clipboard capture is `\|1C`. |
-| `\|;` | BUTTON_EXT | **RIP_POLY_MARKER** — the handler names itself and validates marker < 36, rotation < 360, flags <= 3. |
+| `\|;` | BUTTON_EXT | **RIP_POLY_MARKER** — the handler names itself and validates marker < 36, rotation < 360, flags <= 3. All 36 glyph outlines are carried; marker 0 is a circle drawn by the ellipse generator, 1-35 come from the driver's descriptor table at RVA 0x07ca48. |
 | `\|J` | SAVE_ICON | **RIP_SET_BASE_MATH** — selects the MegaNum radix. |
 | `\|D` | FILL_PATTERN_EXT | **RIP_SET_DRAWING_PALETTE** — block form of `\|d`. The 8x8 pattern is `\|s`. |
 | `\|d` | EXT_FONT_STYLE | **RIP_ONE_DRAWING_PALETTE** — extended font style is `\|y`. |

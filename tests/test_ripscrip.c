@@ -3575,6 +3575,55 @@ static void test_ext_poly_marker_semicolon(void) {
     }
 }
 
+/* Count painted pixels for one marker number, so glyphs can be compared. */
+static long marker_pixels(rip_state_t *s, comp_context_t *ctx, const char *script) {
+    long n = 0;
+    int xx, yy;
+
+    init_fixture(s, ctx);
+    feed_script(s, ctx, "!|c0F|");
+    feed_script(s, ctx, script);
+    for (yy = 60; yy < 170; yy++)
+        for (xx = 40; xx < 170; xx++)
+            if (draw_get_pixel((int16_t)xx, (int16_t)yy) != 0)
+                n++;
+    return n;
+}
+
+static void test_poly_marker_glyphs_differ(void) {
+    rip_state_t s; comp_context_t ctx;
+    long m0, m1, m6, m20, m34;
+
+    TEST("|; renders a distinct glyph per marker number");
+    /* cx=2S(100) cy=2S(100) marker=NN w=1E(50) h=1E(50) rot=00 flags=00.
+     * The 36 outlines come from the driver's own descriptor table; before
+     * they were extracted every marker number drew the same placeholder,
+     * so the property worth asserting is that they now DIFFER. */
+    m0  = marker_pixels(&s, &ctx, "!|;2S2S001E1E0000|");   /* circle      */
+    m1  = marker_pixels(&s, &ctx, "!|;2S2S011E1E0000|");   /* plus/cross  */
+    m6  = marker_pixels(&s, &ctx, "!|;2S2S061E1E0000|");   /* triangle    */
+    m20 = marker_pixels(&s, &ctx, "!|;2S2S0K1E1E0000|");   /* triangle 2  */
+    m34 = marker_pixels(&s, &ctx, "!|;2S2S0Y1E1E0000|");   /* 16-pt star  */
+
+    if (m0 == 0 || m1 == 0 || m6 == 0 || m20 == 0 || m34 == 0) {
+        FAIL("a marker number painted nothing");
+        return;
+    }
+    /* Marker 0 is the circle: the driver dispatches it to the ellipse
+     * generator rather than the glyph table. */
+    if (m0 == m1 || m1 == m6 || m6 == m34 || m1 == m34) {
+        FAIL("marker numbers still render identical glyphs");
+        return;
+    }
+    /* 6 and 20 are both triangles but different sizes, so they must not be
+     * byte-identical either. */
+    if (m6 == m20) {
+        FAIL("markers 6 and 20 should differ in size");
+        return;
+    }
+    PASS();
+}
+
 static void test_ext_poly_marker_rejects_bad_fields(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|; rejects the fields the driver rejects");
@@ -5233,6 +5282,7 @@ int main(void) {
     test_ext_mouse_region_ext_colon();
     test_skewed_oval_family_extents();
     test_ext_poly_marker_semicolon();
+    test_poly_marker_glyphs_differ();
     test_ext_poly_marker_rejects_bad_fields();
     test_ext_ext_text_window_b();
     test_level1_kill_enclosed_mouse_fields();

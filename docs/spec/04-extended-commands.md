@@ -319,10 +319,17 @@ upward, matching every bound.
      rotation    2       0-359     Rotation, whole degrees
      flags       2       0-3       Presentation flags
 
-IMPLEMENTATION LIMIT: the 36 glyph DESIGNS have not been recovered from
-the driver.  RIPlib places, sizes and rotates the marker correctly but
-renders one neutral glyph for every marker number.  Geometry is
-faithful; glyph identity is not.
+THE 36 GLYPHS.  Marker 0 is a CIRCLE: the driver dispatches it to the same
+ellipse generator the skewed-oval family uses, with a full 0..360 sweep.
+Markers 1-35 are polygon outlines held in a descriptor table --
+{ uint16 count; int32 (*points)[2]; } at RVA 0x07ca48, 6 bytes per entry --
+whose coordinates live in a normalised +/-50 space that the handler scales
+by the marker's half-width and half-height and rotates by its skew.
+
+RIPlib carries all 36 outlines, extracted by
+scripts/dll-marker-glyphs.py.  The set runs from simple shapes (1 is a
+plus, 6 and 20 are triangles of different sizes) through to stars of
+increasing point count (28 through 34), 462 points in total.
 
 
 ---------------------------------------------------------------------
