@@ -600,10 +600,26 @@ D-2  RESOLVED 2026-08-12.  Length-based signature dispatch implemented
      '|h' carries six signatures on one handler.  Lengths 4 and 6 are
      unambiguous and now read their own layouts — previously they were
      read with the 8-character layout, which pulled the id and flags from
-     past the end of the parameters.  The two 8-character forms and the
-     two 3-character forms are NOT separable by length; the driver selects
-     between them on state we have not recovered, so the documented form
-     is kept for those and the ambiguity is recorded rather than guessed.
+     past the end of the parameters.
+
+     CORRECTED 2026-08-12.  An earlier draft said the two 8-character
+     forms and the two 3-character forms were separated "on state we have
+     not recovered".  That was asserted without reading the handler, and
+     it is wrong.  '|h' (RVA 0x01CAE1) is a thin wrapper: after a
+     protection check it passes BOTH the parameter block and the argument
+     COUNT through to a shared routine at RVA 0x1001799E.  Selection is by
+     argument count, explicitly — there is no hidden state.
+
+     The six entries occupy consecutive slots 32-37 with character counts
+     8, 4, 6, 8, 3, 3.  Taking the first entry whose template fits the
+     available length gives 8 -> slot 32, 4 -> slot 33, 6 -> slot 34,
+     3 -> slot 36, which is exactly what RIPlib implements; the duplicate
+     entries are unreachable under that rule.  The internals of 0x1001799E
+     have not been traced, so first-match is the consistent reading rather
+     than a proven one.
+
+     Corpus check: '|h' has ZERO uses across the 116 shipped scripts, so
+     no real content depends on this either way.
 
      Scope note: the FSM accumulates parameters to the closing '|', so a
      wrong arity never desynchronised the frame.  The damage was confined
@@ -620,6 +636,32 @@ D-3  '!' TRIGGERS ANYWHERE IN A LINE.
 
 D-4  '|28' GRADIENT IS RIPlib-ORIGINAL, NOT INHERITED.
      Severity: documentation only — corrected in segment 6A.
+
+D-8  '|1k' AND '|3D' — HOW FAR THE ANALYSIS ACTUALLY GOT.
+     Recorded 2026-08-12 after these were re-examined.  An earlier draft
+     called their semantics "not recovered", which overstated the effort
+     spent: the dispatch entry and the absence of a diagnostic string had
+     been checked, but the handlers themselves had not been read.  They
+     have now been read, and the honest position is:
+
+     '|1k'  (RVA 0x00C474, 5 args: XY,XY,XY,XY,mega4) — SUBSTANTIALLY
+            recovered.  It orders the two coordinate pairs, applies the
+            same world/device transform '|j' uses (RVA 0x10031084),
+            assembles a RECT via USER32!SetRect, and passes that rect plus
+            the 4-digit argument to RVA 0x10012D63, bracketed by the same
+            lock/dirty pair the drawing commands use.  So it is a
+            rectangle operation with a 4-digit parameter.  What 0x10012D63
+            actually does is not established: it references no strings, so
+            naming it needs semantic tracing rather than string mining.
+
+     '|3D'  Both handlers (RVA 0x038BD2 and 0x024AF4, one 4-digit argument
+            each) reference NO strings at all.  Nothing beyond the
+            dispatch entry has been established.
+
+     Both are absent from the 116-file corpus, so no shipped content
+     exercises them, and RIPlib accepts and consumes them without acting.
+     That is a bounded, evidenced gap — not an unknown, and not a claim of
+     completeness.
 
 D-5  FOUR DRIVER COMMANDS ARE UNIMPLEMENTED.
      Measured 2026-08-12 by diffing the dispatch table against RIPlib's
