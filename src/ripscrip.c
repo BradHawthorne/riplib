@@ -1583,17 +1583,28 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
-        case 'e': /* Style-slot protection — slot:2
-                   * Handler RVA 0x038BE1.  Diagnostics: "Cannot protect style
-                   * slot #0", "Current style slot is protected".  RIPlib keeps
-                   * one graphics style rather than a slot table, so the
-                   * protect flag is recorded; slot 0 is rejected as the driver
-                   * does. */
-            if (len >= 2) {
-                uint16_t slot = (uint16_t)mega2(p);
-                if (slot != 0)
-                    s->style_slot_protected = 1;
-            }
+        case 'e': /* RIP_BAUD_EMULATION — rate:4
+                   *
+                   * CORRECTED 2026-08-12.  This was implemented as
+                   * "style-slot protection" on the strength of diagnostics
+                   * ("Cannot protect style slot #0") that turned out to have
+                   * bled in from a neighbouring handler when the extraction
+                   * used loose bounds.  The bbs-land reconstruction binds
+                   * level 3 'e' to RIP_BAUD_EMULATION (evidence: 2.A0), and
+                   * RIP_BaudEmulation is present in the driver's own function
+                   * name table, so the letter is theirs.
+                   *
+                   * Sets a baud-rate emulation for local RIP playback — the
+                   * driver throttles rendering to simulate a slower link.
+                   * RIPlib renders as fast as its host drives it and applies
+                   * no artificial delay, so the requested rate is recorded
+                   * for an embedder that wants to honour it.
+                   *
+                   * Width: the reference documents rate:4 while the driver's
+                   * dispatch entry records a single 2-digit field.  Both are
+                   * accepted; see docs/spec §12.13. */
+            if (len >= 4)      s->baud_emulation = (uint32_t)mega4(p);
+            else if (len >= 2) s->baud_emulation = (uint32_t)mega2(p);
             break;
 
         case 'D': /* Two dispatch slots (122 and 125) carry 'D' with distinct

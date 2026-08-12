@@ -371,9 +371,11 @@ struct rip_state_s {
      * been recovered, so the announcement is recorded, not decoded. */
     uint16_t encoded_stream_type;
     uint32_t encoded_stream_len;
-    /* '|3e' style-slot protection flag. RIPlib keeps one graphics style
-     * rather than a slot table; slot 0 is rejected as the driver does. */
-    uint8_t  style_slot_protected;
+    /* '|3e' RIP_BAUD_EMULATION — requested playback rate.  The driver
+     * throttles rendering to simulate a slower link; RIPlib renders as fast
+     * as its host drives it and applies no artificial delay, so the rate is
+     * recorded for an embedder that wants to honour it.  0 = never set. */
+    uint32_t baud_emulation;
     /* '|1c' RIP_SetMouseCursor selection. RIPlib renders no pointer, so the
      * choice is recorded for an embedder that does. */
     uint8_t  mouse_cursor_id;

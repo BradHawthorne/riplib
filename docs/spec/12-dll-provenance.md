@@ -719,7 +719,49 @@ reading a genuine second opinion rather than a restatement.  Results:
   opcode is unknown".  Two independent reconstructions working from the
   same help resource and the same binary both stop here.
 
-So the two '|3D' entries and '|3e' remain unbound.  Established: '|3D' at
+RECIPROCAL AUDIT — their reference checked against the dispatch table.
+
+Every command row in their 3.0 reference was compared against the
+driver's own dispatch entry (letter, arity, argument widths).  Findings,
+in both directions:
+
+  THEIR NOTATION IS BETTER THAN OURS.  Most apparent mismatches were an
+  artefact of this side's parser, not their errors: they write widths as
+  'CM' (colour-mode dependent) alongside 'XY' (coordinate-size
+  dependent), which is exactly what the driver's own 'color' and 'XY'
+  argument-type bytes mean.  Once decoded that way, '|c', '|S' and the
+  rest agree with the binary exactly.  A model that only understood
+  fixed digit counts under-reads the protocol.
+
+  '|3e' — THEY RESOLVE ONE OF OURS.  Their reference binds level 3 'e'
+  to RIP_BAUD_EMULATION (evidence 2.A0), and RIP_BaudEmulation is in the
+  driver's function-name table.  This segment previously carried '|3e'
+  as style-slot protection, on diagnostics that had bled in from a
+  neighbouring handler under loose bounds.  Corrected, and implemented.
+
+  '|1A' — WE RESOLVE ONE OF THEIRS.  Their reference carries a row
+  literally titled "1A (unidentified)", noting "6 digits observed
+  (layout unresolved)".  The handler at RVA 0x00DC58, bounded tightly by
+  the next entry (62 bytes), pushes BOTH 'Invalid article number' and
+  'RIP_SelectArticle()'.  It is RIP_SelectArticle, and its dispatch
+  entry records mega2 + mega4 = 6 characters, matching their corpus
+  observation exactly.  Worth sending upstream.
+
+  UNRESOLVED IN BOTH — THE Switch* WIDTHS.  For the resource-switch
+  family their reference and the dispatch table disagree on total width:
+  '|2s' is documented 'port-num:1 flags:2 res:3' (6 chars) where the
+  dispatch entry records mega1 + mega2 (3); '|2T' is documented
+  'window_num:1 res:1' (2) against 3.  Both readings can be true if the
+  trailing reserved bytes are consumed outside the dispatch template.
+  Not resolved here; recorded so neither side treats it as settled.
+
+  ONE OPEN ITEM ON THIS SIDE.  '|F' RIP_FILL shows argc=0 at RVA
+  0x01B2FD, one byte before '|G' at 0x01B2FE — almost certainly a thunk
+  or a mis-parse of that entry rather than a real zero-argument flood
+  fill.  Their 'x:XY y:XY border:CM' is the sane reading.  Flagged for
+  a follow-up pass over the dispatch parser.
+
+So the two '|3D' entries remain unbound ('|3e' is now resolved).  Established: '|3D' at
 0x024AF4 copies its text argument into a 256-byte buffer and calls a
 routine referencing "ICONS"; '|3D' at 0x038BD2 is a 15-byte thunk.  None
 appears in the 116-file corpus.  They stay recorded rather than guessed,
