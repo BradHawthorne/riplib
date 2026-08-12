@@ -7,8 +7,18 @@ decoded-argument array and each handler indexes it; the ORDER of those
 indexes against the ORDER of the GDI/helper call arguments is what
 identifies each field.
 
-Resolves call targets to names where a nearby string push identifies
-them, and annotates displacement loads so argument slots are visible.
+Two annotations are applied, and the second matters more than it looks:
+
+  - immediates that point at a readable string are shown inline.  This is
+    how most handlers were named: they push their own name before calling
+    the error reporter.
+
+  - indirect calls through the import table are resolved to
+    DLL!Function.  Handlers that reference NO strings are opaque to every
+    string-based method, and several stayed unidentified for exactly that
+    reason.  Naming what a handler CALLS gets past that: '|3D' was
+    settled by seeing WINMM!timeGetTime in its callee, and the
+    skewed-oval renderer was confirmed by GDI32!Polygon.
 
 Usage:
     python scripts/dll-disasm.py <Ripscrip.dll> 0x01f904 [--count 90]
@@ -34,6 +44,45 @@ def load(path):
         vs, va, rs, rp = struct.unpack_from("<IIII", d, o + 8)
         secs.append(dict(n=nm, rva=va, vs=vs, raw=rp, rs=rs))
     return d, secs
+
+
+def read_imports(d, secs, rva2off):
+    """Map each import-address-table VA to 'DLL!Function'.
+
+    A handler that pushes no strings is invisible to string mining, but its
+    indirect calls still say what it does.  This is the map that makes
+    'call dword ptr [0x100966fc]' read as 'WINMM.dll!timeGetTime'.
+    """
+    out = {}
+    pe = struct.unpack_from("<I", d, 0x3C)[0]
+    opt = pe + 4 + 20
+    imp_rva = struct.unpack_from("<I", d, opt + 104)[0]
+    o = rva2off(imp_rva)
+    if o is None:
+        return out
+    while True:
+        oft, _ts, _fc, name_rva, ft = struct.unpack_from("<IIIII", d, o)
+        if oft == 0 and name_rva == 0:
+            break
+        no = rva2off(name_rva)
+        dll = d[no:d.find(b"\0", no)].decode("ascii", "replace") if no else "?"
+        thunks = rva2off(oft or ft)
+        i = 0
+        while thunks is not None:
+            t = struct.unpack_from("<I", d, thunks + 4 * i)[0]
+            if t == 0:
+                break
+            va = IB + ft + 4 * i
+            if t & 0x80000000:
+                out[va] = f"{dll}!#{t & 0xFFFF}"
+            else:
+                q = rva2off(t)
+                if q is not None:
+                    q += 2                     # skip the ordinal hint
+                    out[va] = f"{dll}!{d[q:d.find(chr(0).encode(), q)].decode('ascii', 'replace')}"
+            i += 1
+        o += 20
+    return out
 
 
 def main():
@@ -70,6 +119,8 @@ def main():
         except UnicodeDecodeError:
             return None
 
+    imports = read_imports(d, secs, rva2off)
+
     rva = int(args.rva, 0)
     off = rva2off(rva)
     if off is None:
@@ -85,14 +136,22 @@ def main():
     n = 0
     for ins in md.disasm(code, IB + rva):
         note = ""
-        # annotate immediate operands that point at a readable string
-        for tok in ins.op_str.replace(",", " ").split():
-            t = tok.strip("[]")
-            if t.startswith("0x") and len(t) >= 8:
-                s = read_cstr(int(t, 16))
-                if s and len(s) > 3 and s.isprintable():
-                    note = f"        ; \"{s}\""
-                    break
+        # an indirect call through the IAT names the API being invoked
+        if ins.mnemonic == "call" and ins.op_str.startswith("dword ptr ["):
+            t = ins.op_str[len("dword ptr ["):-1]
+            if t.startswith("0x"):
+                api = imports.get(int(t, 16))
+                if api:
+                    note = f"        ; {api}"
+        # otherwise annotate immediates that point at a readable string
+        if not note:
+            for tok in ins.op_str.replace(",", " ").split():
+                t = tok.strip("[]")
+                if t.startswith("0x") and len(t) >= 8:
+                    s = read_cstr(int(t, 16))
+                    if s and len(s) > 3 and s.isprintable():
+                        note = f"        ; \"{s}\""
+                        break
         print(f"  {ins.address - IB:#08x}  {ins.mnemonic:<7} {ins.op_str}{note}")
         n += 1
         if ins.mnemonic == "ret" or n >= args.count:

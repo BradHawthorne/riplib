@@ -1185,14 +1185,92 @@ display style, bounded text box) moved to '|3&' and '|3-', letters the
 driver's Level 3 set does not use.
 
 ---------------------------------------------------------------------
+12.16  CLASS I — WHAT A HANDLER CALLS, NOT WHAT IT SAYS
+---------------------------------------------------------------------
+
+Classes B, C, F and G between them named most of the dispatch table, and
+they share a blind spot: every one of them keys on STRINGS.  A handler
+that pushes no name, raises no diagnostic and reports no error is
+invisible to all four at once, which is precisely why '|3D' survived
+three separate attempts (D-8).
+
+Class I asks the other question: not what a handler SAYS, but what it
+CALLS.  scripts/dll-handler-imports.py resolves the import directory,
+walks each handler and its callees to a bounded depth, and reports the
+Win32 APIs reached.  Drawing commands are self-identifying under this
+lens, because GDI names its primitives after the shapes they draw.
+
+WHAT IT INDEPENDENTLY CONFIRMED.  Every one of these was decided on
+other grounds first and then checked against this class:
+
+     |<   GDI32!PolyPolygon   — the ONLY handler in the table that
+                                reaches it.  RIP_POLY_POLYGON, settled.
+     |K   GDI32!Rectangle     — the same primitive as '|B' RIP_BAR and
+                                '|R' RIP_RECTANGLE.  A filled rectangle,
+                                not a mouse operation.
+     |D   SetPaletteEntries   — identical API set to '|d'
+                                RIP_OneDrawingPalette, '|a'
+                                RIP_ONE_PALETTE and '|Q' RIP_SET_PALETTE.
+                                A palette command.
+     |&   GDI32!Polygon       — with '|+', '|-', '|[' and '|P'.  The
+                                skewed-oval family really is rendered as
+                                a polygon, as 12.14 deduced from the
+                                360-point buffer.
+     |]   GDI32!Polyline      — NOT Polygon, unlike its four siblings.
+                                The arc is stroked and open, which is how
+                                RIPlib implements it.
+     |J   (nothing)           — reaches no drawing or resource API at
+                                all, which is what a pure state setter
+                                like RIP_SET_BASE_MATH should look like.
+     |3D  WINMM!timeGetTime   — via its callee.  This is the one that
+                                broke the deadlock; see D-8.
+
+LIMITS, WHICH MATTER FOR HOW FAR THIS CAN BE PUSHED.
+
+  - Absence proves nothing.  The sweep is depth-bounded, so a handler
+    can reach a primitive further down than the cutoff.  '|_' shows no
+    GDI call at depth 2 yet plainly draws: it calls 0x100125C0, which
+    normalises angles against 0x168 (360) — the arithmetic a chord's
+    start/end angles need.  Read a null result as "not reached within
+    the bound", never as "does nothing".
+
+  - Scaffolding drowns signal unless filtered.  Nearly every handler
+    brackets its work with the same lock/unlock, caret-hide and
+    offscreen-DC sequence, so BitBlt, CreateCompatibleDC, SelectObject,
+    GlobalLock, DrawFocusRect and friends appear almost everywhere and
+    discriminate nothing.  The script carries an explicit NOISE set;
+    that set is a judgement and is worth revisiting before relying on a
+    marginal result.
+
+  - It classifies, it does not name.  Class I tells you a command draws
+    an ellipse.  It cannot tell you the command is called
+    RIP_OVAL_PIE_SLICE.  It is a corroborator and a tie-breaker, not a
+    replacement for the string classes.
+
+---------------------------------------------------------------------
 12.15  STILL OPEN
 ---------------------------------------------------------------------
 
 Requires reading further handler bodies:
 
      * GFXSTYLE facing-bit offsets (bold/italic/underline/shadow)
-     * handler names for letters with no class B/C string
      * disambiguation of '|;' and '|d'
+     * what 0x10012D63 does for '|1k'.  PARTIALLY ANSWERED by class I:
+       its chain reaches GDI32!GetStockObject and USER32!FillRect via
+       0x10012DE2, so it erases a region — consistent with a mouse-field
+       delete that also clears where the fields were.  The exact
+       relationship between the two calls it makes (0x10012E27 and
+       0x10012DE2) is not established.
+
+     * handler names for letters with no class B/C string.  This is now
+       bounded rather than open-ended: class I (12.16) classifies what
+       those handlers DO even where no string names them, and it did so
+       for every drawing command in the table.  What remains genuinely
+       unnamed are non-drawing handlers, which reach no distinctive API
+       and so cannot be separated this way.
+
+     * base-64 MegaNum digit alphabet (D-10) — the decoder that reads
+       the base byte at (state+2)+0x38 has not been located.
 
 Until those are done, no segment may state those specific claims as
 DLL-derived fact.
