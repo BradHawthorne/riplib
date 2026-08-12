@@ -13,7 +13,7 @@
 
 *31-page diagnostic harness running on RP2350 HSTX → DVI at 720×480 60fps. Click to watch.*
 
-RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a broad RIPscrip protocol parser for v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, v3.1 (A2GSPU §A2G.1-7 extensions), and v3.2 (§A2G.8-13 quality-of-life refinements). Storage-oriented client features are mapped to an in-memory icon/clipboard cache and host request queue on embedded targets, and hardware/host-only protocol features use documented embedded fallbacks. It renders to any `uint8_t*` framebuffer with zero platform dependencies.
+RIPlib provides a complete 2D rendering engine with 37+ drawing primitives, 10 BGI stroke fonts, and a broad RIPscrip protocol parser for v1.54 (Level 0/1), v2.0 (Extended + Level 2 Drawing Ports), v3.0, v3.1 (§A2G.1-7 extensions), and v3.2 (§A2G.8-13 quality-of-life refinements). Storage-oriented client features are mapped to an in-memory icon/clipboard cache and host request queue on embedded targets, and hardware/host-only protocol features use documented embedded fallbacks. It renders to any `uint8_t*` framebuffer with zero platform dependencies.
 
 RIPlib is a portable rendering/parser core, not a complete terminal application. A host app still owns transport, real filesystem transfer, sound playback, external URL/program launch, and OS clipboard integration.
 
@@ -26,8 +26,8 @@ RIPlib is a portable rendering/parser core, not a complete terminal application.
 | Bezier Curves | No | No | No | **Yes (FPU)** |
 | Polygon Fill | Basic | Basic | Basic | **Scanline** |
 | Flood Fill | Solid | Solid | Solid | **Patterned** |
-| Fill Patterns | 8 | 8 | 8 | **13** |
-| Write Modes | 3 (COPY/XOR/OR) | 3 | 3 | **5 (+AND/NOT)** |
+| Fill Patterns | 8 | 8 | 8 | **11 + user** |
+| Write Modes | 3 (COPY/XOR/OR) | 3 | 3 | **5 (all rendered)** |
 | Stroke Fonts | 10 CHR (buggy parsers) | Partial | No | **10 CHR (correct parser)** |
 | Font Scaling | 1-10 integer | 1-10 | N/A | **1-10 + attributes** |
 | Font Attributes | No | No | No | **Bold/Italic/Underline/Shadow** |
@@ -47,7 +47,7 @@ RIPlib is a portable rendering/parser core, not a complete terminal application.
 | **v1.54** | 1993 | Portable core implemented | Level 0 drawing plus Level 1 interactive commands, icon cache lookup, clipboard capture/paste, file query, variables, and host callback fallbacks |
 | **v2.0** | 1995 | Portable core implemented with embedded fallbacks | Extended drawing commands, header/mode metadata, filled-object border control, icon slots/style, scaled region copy, and Level 2 Drawing Ports with state save/restore |
 | **v3.0** | 1997 | Portable core implemented with approximations | Font justification, extended text windows, gradient fill, scalable text state, menu/dialog/scrollbar widgets, palette query, and indexed-color alpha approximation |
-| **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | AND/NOT write modes, vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
+| **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | vertical text CW+CCW, font attributes (bold/italic/underline/shadow), corrected vertical text direction, 13 native fill patterns, FPU curves |
 | **v3.2** | 2026 | Implemented extensions (§A2G.8-13) | State push/pop stack, layout/introspection variables, time component variables, EGA color-name aliases, `<<DEBUG>>` directive, radial gradient |
 
 Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, OS clipboard integration, URL launch/delete callbacks, true direct-RGB framebuffers, and monitor overscan remain outside the portable core. The parser accepts those protocol surfaces where possible and exposes embedded-friendly fallbacks instead of claiming host behavior the library cannot provide by itself.
@@ -64,8 +64,8 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 - Flood Fill (border-color semantics, patterned fill)
 - Text rendering (bitmap 8x8/8x16 + BGI stroke fonts)
 - Copy/Save/Restore region, Get Pixel
-- 5 write modes: COPY, OR, AND, XOR, NOT
-- 13 fill patterns (11 built-in + user-defined + solid)
+- 5 write modes: COPY(0), XOR(1), OR(2), AND(3), NOT(4) — wire order per RIPSCRIP.DLL 3.0.7
+- 11 built-in fill patterns + user-defined slot (4 BGI styles are approximated)
 - Clip region (set, save, restore)
 - Dirty-rectangle callback for efficient screen refresh
 
@@ -87,10 +87,10 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 
 ### v3.1 Extensions (§A2G.1-7, unique to RIPlib)
 - AND and NOT write modes (beyond standard COPY/XOR/OR)
-- Vertical text CW + CCW (direction 0/1/2)
+- Vertical text: dir 1 bottom-to-top (BGI VERT_DIR), dir 2 CCW and dir 3 CW top-to-bottom
 - Corrected vertical text direction (top-to-bottom, readable)
-- Font attributes (bold/italic/underline/shadow)
-- 13 native fill patterns (most implementations have 8)
+- Font attributes (bold/italic/underline/shadow) on `|q`
+- 11 native fill bitmaps + user slot (most implementations have 8; 4 BGI styles remain approximated — see §A2G.4)
 - FPU Bezier curves (no integer rounding artifacts)
 - FPU trigonometry (sinf/cosf/atan2f for arcs and pies)
 - Scanline pie fill (eliminates flood-fill leak bugs)
@@ -99,9 +99,9 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 ### v3.2 Extensions (§A2G.8-13, RIPlib quality-of-life refinements)
 - **State push/pop stack** — `|^` / `|~` save/restore the drawing prelude (colors, fill/line/write state including custom 16-bit line patterns, font and extended font state, cursor, viewport, filled-border mode). Bounded LIFO, 8 frames.
 - **Layout / introspection variables** — `$CX$` `$CY$` `$VPW$` `$VPH$` `$VPCX$` `$VPCY$` `$CCOL$` `$CFCOL$` `$CBCOL$` for "center this text" without hardcoded 320,200.
-- **Time component variables** — `$HOUR$` `$MIN$` `$SEC$` `$DOW$` `$DOM$` `$MONTH$` for greeting/banner variations.
+- **Time component variables** — `$HOUR$` (12-hour) `$MHOUR$` (24-hour) `$MIN$` `$SEC$` `$WDAY$` (0=Sunday) `$DOW$` (day name) `$DAY$` `$MONTHNUM$` `$MONTH$` (month name) for greeting/banner variations. Names and semantics match RIPSCRIP.DLL 3.0.7.
 - **EGA color-name aliases** — `$BLACK$` `$BLUE$` `$GREEN$` `$CYAN$` `$RED$` `$MAGENTA$` `$BROWN$` `$LIGHTGRAY$` `$DARKGRAY$` `$LIGHTBLUE$` `$LIGHTGREEN$` `$LIGHTCYAN$` `$LIGHTRED$` `$LIGHTMAGENTA$` `$YELLOW$` `$WHITE$`.
-- **`<<DEBUG msg>>` preprocessor directive** — pushes `>DEBUG: <msg>\r` to TX for development instrumentation; safe to leave in production.
+- **`<<DEBUG msg>>` preprocessor directive** — **off by default.** Enable with `-DRIPLIB_ENABLE_DEBUG_DIRECTIVE=ON` to push `>DEBUG: <msg>\r` to TX for development instrumentation. It is *not* safe to leave enabled in production: unsolicited terminal-to-host traffic has no precedent in the protocol, and a BBS sitting at a prompt reads those bytes as keystrokes. The directive is parsed and consumed either way, so rendering is identical.
 - **Radial gradient** — `|28` gains mode 2 for FPU per-pixel radial fill alongside the existing horizontal (0) and vertical (1) modes.
 
 `$RIPVER$` and the `ESC[!` probe both report **`RIPSCRIP032001`**.
@@ -160,7 +160,7 @@ void palette_write_rgb565(uint8_t index, uint16_t rgb565);
 uint16_t palette_read_rgb565(uint8_t index);
 
 // Send bytes to BBS (TCP send, serial write, etc.)
-void card_tx_push(const char *buf, int len);
+void riplib_host_tx(const char *buf, int len);
 ```
 
 See `examples/platform_stubs.c` for a minimal desktop implementation.
@@ -243,43 +243,22 @@ riplib/
 ## Portability
 
 RIPlib is proven on:
-- **Raspberry Pi RP2350 / Pico 2** @ 384MHz (running A2GSPU firmware)
-- **x86/x64 Windows** (GSSquared Apple IIgs emulator)
+- **Raspberry Pi RP2350 / Pico 2** @ 384MHz (RP235XA, 30 GPIO)
+- **x86/x64 Windows, Linux, macOS** (CI matrix, Debug + Release)
 - **Any C99 platform** with a framebuffer
 
 The library uses single-precision FPU (`sinf`, `cosf`, `atan2f`, `sqrtf`) for accurate curve and angle calculations. On platforms without hardware FPU, the compiler provides software implementations — no code changes needed.
 
-### Reference target: A2GSPU firmware
+### Reference target: RP2350
 
-RIPlib was extracted from the A2GSPU firmware — the rendering
-software for an RP2350-based Apple IIgs GPU coprocessor.  RIPlib
-is a parallel, platform-independent extraction of the rendering
-engine from A2GSPU.
+<a id="reference-target-a2gspu-firmware"></a>
 
-```
-       ┌──────────────┐                           ┌──────────────┐
-       │  USB (host)  │◄──┐                  ┌───►│ DVI / HDMI   │
-       └──────────────┘   │                  │    └──────────────┘
-                          │                  │ PIO / HSTX
-       ┌──────────────┐   │   ┌────────┐     │
-       │ SDIO microSD │◄──┼───│  "B"   │ IPL │    ┌────────┐
-       └──────────────┘   │   │RP235XB │◄────┼───►│  "V"   │◄── USB
-                          │   │48 GPIO │ PIO │    │RP235XA │◄── UX
-       ┌──────────────┐   │   │        │     │    │30 GPIO │
-       │ Apple II Bus │◄──┘   └────────┘     │    └────────┘
-       └──────────────┘             ▲        │         ▲
-                                    │        ▼         │
-                                ┌───┴────────────────────┐
-                                │   Expansion Connector  │
-                                └────────────────────────┘
-```
-
-- **Processor "B" (RP235XB, 48 GPIO)** — host bus, SDIO/microSD storage, USB-A device side, Apple II bus glue.
-- **Processor "V" (RP235XA, 30 GPIO)** — video out (HSTX or PIO-DVI), USB keyboard, UX inputs.  **This is where RIPlib runs.**
-
-The two processors communicate via an IPL (Inter-Processor Link) over PIO so that B can stream a remote BBS connection to V, and V renders the RIPscrip protocol to the framebuffer.
-
-Board reference (block diagram source): <https://www.facebook.com/groups/5251478676/posts/10166402670968677/>.
+RIPlib's first deployment was on an RP2350-class microcontroller, and
+that remains the reference target for embedded builds: Cortex-M33 with
+a single-precision FPU, rendering to an 8-bit indexed framebuffer with
+video scanned out over HSTX or PIO-DVI.  Nothing in the library depends
+on that target — it is simply the configuration the embedded numbers in
+this README were measured on.
 
 To build RIPlib for the Pico 2 / RP2350 target:
 
@@ -289,7 +268,7 @@ cmake --build build-pico2
 # produces build-pico2/libriplib.a
 ```
 
-The toolchain file targets Cortex-M33 + fpv5-sp-d16 FPU + Thumb with `-DPICO_RP2350=1` so downstream firmware that uses the pico-sdk's chip-detection macros sees a consistent build flag.  Both RP2350 variants (V/RP235XA and B/RP235XB) share the CPU core, so the same toolchain file builds for either processor — pin-count differences are a board-level concern.
+The toolchain file targets Cortex-M33 + fpv5-sp-d16 FPU + Thumb with `-DPICO_RP2350=1` so downstream firmware that uses the pico-sdk's chip-detection macros sees a consistent build flag.  Both RP2350 packages — RP235XA (30 GPIO, QFN-60) and RP235XB (48 GPIO, QFN-80) — share the same CPU core, so one toolchain file builds for either; pin-count differences are a board-level concern.
 
 ## Testing
 

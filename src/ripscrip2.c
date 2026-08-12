@@ -48,7 +48,7 @@
 #include <math.h>
 
 extern void palette_write_rgb565(uint8_t index, uint16_t rgb565);
-extern void card_tx_push(const char *buf, int len);
+extern void riplib_host_tx(const char *buf, int len);
 
 #define RIP2_PI_F 3.14159265358979323846f
 
@@ -836,7 +836,13 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      * that subsequent text commands actually read:
      *   - text_scale (1..10) → rs->font_size (BGI integer scale 1-10)
      *   - text_rotation snapped to the nearest 90° quadrant →
-     *     rs->font_dir (0=horizontal, 1=vertical CW, 2=vertical CCW)
+     *     rs->font_dir (0=horizontal, 3=vertical CW, 2=vertical CCW)
+     *
+     * NOTE (2026-08-12, X3): 90° maps to font_dir 3, not 1.  Direction 1
+     * was restored to its documented BGI VERT_DIR meaning (bottom-to-top),
+     * and the CW top-to-bottom rendering a 90° rotation actually wants
+     * moved to direction 3.  Mapping 90° to 1 would now render the text
+     * running upward.
      *
      * Scale is clamped to the renderer's real range 1-10 (bgi_font.c caps
      * scale at 10), matching the 'Y' RIP_FONT_STYLE handler's clamp.  An
@@ -858,8 +864,8 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
             if (rs) {
                 int rot = ((int)s->text_rotation % 360 + 360) % 360;
                 if (rot < 45 || rot >= 315)       rs->font_dir = 0;
-                else if (rot < 135)               rs->font_dir = 1;
-                else if (rot >= 225)              rs->font_dir = 2;
+                else if (rot < 135)               rs->font_dir = 3;  /* 90°  = CW  */
+                else if (rot >= 225)              rs->font_dir = 2;  /* 270° = CCW */
                 else                              rs->font_dir = 0;
             }
         }
@@ -1046,7 +1052,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                              (unsigned)rip2_rgb332_g(rgb),
                              (unsigned)rip2_rgb332_b(rgb));
             if (n > 0)
-                card_tx_push(resp, n);
+                riplib_host_tx(resp, n);
         }
         break;
     }

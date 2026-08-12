@@ -295,7 +295,7 @@ Example (Triplex font, scale 2):
 ---------------------------------------------------------------------
 
 BGI stroke fonts support four rendering attributes set via the
-RIP_FONT_ATTRIB command (|f). See §A2G.3 for full details.
+RIP_FONT_ATTRIB command (|q). See §A2G.3 for full details.
 
      BOLD (0x01):      Double-stroke, +1px right offset
      ITALIC (0x02):    X shear by top×scale/5

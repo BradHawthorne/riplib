@@ -100,18 +100,30 @@ Sets the pixel compositing mode for all drawing operations.
      ---------   -----   -----   -----------
      mode        2       0-4     Write mode
 
-     Mode   Name    Operation          v3.1
-     ----   ----    ---------          ----
-     0      COPY    dst = src          v1.54
-     1      OR      dst = dst | src    v1.54
-     2      AND     dst = dst & src    v3.1 extension
-     3      XOR     dst = dst ^ src    v1.54
-     4      NOT     dst = ~dst         v3.1 extension
+     Mode   Name    Operation          GDI raster op
+     ----   ----    ---------          -------------
+     0      COPY    dst = src          R2_COPYPEN  (0x0D)
+     1      XOR     dst = dst ^ src    R2_XORPEN   (0x07)
+     2      OR      dst = dst | src    R2_MERGEPEN (0x0F)
+     3      AND     dst = dst & src    R2_MASKPEN  (0x09)
+     4      NOT     dst = ~dst         R2_NOT      (0x06)
 
-     v3.1 NOTE: The original v1.54 spec defined modes 0-3 only.
-     Mode constants were ordered differently in the DLL
-     (0=COPY, 1=XOR, 2=OR). RIPlib uses the RIPscrip protocol
-     wire values: 0=COPY, 1=OR, 2=AND, 3=XOR, 4=NOT.
+     CORRECTED 2026-08-12.  This table previously read 1=OR, 2=AND,
+     3=XOR and described AND and NOT as v3.1 extensions.  Both
+     claims were wrong.
+
+     The ordering is established by disassembly of RIPSCRIP.DLL
+     3.0.7: the '|W' handler (RVA 0x02102C) stores the wire byte
+     unmodified, and the apply path passes it to a five-way
+     translation (RVA 0x00E6B3) that calls GDI SetROP2 with the
+     raster ops shown above.  The wire value IS the index, so there
+     is no internal-vs-wire distinction of the kind the previous
+     note asserted.  See docs/spec/12-dll-provenance.md §12.10.
+
+     AND and NOT are not RIPlib extensions.  Both have been
+     documented modes since v2.00 Alpha 1, and the translation
+     above shows the shipping driver rendered them.  §DEAD.3's
+     "parsed but never rendered" claim is corrected accordingly.
 
      Attributes: [WM] sets the mode used by all subsequent commands.
 

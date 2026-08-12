@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project(riplib VERSION 1.3.0 LANGUAGES C)
+project(riplib VERSION 2.0.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 99)
 # Only pull in CTest (and its Experimental/Nightly/… targets + BUILD_TESTING)
@@ -55,6 +55,16 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # ── Library ─────────────────────────────────────────────────────────
+# ── Optional: <<DEBUG>> preprocessor directive ───────────────────────
+# OFF by default (X7).  The directive is always parsed and consumed, so
+# rendering is identical either way; enabling it makes RIPlib send an
+# unsolicited ">DEBUG: ..." line to the host, which a BBS sitting at a
+# prompt will read as keystrokes.  Only enable for a host written to
+# expect it.  PUBLIC so tests and consumers see the same setting.
+option(RIPLIB_ENABLE_DEBUG_DIRECTIVE
+       "Emit <<DEBUG msg>> lines to the host (unsolicited TX; off by default)"
+       OFF)
+
 add_library(riplib STATIC
     src/drawing.c
     src/bgi_font.c
@@ -70,6 +80,10 @@ add_library(riplib STATIC
     icons/rip_icns_data.c
 )
 add_library(riplib::riplib ALIAS riplib)
+
+if(RIPLIB_ENABLE_DEBUG_DIRECTIVE)
+    target_compile_definitions(riplib PUBLIC RIPLIB_ENABLE_DEBUG_DIRECTIVE=1)
+endif()
 
 target_include_directories(riplib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

@@ -75,12 +75,24 @@ void    draw_set_arc_radius(int16_t radius);
 void    draw_set_write_mode(uint8_t mode);
 
 /* Write modes for draw_set_write_mode()
- * Values match RIPscrip protocol (0=COPY, 1=OR, 2=AND, 3=XOR, 4=NOT)
- * so ripscrip.c can pass protocol values directly. */
+ * Values are the RIPscrip wire values (0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT)
+ * so ripscrip.c can pass protocol values directly.
+ *
+ * Corrected 2026-08-12.  These previously read OR=1, AND=2, XOR=3 on the
+ * strength of docs/spec/11-dll-deviations.md §BUG.7, which asserted a
+ * wire ordering with no citation.  Disassembly of RIPSCRIP.DLL 3.0.7
+ * disproves it: the '|W' handler (RVA 0x02102C) stores the wire byte
+ * unmodified, and the apply path feeds it to a translation at RVA
+ * 0x00E6B3 that calls GDI SetROP2 with
+ *     0 -> R2_COPYPEN  1 -> R2_XORPEN  2 -> R2_MERGEPEN
+ *     3 -> R2_MASKPEN  4 -> R2_NOT
+ * so XOR is 1 on the wire.  This also matches the 1.54 specification,
+ * the 2.00a4 table, Borland BGI, and §DEAD.3.  §BUG.7 is withdrawn;
+ * see docs/spec/12-dll-provenance.md §12.10 for the full chain. */
 #define DRAW_MODE_COPY  0
-#define DRAW_MODE_OR    1
-#define DRAW_MODE_AND   2
-#define DRAW_MODE_XOR   3
+#define DRAW_MODE_XOR   1
+#define DRAW_MODE_OR    2
+#define DRAW_MODE_AND   3
 #define DRAW_MODE_NOT   4
 
 /* ── Pixel + axis-aligned primitives ─────────────────────────────── */

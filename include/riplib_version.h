@@ -7,8 +7,8 @@
  *
  * RIPLIB_VERSION_INT exposes a packed integer (major * 10000 + minor * 100
  * + patch) for ordered comparisons:
- *   #if RIPLIB_VERSION_INT >= 10300
- *       // code that requires v1.3.0 or newer
+ *   #if RIPLIB_VERSION_INT >= 20000
+ *       // code that requires v2.0.0 or newer
  *   #endif
  *
  * NOTE: these macros are hand-maintained.  At release time they MUST be
@@ -22,11 +22,11 @@
 
 #pragma once
 
-#define RIPLIB_VERSION_MAJOR  1
-#define RIPLIB_VERSION_MINOR  3
+#define RIPLIB_VERSION_MAJOR  2
+#define RIPLIB_VERSION_MINOR  0
 #define RIPLIB_VERSION_PATCH  0
 
-#define RIPLIB_VERSION_STRING "1.3.0"
+#define RIPLIB_VERSION_STRING "2.0.0"
 
 #define RIPLIB_VERSION_INT \
     (RIPLIB_VERSION_MAJOR * 10000 + RIPLIB_VERSION_MINOR * 100 + RIPLIB_VERSION_PATCH)

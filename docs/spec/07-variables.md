@@ -111,8 +111,9 @@ $ISPALETTE$
 $USER$
      Format:   String (may be empty)
      Value:    "" (empty on embedded — no login context)
-     Description: Current user name. On the DLL, returned the
-                  RIPtel login identity. On A2GSPU, always empty.
+     Description: Current user name. The original driver returned
+                  the client's login identity; RIPlib has no login
+                  context and always returns empty.
 
 
 ---------------------------------------------------------------------
@@ -266,14 +267,27 @@ a linear search of the variable table.
      -------------   --------   -------   -------------------------
      $DATE$          date       v1.54     MM/DD/YY
      $TIME$          time       v1.54     HH:MM
-     $YEAR$          date       v3.1      YYYY (4-digit)
+     $YEAR$          date       v1.54     YY (2-digit)
+     $FYEAR$         date       v1.54     YYYY (4-digit)
      $WOYM$          date       v3.0      Week of year (ISO)
-     $HOUR$          time       v3.2      HH from host_time or RTC
+     $HOUR$          time       v3.2      HH, 12-hour (01-12)
+     $MHOUR$         time       v3.2      HH, 24-hour (00-23)
      $MIN$           time       v3.2      MM from host_time or RTC
      $SEC$           time       v3.2      SS from RTC
-     $DOW$           date       v3.2      Day of week (Mon=0)
-     $DOM$           date       v3.2      Day of month (DD)
-     $MONTH$         date       v3.2      Month of year (MM)
+     $WDAY$          date       v3.2      Day of week digit, Sun=0
+     $DOW$           date       v3.2      Day of week name ("Friday")
+     $DAY$           date       v3.2      Day of month (DD)
+     $MONTHNUM$      date       v3.2      Month of year (MM)
+     $MONTH$         date       v3.2      Month name ("January")
+
+     NAMES CORRECTED 2026-08-12.  RIPSCRIP.DLL 3.0.7 carries both
+     names of each pair as distinct strings (HOUR/MHOUR, DOW/WDAY,
+     MONTH/MONTHNUM, YEAR/FYEAR) and has no "DOM" string at all.
+     RIPlib previously returned the right values under the wrong
+     names — $YEAR$ gave four digits, $HOUR$ gave 00-23, $DOW$ gave
+     a Monday=0 digit, $MONTH$ gave MM, and day-of-month was $DOM$.
+     Each was silently wrong against a conforming terminal rather
+     than an error.  $DOM$ is removed; use $DAY$.
      $RIPVER$        protocol   v1.54     Version string
      $PROT$          protocol   v3.1      Resolution mode
      $COMPAT$        protocol   v3.1      Compatibility level

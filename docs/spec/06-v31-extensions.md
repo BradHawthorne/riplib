@@ -30,20 +30,35 @@ cross-referencing.
 §A2G.1  EXTENDED WRITE MODES — AND and NOT
 ---------------------------------------------------------------------
 
-The original RIPscrip v1.54 defined three write modes:
+WITHDRAWN AS A PROTOCOL EXTENSION — 2026-08-12.
+
+This section claimed AND and NOT as v3.1 additions, on a write-mode
+ordering that has since been disproved.  Both claims fail:
+
+  ORDERING.  The wire values are 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT,
+  established by disassembly (docs/spec/12-dll-provenance.md §12.10).
+  There is no "DLL internal vs wire" distinction — the '|W' handler
+  stores the wire byte unmodified and the apply path translates it
+  straight to a GDI raster op.  The note that previously appeared
+  here asserted the opposite with no citation; it came from §BUG.7,
+  which is now withdrawn.
+
+  NOVELTY.  AND and NOT are not new.  Both have been documented
+  modes since v2.00 Alpha 1, and the driver's translation maps
+  wire 3 -> R2_MASKPEN and wire 4 -> R2_NOT, so the shipping
+  implementation rendered them.  They were never dead code.
+
+What §A2G.1 actually contributed is a completeness fix to RIPlib's
+own renderer — implementing all five modes in every pixel-write
+path.  That is a library-level improvement, not a language
+extension, and it is no longer counted as one.
+
+The five modes, for reference:
 
      Mode 0: COPY   (dst = src)
-     Mode 1: OR     (dst = dst | src)
-     Mode 3: XOR    (dst = dst ^ src)
-
-     NOTE: The DLL internally used a different ordering
-     (0=COPY, 1=XOR, 2=OR). The wire protocol values above
-     are the RIPscrip specification values. RIPlib uses the
-     wire protocol values.
-
-v3.1 adds two modes:
-
-     Mode 2: AND    (dst = dst & src)
+     Mode 1: XOR    (dst = dst ^ src)
+     Mode 2: OR     (dst = dst | src)
+     Mode 3: AND    (dst = dst & src)
      Mode 4: NOT    (dst = ~dst)
 
 AND mode performs a bitwise AND between the source color and
@@ -82,11 +97,24 @@ This renders English text backwards on screen. Reading top-to-
 bottom, "HELLO" appears as "OLLEH". No known BBS sends vertical
 text commands, so this behavior was never observed in practice.
 
-v3.1 CORRECTION: Direction 1 now renders top-to-bottom:
+REVISED 2026-08-12 (X3).  v3.1 originally REDEFINED direction 1 to
+render top-to-bottom.  That made content authored against either
+side read upside-down on the other, for no gain: the 1.54 wording
+is a statement of intent, not a defect report, and bottom-to-top is
+the conventional orientation for a rotated axis label.
+
+Direction 1 has been restored to its documented meaning, and the
+corrected top-to-bottom rendering moved to a NEW value, 3:
 
      Direction 0: Horizontal, left to right (unchanged)
-     Direction 1: Vertical, top to bottom, CW glyph rotation
+     Direction 1: Vertical, BOTTOM TO TOP, CCW glyphs  (BGI VERT_DIR,
+                  as the 1.54 specification defines it)
      Direction 2: Vertical, top to bottom, CCW glyph rotation
+     Direction 3: Vertical, top to bottom, CW  glyph rotation
+                  (this is what direction 1 did before the revision)
+
+Note for '|26' SCALABLE_TEXT: a 90-degree rotation maps to direction
+3, not 1 — mapping it to 1 would now run the text upward.
 
 For direction 1 (CW), characters are readable when tilting
 the head clockwise (right ear toward shoulder). This matches
@@ -121,9 +149,14 @@ Glyph coordinate transforms:
 §A2G.3  FONT ATTRIBUTE RENDERING
 ---------------------------------------------------------------------
 
-The RIP_FONT_ATTRIB command (|f) was present in v3.0 but the DLL
+The RIP_FONT_ATTRIB command (|q) was present in v3.0 but the DLL
 never applied the attribute bits to the rendered output. The bits
 were parsed and stored but had no visual effect.
+
+LETTER CORRECTED 2026-08-12: this section previously placed the
+command on '|f'.  The driver's '|f' is RIP_SetWorldFrame; font
+attributes are on '|q'.  §A2G.3 therefore MOVES rather than being
+withdrawn — the feature is real, the letter was wrong.
 
 v3.1 implements all four attribute effects for BGI stroke fonts:
 
@@ -160,8 +193,8 @@ Attributes are cumulative — bold+italic+underline is valid.
 Attributes only affect BGI stroke fonts (font IDs 1-10). The
 bitmap font (ID 0) ignores attributes.
 
-     Wire format: !|f0300|    (bold + italic)
-                  !|f0700|    (bold + italic + underline)
+     Wire format: !|q03|      (bold + italic)
+                  !|q07|      (bold + italic + underline)
 
 
 ---------------------------------------------------------------------
@@ -172,7 +205,35 @@ The original BGI defined 13 fill patterns (0-12), but most
 implementations only provided 8 built-in patterns and
 approximated patterns 9-11 using the closest available match.
 
-v3.1 provides all 13 patterns natively:
+QUALIFIED 2026-08-12.  This section previously claimed v3.1
+"provides all 13 patterns natively".  That overstates what the
+implementation does, on two counts:
+
+  COUNT.  src/drawing.c declares eleven 8x8 bitmaps plus one
+  user-defined slot, not thirteen.
+
+  COLLAPSE.  The wire-to-bitmap mapping in rip_bgi_fill_to_card()
+  still resolves four BGI styles to approximations, and two of
+  them collapse onto a single bitmap:
+
+       BGI 3  LTSLASH    -> light diagonal   (approximation)
+       BGI 5  BKSLASH    -> diagonal back  \
+       BGI 6  LTBKSLASH  -> diagonal back  /  same bitmap
+       BGI 8  XHATCH     -> 50% checker      (approximation)
+
+  So the 9/10/11 approximations §DEAD.6 set out to remove were
+  fixed, but the 5/6 collapse was relocated into the mapping layer
+  rather than eliminated.
+
+Separately, "correct per Borland BGI" is not the same standard as
+"correct per RIPscrip": the RIPscrip specification prints eight
+byte values per pattern and RIPterm implemented those, including
+the well-known wrong Light Backslash bytes A5 D2 69 B4 5A 2D 96 4B.
+Byte-exact fidelity matters when a fill tiles against era artwork.
+RIPlib's independently chosen bitmaps are a defensible choice, but
+they are a CHOICE and are recorded as one here.
+
+The eleven built-in patterns:
 
      ID   Name              Pattern (8×8 hex)
      --   ---------------   ---------------------------------
@@ -290,7 +351,7 @@ rotation with FPU, if needed).
 
 Direction validation:
      dir > 2 → command rejected (no state change)
-     dir 0-2 → stored in s->font_dir
+     dir 0-3 → stored in s->font_dir
 
 
 =====================================================================

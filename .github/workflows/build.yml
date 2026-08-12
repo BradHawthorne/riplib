@@ -185,6 +185,18 @@ jobs:
         echo "=== Archive total (arm-none-eabi-size --totals) ==="
         arm-none-eabi-size --totals ${GITHUB_WORKSPACE}/build-pico2/libriplib.a | tail -3
 
+  branding:
+    name: platform-independence (branding lint)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    # Guards the binding platform-independence constraint in
+    # design/decisions.md. Added 2026-08-12 after a scrub shipped
+    # believed-complete on a verification grep that was a silent no-op.
+    - name: No consumer-specific names outside sanctioned locations
+      run: bash scripts/check-branding.sh --verbose
+
   static-analysis:
     runs-on: ubuntu-latest
     steps:

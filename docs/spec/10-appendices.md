@@ -10,6 +10,14 @@ A.1  COMMAND QUICK-REFERENCE TABLE
 
 All commands sorted by level and command letter.
 
+     AUTHORITY NOTE (2026-08-12).  Where this table disagrees with
+     docs/spec/13-dll-command-table.md, THAT table wins: it is the
+     shipping driver's own dispatch table read out of the binary,
+     with each command's real arity and argument types.  Several
+     rows below were corrected against it; rows still marked
+     "(unverified)" have not been reconciled and should not be
+     relied on for interoperability.
+
 LEVEL 0 — Core Drawing (no prefix):
 
      Cmd  Name                   Args  Format
@@ -62,35 +70,41 @@ LEVEL 0 — Extended Commands (v2.0+):
      +    SCROLL                 14    !|+<x0><y0><x1><y1><dx><dy><fc>|
      ,    COPY_REGION_EXT        20    !|,<sx0>..<dy1><r><r>|
      -    TEXT_XY_EXT            var   !|-<x0><y0><x1><y1><fl><text>|
+     x    FILLED_POLY_BEZIER     var   !|x<nsegs><nsteps><pts..>|
      z    POLY_BEZIER            var   !|z<nsegs><nsteps><pts..>|
      "    BOUNDED_TEXT           var   !|"<x0><y0><x1><y1><fl><text>|
-     [    FILL_POLYGON_EXT      14    !|[<x0><y0><x1><y1><m><p1><p2>|
-     ]    POLYLINE_EXT           14    !|]<x0><y0><x1><y1><m><p1><p2>|
-     _    DRAW_TO                12    !|_<x0><y0><m><p><x1><y1>|
+     [    (contested: skewed-oval family, 7 args)  (unverified)
+     ]    (contested: skewed-oval family, 7 args)  (unverified)
+     _    (contested: 6 args, not a single point)  (unverified)
      {    ANIMATION_FRAME        12    !|{<x0><y0><x1><y1><x2><y2>|
-     K    KILL_MOUSE_EXT         8     !|K<x0><y0><x1><y1>|
+     K    FILLED_RECTANGLE       8     !|K<x0><y0><x1><y1>|  (was KILL_MOUSE_EXT)
      :    MOUSE_REGION_EXT       var   !|:<x0><y0><x1><y1><hk><fl>..|
-     ;    BUTTON_EXT             var   !|;<x0><y0>..<tidx>|
+     ;    POLY_MARKER            14    !|;<x><y><num><x2><y2><rot><fl>|  (was BUTTON_EXT)
      b    EXT_TEXT_WINDOW        var   !|b<x0><y0>..<flags>|
-     d    EXT_FONT_STYLE         7     !|d<fid><attr><size>|
-     f    FONT_ATTRIB            4     !|f<attrib><res>|
+     d    ONE_DRAWING_PALETTE    7     !|d<index><bits><rgb>|  (was EXT_FONT_STYLE)
+     f    SET_WORLD_FRAME        4     !|f<x_dim><y_dim>|
+     j    POINT                  4     !|j<x><y>|
+     r    TEXT_METRIC            6     !|r<mode><domain><res>|
+     y    EXT_FONT_STYLE         26    !|y<26 chars>|
      h    HEADER                 8     !|h<type><id><flags>|
+     q    FONT_ATTRIB            2     !|q<attrib>|
      n    SET_COORD_SIZE         4     !|n<byte_size><res>|
      M    SET_COLOR_MODE         2     !|M<mode><depth>|
      N    SET_BORDER             2     !|N<borders>|
      &    ICON_STYLE             14    !|&<x0><y0>..<scale>|
      .    STAMP_ICON             12    !|.<slot><x><y><w><h><fl>|
-     J    SAVE_ICON              2     !|J<slot>|
-     D    FILL_PATTERN_EXT       18    !|D<p0>..<p7><color>|
-     <    GET_IMAGE_EXT          8     !|<<x0><y0><x1><y1>|
+     J    SET_BASE_MATH          2     !|J<base>|      (was SAVE_ICON)
+     D    SET_DRAWING_PALETTE    var   !|D<start><count><bits><rgb..>|  (was FILL_PATTERN_EXT)
+     <    POLY_POLYGON         var     (variable-length; was GET_IMAGE_EXT)
      t    REGION_TEXT            var   !|t<justify><text>|
      `    COMPOSITE_ICON         var   !|`<n><pairs..><mode>|
      !    COMMENT                var   !|!<text>|   (consumed, no output)
      ( )  GROUP_BEGIN / _END     0     !|(|  !|)|  (no-op markers)
 
-     (The backtick COMPOSITE_ICON, the '!' comment marker, and the
-      '('/')' group markers are RIPlib extensions beyond the published
-      TeleGrafix tables — see 11-dll-deviations.md §DEV.4.)
+     (The backtick COMPOSITE_ICON, the '!' comment marker and the
+      '('/')' group markers are all PRESENT in RIPSCRIP.DLL 3.0.7 —
+      they are documented commands, not RIPlib extensions.  See
+      11-dll-deviations.md §DEV.4, corrected 2026-08-12.)
 
 LEVEL 1 — Interactive (prefix '1'):
 
@@ -110,7 +124,7 @@ LEVEL 1 — Interactive (prefix '1'):
      W    WRITE_ICON             var   !|1W...|
      A    PLAY_AUDIO             var   !|1A<filename>|
      Z    PLAY_MIDI              var   !|1Z<filename>|
-     S    IMAGE_STYLE            2     !|1S<mode>|
+     i    IMAGE_STYLE            6     !|1i<x0><y0><x1><y1><fl>|  (was 1S)
      N    SET_ICON_DIR           var   !|1N<path>|
      F    FILE_QUERY             var   !|1F<mode><res><filename>|
      D    DEFINE_VARIABLE        var   !|1D<name>=<value>|
@@ -120,8 +134,9 @@ LEVEL 1 — Interactive (prefix '1'):
      X    CLIPBOARD_OP           var   !|1X<op>[<params>]|
      R    READ_SCENE             var   !|1R<filename>|
 
-     (1V/1X/1R are RIPlib extensions beyond the published TeleGrafix
-      tables — see 11-dll-deviations.md §DEV.4. 1V sets the viewport
+     (1R is PRESENT in the driver as RIP_ReadScene and is NOT a
+      RIPlib extension.  Only 1V and 1X are RIPlib-original — see
+      11-dll-deviations.md §DEV.4, corrected 2026-08-12. 1V sets the viewport
       and stores a scale field; 1X is a compound clipboard op
       [0=clear 1=flipH 2=flipV 3=rot180 4=invert 5=capture 6=paste];
       1R queues a scene-file request to the host.)
