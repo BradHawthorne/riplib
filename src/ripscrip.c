@@ -4039,13 +4039,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* Dispatch slot 3, argc 5.  The entry records its 3rd and 4th arguments
-     * as mega2, but the handler at RVA 0x01f904 passes (arg0,arg1) and then
-     * (arg2,arg3) to the same coordinate-pair mapper at 0x10031084, so both
-     * pairs are coordinates and the recorded types are a defect in RIPlib's
-     * dispatch parser — see docs/spec/12 §12.14, defect D-9.  The handler is
-     * otherwise instruction-for-instruction identical to '-' at 0x01c348,
-     * the filled member of the same shape. */
+    /* Dispatch slot 3, argc 5, types ff ff 02 02 02.  The handler at RVA
+     * 0x01f904 is instruction-for-instruction identical to '-' at 0x01c348
+     * — the outline member of the same shape — and passes (arg0,arg1) and
+     * then (arg2,arg3) to the same coordinate mapper at 0x10031084.
+     *
+     * That the radii are typed mega2 here and coordinate-width in '-' is
+     * not a contradiction: the type byte gives the WIRE WIDTH, the mapper
+     * is SEMANTIC scaling after decode.  '|&' always transmits its radii
+     * as 2 digits; '|-' transmits them at the current coordinate size.  At
+     * the default size of 2 both are 10 characters, which is why
+     * TeleGrafix's demo shows the same payload shape for the pair.
+     * See docs/spec/12 §12.14 and defects D-9 (withdrawn) and D-11. */
     case '&': /* RIP_SKEWED_OVAL — cx:2 cy:2 rx:2 ry:2 skew:2 */
         if (len >= 10) {
             int16_t cx = mega2(p),     cy = scale_y(mega2(p + 2));

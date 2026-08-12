@@ -840,11 +840,13 @@ in both directions:
   trailing reserved bytes are consumed outside the dispatch template.
   Not resolved here; recorded so neither side treats it as settled.
 
-  ONE OPEN ITEM ON THIS SIDE.  '|F' RIP_FILL shows argc=0 at RVA
-  0x01B2FD, one byte before '|G' at 0x01B2FE — almost certainly a thunk
-  or a mis-parse of that entry rather than a real zero-argument flood
-  fill.  Their 'x:XY y:XY border:CM' is the sane reading.  Flagged for
-  a follow-up pass over the dispatch parser.
+  ONE OPEN ITEM ON THIS SIDE — SINCE RESOLVED.  '|F' RIP_FILL showed
+  argc=0 at RVA 0x01B2FD, one byte before '|G' at 0x01B2FE, and was
+  guessed to be a thunk or a mis-parse.  It is neither: 0x01B2FD is a
+  bare 'ret', the tail of the preceding function, so THE 3.0 DRIVER
+  STUBS OUT FLOOD FILL.  Their 'x:XY y:XY border:CM' is still the right
+  reading for the WIRE, and RIPlib implements it that way; the driver
+  simply declines to act on it.  See D-9.
 
 So the two '|3D' entries remain unbound ('|3e' is now resolved).  Established: '|3D' at
 0x024AF4 copies its text argument into a 256-byte buffer and calls a
@@ -921,27 +923,75 @@ D-7  'riplib_host_tx' CARRIES CONSUMER TERMINOLOGY IN THE PUBLIC API.
      port must implement, and its name says "card".  Renaming is a
      breaking API change and therefore a v2.0.0-shaped decision.
 
-D-9  THE DISPATCH PARSER MIS-TYPES SOME ARGUMENTS.  Recorded
-     2026-08-12.  scripts/dll-dispatch-table.py records '|&' (slot 3) as
-     XY, XY, mega2, mega2, mega2 — but the handler at RVA 0x01f904 hands
-     BOTH (arg0,arg1) and (arg2,arg3) to the coordinate-pair mapper at
-     0x10031084, so arguments 2 and 3 are coordinates, not plain
-     MegaNums.  The paired handler '|-' (slot 9) is recorded correctly as
-     XY, XY, XY, XY, mega2 despite being the same shape, which is what
-     makes the '|&' row provably wrong rather than merely doubtful.
+D-9  WITHDRAWN 2026-08-12, THE SAME DAY IT WAS RAISED.  It alleged
+     "the dispatch parser mis-types some arguments".  Both symptoms were
+     re-checked against the raw table bytes and both are FAITHFUL
+     RECORDS; the extractor is correct and the defect does not exist.
+     Recorded rather than deleted because blaming one's own tooling for
+     an accurate reading is a mistake worth leaving visible.
 
-     A second symptom, recorded earlier and still open: '|F' RIP_FILL is
-     read as argc=0 at RVA 0x01B2FD, one byte before '|G' at 0x01B2FE.
-     A zero-argument flood fill is not a plausible command, and the
-     one-byte offset points at the same defect — the parser walking into
-     an entry at the wrong boundary or following a thunk.
+     Symptom 1, '|&' (slot 3) typed XY, XY, mega2, mega2, mega2.  The
+     raw entry really is ff ff 02 02 02.  The apparent contradiction
+     with the handler — which hands (arg0,arg1) AND (arg2,arg3) to the
+     coordinate mapper at 0x10031084 — is not a contradiction, because
+     the two things describe different layers:
 
-     Both symptoms are in RIPlib's EXTRACTION script, not in the driver.
-     Consequence: argument TYPE bytes in segment 13 are advisory where
-     they disagree with a handler's own behaviour, while argument COUNTS
-     have held up everywhere they have been checked (all six members of
-     the skewed-oval family matched TeleGrafix's demo exactly).  Until
-     the parser is fixed, prefer handler evidence over recorded types.
+          the TYPE byte gives the WIRE WIDTH (how many digits to read)
+          the coordinate mapper is SEMANTIC (scaling after decode)
+
+     A radius is a coordinate-like quantity that gets scaled, and it can
+     still be transmitted as a fixed 2-digit MegaNum.  '|&' does exactly
+     that; '|-' (ff ff ff ff 02) transmits its radii at coordinate
+     width.  At the default coordinate size of 2 both encode to the same
+     10 characters, which is why TeleGrafix's demo shows an identical
+     payload shape for the pair.  See D-11 for what that costs.
+
+     Symptom 2, '|F' RIP_FILL at RVA 0x01B2FD with argc=0, one byte
+     before '|G' at 0x01B2FE.  0x01B2FD disassembles to a single 'ret'
+     — it is the tail of the preceding function, and 0x01B2FE is a real
+     'push ebp' prologue.  So the entry is accurate and the finding is
+     about the DRIVER, not the table:
+
+          THE 3.0 DRIVER STUBS OUT FLOOD FILL.  '|F' is dispatched, so
+          the letter is recognised and its frame consumed, but the
+          handler returns immediately.  Slot 27 is the only Level 0 row
+          whose handler is a bare 'ret'; the other argc=0 rows ('E'
+          RIP_ERASE_VIEW at 0x01ad6f, 'e' RIP_ERASE_WINDOW at 0x01ad98,
+          Level 1 'K' at 0x00c543) all have real prologues.  No shipped
+          scene uses '|F'.
+
+     RIPlib implements '|F' as the 1.54 specification defines it
+     (x:2 y:2 border:2), matching SyncTERM and IcyTerm, and that stays.
+     A 3.0 driver declining to flood-fill is not a reason for a library
+     that also serves 1.54 content to drop the command.  Note that
+     RIPlib once changed '|F' to take zero arguments on the strength of
+     this very argc=0 reading, described in the code as "DLL internal
+     behavior"; that change was later reverted against the spec.  This
+     entry explains what was actually being observed.
+
+     Consequence: argument type bytes AND counts in segment 13 are
+     records of the binary and have held up under every check made.
+     Where a handler's behaviour appears to disagree, expect a
+     wire-versus-semantics distinction like symptom 1 before suspecting
+     the table.
+
+D-11 COORDINATE WIDTH IS RECORDED BUT NOT HONOURED.  Recorded
+     2026-08-12, surfaced while withdrawing D-9.  The dispatch table
+     types many arguments 0xFF ("width per SET_COORDINATE_SIZE"), and
+     '|n' RIP_SET_COORDINATE_SIZE (slot 49, byte_size:1 res:3) selects
+     that width at runtime.  RIPlib parses '|n' and stores the value in
+     rip_state_t.coordinate_size, but every decode site calls the fixed
+     2-digit mega2(); the field is recorded and never consulted.
+
+     A stream that sets any width other than 2 will therefore desync
+     from the first coordinate onward.  Impact on real content is nil:
+     all 24 uses of '|n' across the 35 shipped scenes are byte_size=2,
+     the default — the same situation as '|J10' in D-10.
+
+     Closing it means threading the width through src/rip_meganum.h,
+     whose decoders are deliberately stateless static inlines, so it is
+     a genuine refactor rather than a patch.  Until then the 0xFF type
+     byte should be read as "2 in practice".
 
 D-10 BASE-64 MEGANUM IS ACCEPTED BUT NOT DECODED.  Recorded
      2026-08-12.  '|J' RIP_SET_BASE_MATH (RVA 0x01f32e) selects the
