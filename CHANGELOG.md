@@ -126,11 +126,29 @@ Two anomalies the values surfaced immediately, neither visible to any count:
   RIPlib parsing malformed shipped content faithfully; recorded as content, not
   a defect.
 - **`NEWSPAPR.RIP` requests `$&MAIN_STORY`** — the prefix is correct and the
-  filename is a *variable reference*. `rip_expand_variables()` is applied to
-  rendered text and `<<IF>>` expressions, and to no filename argument anywhere.
-  Same shape as D-26, one command over. **Not fixed**: the scope question D-26
-  had to answer is unanswered here — which arguments expand, and whether `$&` is
-  a distinct sigil. The handler is the arbiter and hasn't been read for it. See
+  filename is a *variable reference*, going out literally. **Arbitrated and
+  fixed the same day.** The driver's `$`-scanner sits at RVA `0x04B0E4` and is
+  reached by twelve dispatch entries — RIPlib ran that path for text only, so
+  filenames and the `|3G` URL passed through verbatim. Found by differential:
+  intersect the calls of `|@` and `|T` with `|1R`'s, subtract five numeric-only
+  commands, and exactly one routine survives.
+
+  **`&` is not a sigil**, which the shape invites you to assume — the scanner
+  compares against `'$'` alone, so `$&MAIN_STORY$` is a variable simply *named*
+  `&MAIN_STORY`. Both implementations already agreed; recording that saved
+  inventing a rule for it.
+
+  Fixed for `|1R` and `|1b`, with expansion running *before* the filename safety
+  check so a name assembled from a variable is still subject to it. Impact is
+  precise: 11 of the 13 `$`-bearing `|1R` payloads are the `<<IF>>` conditionals
+  D-26 already handles; NEWSPAPR's two stay literal because the variable is
+  undefined in the scene (the host supplies it). The mechanism is proven by
+  test, not by that scene.
+
+  **And the instruments broke** — both audit scripts hardcoded switch-block line
+  numbers, the helper shifted every case label below it, and `|3e` fell outside
+  its window. The validator reported it UNVERIFIED rather than passing it,
+  catching a fault in itself. Ranges now derive from structural markers. See
   D-28.
 
 **A comment that was wrong twice over — and the check that should have caught

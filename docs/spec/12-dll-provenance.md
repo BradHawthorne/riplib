@@ -1143,11 +1143,50 @@ D-28 THE CORPUS COUNTED ITS REQUESTS AND NEVER READ THEM.  Recorded
 
      This is the same shape as D-26, one command over: an argument that
      needs a preprocessing pass the parser applies elsewhere and not
-     here.  It is NOT fixed here, and the reason is that the scope
-     question D-26 had to answer is unanswered for this one -- which
-     arguments expand, and whether '$&' is a distinct sigil from '$'.
-     The driver's handler is the arbiter and has not been read for it.
-     Two scenes, two requests.  Recorded for /arbitrate.
+     here.  ARBITRATED AND FIXED, same day.
+
+     THE SCANNER.  0x04B0E4, identified by the two `cmp ..., 0x24` it
+     turns on.  Found by differential rather than by guessing: intersect
+     the calls of '|@' and '|T' (which certainly interpolate) with those
+     of '|1R', subtract everything five numeric-only commands call, and
+     exactly one routine survives.
+
+     WHICH ARGUMENTS.  Twelve dispatch entries reach it -- '|"' '|1R'
+     '|1b' '|1e' '|1p' '|1w' '|3G' '|@' '|T' '|r' '|y' directly, and
+     '|1U' one call deep.  RIPlib ran that path for TEXT only, so
+     filenames and the GotoURL argument passed through verbatim.
+
+     '&' IS NOT A SIGIL, which the shape invites one to assume.  The
+     driver's scanner compares against '$' alone and RIPlib has no '&'
+     handling either, so "$&MAIN_STORY$" is a variable simply NAMED
+     "&MAIN_STORY".  Both implementations already agree; nothing special
+     was needed, and recording that saved inventing a rule for it.
+
+     Fixed for '|1R' and '|1b'.  Expansion runs BEFORE the filename
+     safety check, never after, so a name assembled from a variable is
+     still subject to it.  A name without '$' expands to itself, so
+     covering '|1b' -- 36 corpus uses, none currently parameterised --
+     costs nothing and prevents the next scene that does parameterise it
+     from silently failing.
+
+     IMPACT, precisely.  13 of the 25 '|1R' payloads contain '$', but 11
+     of those are the <<IF $COLORS$...>> conditionals D-26 already
+     handles.  The two in NEWSPAPR.RIP still resolve to the literal
+     text, because the variable is UNDEFINED in the scene -- the host
+     supplies it -- and an unrecognised token is emitted as a literal by
+     design.  The mechanism is proven by test rather than by that scene:
+     define a variable, reference it in a '|1R' filename, and the
+     expanded name is what reaches the request queue.
+
+     AND THE INSTRUMENTS BROKE, which is the part worth keeping.  Both
+     audit scripts hardcoded the switch-block line ranges.  Adding the
+     expansion helper shifted every case label below it, '|3e' fell
+     outside its own window, and the claim validator reported it
+     UNVERIFIED rather than passing it -- exactly the behaviour it was
+     built for, catching a fault in itself.  The ranges are now derived
+     from structural markers (`if (s->is_level3)` and its siblings) that
+     move with the code.  Verified the derived ranges still refute an
+     injected '|3e' regression.
 
 D-27 A COMMENT THAT WAS WRONG TWICE OVER, AND THE CHECK THAT SHOULD
      HAVE CAUGHT IT.  Recorded 2026-08-13.
