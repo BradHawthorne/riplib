@@ -293,6 +293,107 @@ def main():
         check("|3e no longer falls back to mega4",
               not re.search(r"mega4\(p\)", body), "checked for mega4(p)")
 
+    # ---- handler-derived bounds (D-14, D-21) -----------------------------
+    # Each is "the handler guards this field at this value and says so".
+    # Re-derived by finding the diagnostic and the compare that guards it.
+    BOUNDS = [
+        ("|1G", "Invalid mode parameter", 6),
+        ("|1g", "Illegal mode parameter", 5),
+        ("|;", "Invalid marker number", 36),
+        ("|;", "Invalid marker rotation", 360),
+        ("|Y", "Illegal font number", 0xA),
+        ("|a", "Invalid Color Parameter", 0x3F),
+    ]
+    try:
+        from capstone import Cs, CS_ARCH_X86, CS_MODE_32
+        have_cs = True
+    except ImportError:
+        have_cs = False
+    for cmd, diag, want in BOUNDS:
+        name = "%s guards %r at %d" % (cmd, diag, want)
+        if not have_cs or cmd not in by_cmd:
+            check(name, None, "no capstone or no entry")
+            continue
+        rva = by_cmd[cmd][2]
+        bounds = sorted({r for (_, r, _, _, _) in table})
+        nxt = next((x for x in bounds if x > rva), None)
+        extent = min(nxt - rva, 4096) if nxt else 1200
+        md = Cs(CS_ARCH_X86, CS_MODE_32)
+        insns = list(md.disasm(d[rva2off(rva):rva2off(rva) + extent], rva + IB))
+        hit = None
+        for i, ins in enumerate(insns):
+            if ins.mnemonic != "push" or not ins.op_str.startswith("0x"):
+                continue
+            try:
+                s = cstr(d, rva2off, int(ins.op_str, 16))
+            except ValueError:
+                continue
+            if not s or diag not in s:
+                continue
+            for k in range(i - 1, max(-1, i - 12), -1):
+                m = insns[k]
+                if m.mnemonic == "cmp" and "," in m.op_str:
+                    rhs = m.op_str.rsplit(",", 1)[1].strip()
+                    if rhs.startswith("0x") or rhs.isdigit():
+                        hit = int(rhs, 0)
+                        break
+            break
+        check(name, hit == want,
+              "guard found at %s" % ("0x%x (%d)" % (hit, hit) if hit is not None
+                                     else "none"))
+
+    # ---- protection is host-side only (D-22) ------------------------------
+    if have_cs:
+        writers = 0
+        readers = 0
+        for (L, rva, argc, w, radix) in table:
+            if L is None:
+                continue
+            off = rva2off(rva)
+            if off is None:
+                continue
+            bounds = sorted({r for (_, r, _, _, _) in table})
+            nxt = next((x for x in bounds if x > rva), None)
+            extent = min(nxt - rva, 4096) if nxt else 1200
+            md = Cs(CS_ARCH_X86, CS_MODE_32)
+            for ins in md.disasm(d[off:off + extent], rva + IB):
+                if "0x104" not in ins.op_str:
+                    continue
+                if ins.mnemonic == "mov" and \
+                        ins.op_str.split(",")[0].strip().endswith("]"):
+                    writers += 1
+                elif ins.mnemonic in ("cmp", "test"):
+                    readers += 1
+        check("protection word has readers but no dispatched writer",
+              writers == 0 and readers > 0,
+              "%d writer(s), %d reader(s)" % (writers, readers))
+    else:
+        check("protection word has readers but no dispatched writer", None,
+              "capstone missing")
+
+    # ---- structural claims about RIPlib's own parser ----------------------
+    STRUCT = [
+        ("the << >> scanner runs for every byte, not only at IDLE",
+         src, r"static void rip_dispatch_byte\(rip_state_t \*s, void \*ctx"),
+        ("an unrecognised << >> run is emitted verbatim",
+         src, r"preproc_emit_verbatim\(s, ctx\);"),
+        ("|1U registers a region regardless of host_len",
+         src, r"if \(s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS\) \{"),
+        ("|1U guards the host-text memcpy against NULL",
+         src, r"if \(host_len > 0\)\s*\n\s*memcpy\(r->text, host_text"),
+        ("|2P reads its flags as a full mega4",
+         src2, r"mega4l\(raw \+ 9\)"),
+        ("|2P no longer sets FULLSCREEN/PROTECTED from wire bits 2-3",
+         src2, None),
+    ]
+    for name, text, pat in STRUCT:
+        if pat is None:
+            # negative: those assignments must be GONE from the |2P handler
+            bad_pat = re.compile(r"port_flags & 0x0[48]\)")
+            check(name, not bad_pat.search(text), "checked for port_flags & 0x04/0x08")
+        else:
+            check(name, bool(re.search(pat, text)), "pattern %r" % pat)
+
     # ---- report ----------------------------------------------------------
     ok = sum(1 for _, r, _ in results if r is True)
     bad = [x for x in results if x[1] is False]

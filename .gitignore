@@ -15,3 +15,10 @@ consumer-handoff/
 *.pdb
 *.su
 *.obj
+
+# scripts/dll-dispatch-table.py defaults its -o to a file in the working
+# directory, so running it from the repo root -- which is how every example
+# in the docs invokes it -- drops this here.  It is a dump of the driver's
+# dispatch record, regenerated on demand from an image that is deliberately
+# not vendored, so there is nothing to gain by tracking it.
+dispatch-table.json
