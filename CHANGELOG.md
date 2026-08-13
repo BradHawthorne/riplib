@@ -124,14 +124,27 @@ Across all 35 scenes, v2.0.2 vs now: **zero** differences in foreground pixels
 or colour counts, and the same 61 asset requests. Everything landed in
 non-rendering paths, exactly where the pixel metrics could not see it.
 
-One question left open and recorded rather than guessed: BUTTONS.RIP sends a
-`|1R` whose filename is a `<<IF $COLORS$…>>` conditional. RIPlib's
-preprocessor is a stream-level state machine and does not evaluate a
-conditional inside a command payload, so that request still goes out as
-literal text. The offset fix is orthogonal and correct; this is a different
-defect, and fixing it needs the driver to settle which commands expand and
-when — `|1M`'s host-command text also carries `<<IF>>` and is meant to be
-evaluated by the *host* on click, not at parse time. See D-26.
+One further defect found, diagnosed in full, and deliberately **not** fixed
+yet: BUTTONS.RIP and CURVES.RIP send a `|1R` whose filename is a
+`<<IF $COLORS$…>>` conditional, and RIPlib requests it literally.
+
+The scope question — which payloads expand, and when — is answered by a case
+distinction the corpus makes cleanly. **Uppercase is a directive; lowercase is
+literal text.** All 14 `<<IF>>` uses sit in `|1R` payloads selecting a file by
+colour depth; all 19 `<<if>>` uses sit in `|1M` host-command text the *host*
+evaluates on click. No uppercase directive appears in host text and no
+lowercase one in a filename. The driver's own diagnostics are uppercase, and
+RIPlib already matches case-sensitively — so its recognition is right.
+
+Two things stop it working: the preprocessor runs only in `RIP_ST_IDLE`, so it
+never sees bytes inside a command; and an unrecognised directive is
+*swallowed* rather than emitted, so naively extending it would eat `|1M`'s
+lowercase host commands — a regression in the same two scenes.
+
+Not applied because part two moves the preprocessor out of one FSM state into
+the byte path shared by every consumer — a redesign of that path, not a patch.
+The diagnosis and fix design are recorded so it can be done deliberately. See
+D-26.
 
 ### Fixed (build)
 

@@ -1135,12 +1135,65 @@ D-26 THE D-25 FIXES, CONFIRMED AGAINST SHIPPED CONTENT -- AND ONE
      above has no conditional and is now exact -- but this scene's font
      request is still wrong, for a different reason.
 
-     Not fixed here because the scope of the preprocessor inside command
-     payloads is not established: '|1M' host-command text also carries
-     <<IF>> in the corpus, and that text is meant to be evaluated by the
-     HOST when the region is clicked, not at parse time.  Applying
-     expansion to every payload would break it.  Which commands expand
-     and when needs the driver, not a guess.
+     DIAGNOSED 2026-08-13.  The scope question above is answered, and
+     the answer is a case distinction that the corpus makes cleanly.
+
+     UPPERCASE IS A DIRECTIVE; lowercase IS LITERAL TEXT.  Across the
+     shipped scenes:
+
+          <<IF>> <<ELSE>> <<ENDIF>> <<ELSEIF>>   14/13/14/1 uses,
+              all inside '|1R' payloads -- BUTTONS.RIP, CURVES.RIP,
+              SPECLEFX.RIP -- selecting a FILE by colour depth
+
+          <<if>> <<else>> <<endif>>              19 uses each,
+              all inside '|1M' host-command text, which the HOST
+              evaluates when the region is clicked
+
+     The split is exact: no uppercase directive appears in host text and
+     no lowercase one in a filename.  The driver's own diagnostics are
+     uppercase too ("Misplaced ENDIF pre-processor directive",
+     "%d too many ('s in ELSEIF pre-processor"), and its preprocessor is
+     a subsystem of its own at RVA ~0x04CF, far past the last dispatch
+     handler.  So the tension recorded above was never real: expanding
+     uppercase directives cannot touch the lowercase host text.
+
+     RIPlib ALREADY MATCHES CASE-SENSITIVELY -- strncmp(dir, "IF ", 3)
+     -- so its recognition is right.  Two things stop it working:
+
+     (a) THE PREPROCESSOR RUNS ONLY IN RIP_ST_IDLE.  Once the FSM enters
+         a command, bytes go to command accumulation and the '<<' scanner
+         never sees them.  Confirmed directly: feeding
+         "!|1R00000000<<IF 1=1>>yes.txt<<ELSE>>no.txt<<ENDIF>>" requests
+         the literal "<<IF 1=1>>YE", while the same conditional wrapped
+         around whole commands resolves correctly.
+
+     (b) AN UNRECOGNISED DIRECTIVE IS SWALLOWED, not emitted.
+         preproc_finalize_directive() matches IF / ELSE / ENDIF and falls
+         through to `s->preproc_len = 0` for anything else.  So simply
+         extending (a) into command payloads would EAT '|1M's lowercase
+         <<if $RETURN$...>> host commands -- a regression in the same two
+         scenes the change is meant to fix.
+
+     THE FIX IS THEREFORE TWO PARTS, and (b) must come first:
+
+         1. emit an unrecognised << ... >> run verbatim instead of
+            discarding it -- a correctness improvement on its own, since
+            today any <<foo>> in display text silently vanishes;
+         2. run the scanner during command accumulation, routing its
+            output to whichever consumer is active (cmd_buf inside a
+            command, VT100 or the text window at IDLE).
+
+     NOT APPLIED HERE.  Part 2 moves the preprocessor out of one FSM
+     state and into the byte path shared by every consumer, which is a
+     redesign of that path rather than a patch, and it changes emission
+     for every byte the parser sees.  The diagnosis is complete and the
+     evidence is recorded so the change can be made deliberately, with
+     the corpus comparison (rendering, requests, regions) as its check.
+
+     IMPACT WHILE UNFIXED: BUTTONS.RIP and CURVES.RIP request a font
+     named "<<IF $COLORS" instead of BLUEBACK.FN or BLUEFADE.FN.  Two
+     scenes, one asset each; every other request in the corpus is now
+     correct (D-26 above).
 
 D-25 THREE MORE STRING TAILS READ EARLY, FOUND BY AN ASSERTION ABOUT
      SILENCE.  Recorded 2026-08-13.
