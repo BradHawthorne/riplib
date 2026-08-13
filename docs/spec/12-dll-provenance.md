@@ -1148,13 +1148,32 @@ D-27 A COMMENT THAT WAS WRONG TWICE OVER, AND THE CHECK THAT SHOULD
      claim as a predicate and re-derives its evidence from the image, the
      corpus and the source, reporting the ones that no longer hold.  It
      is adversarial by construction: it tries to REFUTE, and a claim it
-     cannot re-derive is reported UNVERIFIED rather than passed.  29
-     claims at the time of writing -- handler self-naming, the
-     fixed-radix sets, every string-tail prefix width, five corpus
-     population claims, and five statements about what the source now
-     does, including one negative ("'|3e' no longer falls back to
-     mega4").  Verified to fail: re-injecting the '|3e' compromise
-     refutes exactly one claim and the tool exits non-zero.
+     cannot re-derive is reported UNVERIFIED rather than passed.  Forty-
+     two claims at the time of writing:
+
+          handler self-naming        |1G |1g |1M |1U |; |@ |2P
+          field bounds a handler     mode <= 6, mode <= 5, marker < 36,
+            guards with a diagnostic rotation < 360, font <= 10,
+                                     colour <= 63
+          the fixed-radix sets       base 64 = |D |d |h |y
+                                     base 36 = |J |N
+          string-tail prefix widths  nine commands, each against the
+                                     sum of its own record
+          corpus populations         |k |1b |1R |1e |2s
+          current source behaviour   eleven statements, including three
+                                     NEGATIVES -- |3e no longer falls
+                                     back to mega4, |2P no longer sets
+                                     flags from wire bits 2-3, and the
+                                     protection word has no dispatched
+                                     writer
+
+     Negatives matter more than the rest.  A positive claim decays into
+     a false negative when the code moves; a negative claim is what
+     catches a defect being REINTRODUCED, which is the failure this
+     project actually had.  Verified to fail on all three axes:
+     re-injecting the '|3e' compromise, the '|2P' wire-bit mapping, or
+     the unguarded memcpy each refutes exactly the claims it should and
+     the tool exits non-zero.
 
 D-26 THE D-25 FIXES, CONFIRMED AGAINST SHIPPED CONTENT -- AND ONE
      QUESTION THEY EXPOSED.  Recorded 2026-08-13.

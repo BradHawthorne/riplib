@@ -124,8 +124,14 @@ adversarial by construction. It states each load-bearing claim as a predicate
 and tries to **refute** it from the image, the corpus and the source: handler
 self-naming, the fixed-radix sets, every string-tail prefix width, the corpus
 population figures, and what the code now does, including negatives. A claim it
-cannot re-derive is reported UNVERIFIED rather than passed. 29 claims, all
-holding; verified to fail by re-injecting the `|3e` compromise. See D-27.
+cannot re-derive is reported UNVERIFIED rather than passed. **42 claims**, all
+holding — handler self-naming, the field bounds a handler guards with its own
+diagnostic, the fixed-radix sets, nine string-tail prefix widths, five corpus
+populations, and eleven statements about current source behaviour including
+three *negatives*. The negatives matter most: a positive claim decays into a
+false negative when code moves, while a negative is what catches a defect being
+**reintroduced**. Verified to fail by re-injecting the `|3e` compromise, the
+`|2P` wire-bit mapping, and the unguarded memcpy. See D-27.
 
 The `|1R`/`|1b` fixes confirmed against shipped content rather than authored
 payloads. Replaying DRAGON.RIP through v2.0.2 and through the current tree and
