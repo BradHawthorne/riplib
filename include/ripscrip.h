@@ -82,6 +82,9 @@
 #define RIP_MF_RADIO       0x20  /* radio-button group: deselect others on click */
 #define RIP_MF_TOGGLE      0x40  /* toggle state on each click */
 #define RIP_MF_HAS_LABEL   0x02  /* field has a visible label */
+#define RIP_MF_INVERT      0x01  /* invert the region while clicked (|1M clk) */
+#define RIP_MF_RESET       0x10  /* clear the mouse-field set after this one
+                                  * fires (|1M clr) */
 
 /* Mouse region entry. */
 typedef struct {

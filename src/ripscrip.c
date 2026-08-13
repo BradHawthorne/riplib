@@ -2487,8 +2487,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->num_mouse_regions = 0;
             break;
         case 'M': /* RIP_MOUSE — define mouse region
-                   * Params: num:2, x0:2, y0:2, x1:2, y1:2, hotkey:2, flags:1, res:4, text
-                   * (12 bytes of fixed params, then text for host command)
+                   * num:2 x0:XY y0:XY x1:XY y1:XY clk:1 clr:1 res:2 res:3 text
+                   * (17 characters of fixed params, then text for host command)
                    *
                    * DLL field record layout (rip_mouse.c +0x20 flags byte):
                    *   flags bit 0 → MF_SEND_CHAR(0x08)
@@ -2499,15 +2499,25 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
                 r->x0 = mega2(p + 2);  r->y0 = scale_y(mega2(p + 4));
                 r->x1 = mega2(p + 6);  r->y1 = scale_y1(mega2(p + 8));
-                r->hotkey = (uint8_t)(mega2(p + 10) & 0xFF); /* DLL: hotkey at +0x2B */
-                /* Translate RIPscrip flags (spec bits 0-2) to DLL flag byte bits */
-                {
-                    int spec_flags = mega_digit(p[12]);
-                    r->flags = RIP_MF_ACTIVE;                            /* always active */
-                    if (spec_flags & 1) r->flags |= RIP_MF_SEND_CHAR;   /* send hotkey char */
-                    if (spec_flags & 2) r->flags |= RIP_MF_RADIO;       /* radio group */
-                    if (spec_flags & 4) r->flags |= RIP_MF_TOGGLE;      /* toggle */
-                }
+                /* CORRECTED.  args[5] and args[6] are two SEPARATE single
+                 * digits -- the 1.54 spec's 'invertable' and 'resetafter',
+                 * which bbs-land names clk and clr.  RIPlib read them as one
+                 * 2-digit hotkey and then took its flag bits from p[12], which
+                 * the record types as reserved.  RIP_MOUSE has no hotkey field.
+                 *
+                 * Three independent sources agree on the 1+1 split: slot 101's
+                 * record (mega2, XY x4, mega1, mega1, mega2, mega3), the
+                 * handler at RVA 0x00CEF8 (which loads args[1..7] separately),
+                 * and the 1.54 specification.  The corpus settles the impact:
+                 * across 36 commands in 22 scenes p[10] is '1' 35 times (and
+                 * '3' once) while p[11] and p[12..16] are uniformly '0' -- so
+                 * the old hotkey was always the constant 36, the old flags were
+                 * always 0, and the clk flag was never captured at all.
+                 * The text offset (17) was and remains correct. */
+                r->hotkey = 0;
+                r->flags  = RIP_MF_ACTIVE;
+                if (mega_digit(p[10])) r->flags |= RIP_MF_INVERT;
+                if (mega_digit(p[11])) r->flags |= RIP_MF_RESET;
                 /* Skip reserved bytes (spec says 4 reserved after flags digit) */
                 int text_start = 17; /* num:2 + x0:2 + y0:2 + x1:2 + y1:2 + hotkey:2 + flags:1 + res:4 */
                 int tlen = len - text_start;
@@ -2551,10 +2561,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         case 'U': /* RIP_BUTTON — create button instance (draw + register mouse region).
                    * v1.54 spec: !|1U = RIP_BUTTON. The DLL internal function
                    * name (ripCmd_MouseRegion) is misleading — the command letter is 'U'.
-                   * x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1 res:1 text
+                   * x0:XY y0:XY x1:XY y1:XY hotkey:2 flags:1 res:1 text
                    * text format (spec §3.4): icon_file<>display_label<>host_command.
-                   * A single segment with no <> serves as BOTH label and host
-                   * command (see the host-fallback at registration below). */
+                   * A single segment with no <> is the label only; it does NOT
+                   * become the host command.  (The comment here previously
+                   * claimed a fallback that has never existed in the code.) */
             if (len >= 12) {
                 int16_t bx0 = mega2(p), by0 = scale_y(mega2(p + 2));
                 int16_t bx1 = mega2(p + 4), by1 = scale_y1(mega2(p + 6));
@@ -2676,12 +2687,37 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 /* Register mouse region for button click.
                  * DLL: ripCmd_MouseRegion always sets MF_ACTIVE(0x04) on the field
                  * record (rip_mouse.c: *pFlagByte |= MF_ACTIVE).
-                 * Buttons use plain string send (not MF_SEND_CHAR). */
-                if (host_len > 0 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
+                 *
+                 * CORRECTED: this was gated on host_len > 0, so a button with
+                 * no host command drew but never became clickable.  Every one
+                 * of the 39 '|1U' commands in the shipped corpus is of exactly
+                 * that shape -- they carry two separators with an empty third
+                 * segment ("<>Clear<>") -- so button hit-testing was dead for
+                 * all shipped content.  The region is registered regardless;
+                 * the dispatch already guards on text_len before sending, so a
+                 * hostless button simply sends nothing while still supporting
+                 * hover, SEND_CHAR and TOGGLE.  See D-15. */
+                if (s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
                     rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
                     r->x0 = bx0; r->y0 = by0; r->x1 = bx1; r->y1 = by1;
-                    r->flags = RIP_MF_ACTIVE; /* always active per DLL ground truth */
-                    r->hotkey = 0;
+                    /* The hotkey and flag fields at p+8 and p[10] were parsed
+                     * and then discarded, which left RIPlib's SEND_CHAR/RADIO/
+                     * TOGGLE dispatch unreachable from any command: '|1M' was
+                     * its only writer and took its bits from a reserved column
+                     * that is uniformly '0' in the corpus.  '|1U' is where the
+                     * spec, the record (slot 107: XY XY XY XY mega2 mega1
+                     * mega1) and bbs-land all agree they live.
+                     *
+                     * The bit mapping is the one RIPlib already carried on
+                     * '|1M'; it is moved here rather than re-derived. */
+                    r->flags  = RIP_MF_ACTIVE; /* always active per DLL ground truth */
+                    r->hotkey = (uint8_t)(mega2(p + 8) & 0xFF);
+                    {
+                        int bflags = mega_digit(p[10]);
+                        if (bflags & 1) r->flags |= RIP_MF_SEND_CHAR;
+                        if (bflags & 2) r->flags |= RIP_MF_RADIO;
+                        if (bflags & 4) r->flags |= RIP_MF_TOGGLE;
+                    }
                     r->icon_path[0] = '\0';
                     r->hover = false;
                     if (host_len > 127) host_len = 127;
@@ -2724,8 +2760,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Text blocks (BEGIN_TEXT / REGION_TEXT / END_TEXT) ──── */
-        case 'T': /* RIP_BEGIN_TEXT — define text region
-                   * x0:2 y0:2 x1:2 y1:2 res:2 */
+        case 'T': /* RIP_BeginText — define text region
+                   * x0:XY y0:XY x1:XY y1:XY res:1 res:1
+                   * Slot 105 splits the trailing reserved field into two
+                   * single digits; the total (10 at default widths) is
+                   * unchanged, and RIPlib reads only the four coordinates,
+                   * so this is a notation correction with no behaviour
+                   * attached. */
             if (len >= 10) {
                 s->text_block.x0 = mega2(p);
                 s->text_block.y0 = scale_y(mega2(p + 2));
@@ -2759,25 +2800,53 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->text_block.active = false;
             break;
 
-        /* ── Region copy ───────────────────────────────────────── */
-        case 'G': /* RIP_COPY_REGION — x0:2 y0:2 x1:2 y1:2 res:2 dest_x:2 dest_y:2
-                   * DLL ground truth (ripscrip_text.asm): 8 args — full source rect
-                   * plus independent destination coordinates (dest_x, dest_y).
-                   * Previous code hardcoded dest_x = rx0 (source X); fixed here. */
-            if (len >= 14) {
+        /* ── Vertical scroll ───────────────────────────────────── */
+        case 'G': /* RIP_Scroll — x0:XY y0:XY x1:XY y1:XY mode:1 excl:1 dest_y:XY
+                   *
+                   * Slot 95 records  FF FF FF FF 01 01 FF  -> 12 characters, and
+                   * the handler (RVA 0x00D7E0) names itself in its own
+                   * diagnostics: "RIP_Scroll" with "Invalid mode parameter" and
+                   * "Nothing to do".  It is NOT RIP_COPY_REGION -- that command
+                   * is '|,' (slot 8, ten coordinates), handled at Level 0.
+                   *
+                   * RIPlib previously required 14 characters and read a
+                   * destination *pair* at offsets 10 and 12, on the strength of
+                   * the old reconstruction's "8 args".  The handler settles it:
+                   *
+                   *     SetRect(&r, args[0], args[1], args[2], args[3])
+                   *     if (args[5] == 0) { r.right++; r.bottom++; }
+                   *     if (args[4] > 6) -> "Invalid mode parameter"
+                   *     if (args[6] == r.top) -> "Nothing to do"
+                   *     OffsetRect(&r, 0, args[6] - args[1])
+                   *
+                   * dx is a hardcoded zero, so the move is vertical only and
+                   * there is no destination X at all; args[6] is a destination
+                   * Y rather than a delta.  args[5] selects whether the rect
+                   * edges are inclusive (0) or exclusive (non-zero).  The
+                   * driver flips its pixel loop on  dest_y >= y0  so that
+                   * overlapping moves do not smear, which draw_copy_rect
+                   * already does for us.
+                   *
+                   * Modes 1..6 additionally run a post-scroll effect routine;
+                   * mode 0 exits straight after the move.  Only the move is
+                   * implemented here -- see D-14. */
+            if (len >= 12) {
                 int16_t rx0 = mega2(p), ry0 = scale_y(mega2(p + 2));
                 int16_t rx1 = mega2(p + 4), ry1 = scale_y1(mega2(p + 6));
-                /* p+8: res (2 chars, skip) */
-                int16_t dest_x = mega2(p + 10);             /* destination X */
-                int16_t dest_y = scale_y(mega2(p + 12));    /* destination Y */
-                int16_t rw = rx1 - rx0 + 1, rh = ry1 - ry0 + 1;
-                if (rw > 0 && rh > 0)
-                    draw_copy_rect(rx0, ry0, dest_x, dest_y, rw, rh);
+                uint8_t smode = (uint8_t)mega_digit(p[8]);
+                uint8_t excl  = (uint8_t)mega_digit(p[9]);
+                int16_t dest_y = scale_y(mega2(p + 10));
+                int16_t bump = (excl == 0) ? 1 : 0;
+                int16_t rw = (int16_t)(rx1 - rx0 + bump);
+                int16_t rh = (int16_t)(ry1 - ry0 + bump);
+                if (smode <= 6 && dest_y != ry0 && rw > 0 && rh > 0)
+                    draw_copy_rect(rx0, ry0, rx0, dest_y, rw, rh);
             }
             break;
 
         /* ── Icon loading ──────────────────────────────────────── */
-        case 'I': /* RIP_LOAD_ICON — x:2 y:2 mode:2 clipboard:1 res:2 filename */
+        case 'I': /* RIP_LOAD_ICON — x:XY y:XY mode:1 res:1 clipboard:1 res:1 res:1
+                                     filename */
             if (len >= 9) {
                 int16_t ix = mega2(p), iy = scale_y(mega2(p + 2));
                 /* Dispatch slot 97 records FF FF 01 01 01 01 01 -- after the
@@ -2827,18 +2896,34 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
          * operation the library deliberately does not have, it is validated
          * the way the driver validates it and recorded, not faked. */
 
-        case 'g': /* COPY_BLIT — sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY
-                   *             mode:1 res:1     (handler RVA 0x00B7A4,
-                   *             "Illegal mode parameter")
-                   * A real blit, and RIPlib has the machinery for it. */
-            if (len >= 12) {
+        case 'g': /* RIP_CopyBlit — sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY
+                   *                mode:1 res:1
+                   *
+                   * Slot 96 records  FF FF FF FF FF FF 01 01  -> 14 characters.
+                   * The handler (RVA 0x00B7A4) names itself
+                   * "riprocmd - RIP_CopyBlit()" and loads args[0..6]; args[7] is
+                   * never read, so the trailing digit is accepted and reserved.
+                   * RIPlib gated on 12 characters and treated the mode as
+                   * optional, which let a truncated command blit with mode 0.
+                   *
+                   * Two further corrections from the handler (D-14):
+                   *   - it orders both source pairs through 0x1003112E -- the
+                   *     same helper '|K' RIP_FILLED_RECTANGLE uses -- rather
+                   *     than discarding an inverted rect, which RIPlib did;
+                   *   - the mode check is  cmp ebx,5 / jbe, so modes 0..5 are
+                   *     legal.  RIPlib's raster ops stop at DRAW_MODE_NOT (4),
+                   *     so 5 is accepted per the driver and drawn as COPY. */
+            if (len >= 14) {
                 int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
                 int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
                 int16_t dx  = mega2(p + 8),  dy  = scale_y(mega2(p + 10));
-                uint8_t bmode = (len >= 13) ? (uint8_t)mega_digit(p[12]) : 0;
-                if (bmode <= DRAW_MODE_NOT && sx1 >= sx0 && sy1 >= sy0) {
+                uint8_t bmode = (uint8_t)mega_digit(p[12]);
+                if (sx1 < sx0) { int16_t t = sx0; sx0 = sx1; sx1 = t; }
+                if (sy1 < sy0) { int16_t t = sy0; sy0 = sy1; sy1 = t; }
+                if (bmode <= 5) {
                     uint8_t saved = s->write_mode;
-                    draw_set_write_mode(bmode);
+                    draw_set_write_mode(bmode > DRAW_MODE_NOT
+                                        ? DRAW_MODE_COPY : bmode);
                     draw_copy_rect(sx0, sy0, dx, dy,
                                    (int16_t)(sx1 - sx0 + 1),
                                    (int16_t)(sy1 - sy0 + 1));
@@ -2978,10 +3063,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
-        case 'w': /* mode:1 <string> — handler RVA 0x00D24E, "Invalid string
+        case 'w': /* mode:1 res:3 — handler RVA 0x00D24E, "Invalid string
                    * parameter", "Unable to create temp buffer".  The
                    * reconstruction reads this letter as RIP_PLAY_AUDIO;
-                   * RIPlib performs no audio, so the request is consumed. */
+                   * RIPlib performs no audio, so the request is consumed.
+                   * Slot record is 1 + 3, not the single digit previously
+                   * noted here; bbs-land documents a single 4 instead. */
             break;
 
         case 'W': /* RIP_WRITE_ICON — cache current clipboard under a filename */
@@ -4638,17 +4725,49 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* ── Extended mouse region (v2.0+) ──────────────────────── */
-    /* DLL command table entry 11: ':' = RIP_MOUSE_REGION_EXT (11 args: XY×11). */
-    case ':': /* RIP_MOUSE_REGION_EXT — x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:2 res×5 */
-        if (len >= 22 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
+    /* DLL command table entry 11: ':' = RIP_MOUSE_REGION_EXT. */
+    case ':': /* RIP_MOUSE_REGION_EXT — five (x,y) pairs + one digit.
+               *
+               * Slot 11 records  XY×10, mega1  -> 21 characters, and the
+               * handler (RVA 0x01DD70) loads args[0..10] and coordinate-maps
+               * exactly five consecutive pairs:
+               *
+               *     0x10031084(ctx, &args[0], &args[1])
+               *     0x10031084(ctx, &args[2], &args[3])
+               *     0x10031084(ctx, &args[4], &args[5])
+               *     0x10031084(ctx, &args[6], &args[7])
+               *     0x10031084(ctx, &args[8], &args[9])
+               *
+               * So this is a five-vertex region, not a rectangle carrying a
+               * hotkey and flags.  RIPlib had two defects here (D-14): it
+               * required 22 characters, so every valid 21-character command was
+               * dropped in full, and it read args[4] and args[5] -- which the
+               * record types as coordinates and the handler maps as a pair --
+               * as a hotkey and a flag byte.
+               *
+               * rip_mouse_region_t has no home for a vertex list, so the region
+               * registers as the bounding box of the five vertices: a
+               * conservative over-approximation for hit-testing, rather than a
+               * rectangle invented from two of the coordinates. */
+        if (len >= 21 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
             rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
+            int16_t minx = mega2(p),               maxx = minx;
+            int16_t miny = scale_y(mega2(p + 2)),  maxy = miny;
+            int i;
+            for (i = 1; i < 5; i++) {
+                int16_t vx = mega2(p + i * 4);
+                int16_t vy = scale_y(mega2(p + i * 4 + 2));
+                if (vx < minx) minx = vx;
+                if (vx > maxx) maxx = vx;
+                if (vy < miny) miny = vy;
+                if (vy > maxy) maxy = vy;
+            }
             memset(r, 0, sizeof(*r));
-            r->x0     = mega2(p);
-            r->y0     = scale_y(mega2(p + 2));
-            r->x1     = mega2(p + 4);
-            r->y1     = scale_y1(mega2(p + 6));
-            r->hotkey = (uint8_t)(mega2(p + 8) & 0xFF);
-            r->flags  = (uint8_t)(mega2(p + 10) & 0xFF) | RIP_MF_ACTIVE;
+            r->x0     = minx;
+            r->y0     = miny;
+            r->x1     = maxx;
+            r->y1     = maxy;
+            r->flags  = (uint8_t)mega_digit(p[20]) | RIP_MF_ACTIVE;
             r->active = true;
             s->num_mouse_regions++;
         }

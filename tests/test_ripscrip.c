@@ -739,15 +739,23 @@ static void test_l1_mouse_region_define(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("1M defines a mouse region with hotkey + host text");
+    TEST("1M defines a mouse region with clk/clr flags + host text");
     init_fixture(&s, &ctx);
-    /* num:01 x0:0A y0:0A x1:1E y1:0U hotkey:1T flags:0 res:0000 text=HELLO
-     * 1T (base36) = 1*36+29 = 65 = 'A' */
-    feed_script(&s, &ctx, "!|1M010A0A1E0U1T00000HELLO|");
+    /* num:01 x0:0A y0:0A x1:1E y1:0U clk:1 clr:0 res:00000 text=HELLO
+     *
+     * clk and clr are two SEPARATE single digits -- slot 101 records
+     * mega2, XY x4, mega1, mega1, mega2, mega3, and the 1.54 spec names them
+     * 'invertable' and 'resetafter'.  RIPlib read them as one 2-digit hotkey
+     * and took its flag bits from the reserved column at p[12].  RIP_MOUSE
+     * carries no hotkey field at all.  This header shape matches the corpus
+     * exactly (e.g. FONTS.RIP: "00VJAAWNBA1000000"). */
+    feed_script(&s, &ctx, "!|1M010A0A1E0U1000000HELLO|");
     if (s.num_mouse_regions == 1 &&
         s.mouse_regions[0].x0 == 10 &&
         s.mouse_regions[0].x1 == 50 &&
-        s.mouse_regions[0].hotkey == 65 &&
+        s.mouse_regions[0].hotkey == 0 &&
+        (s.mouse_regions[0].flags & RIP_MF_INVERT) != 0 &&
+        (s.mouse_regions[0].flags & RIP_MF_RESET) == 0 &&
         s.mouse_regions[0].text_len == 5 &&
         memcmp(s.mouse_regions[0].text, "HELLO", 5) == 0)
         PASS();
@@ -964,24 +972,101 @@ static void test_query_response_round_trip(void) {
         FAIL("query response not properly committed");
 }
 
-static void test_l1_copy_region_blits_pixels(void) {
+static void test_l1_scroll_moves_region_vertically(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("1G copies a screen region to a new destination");
+    TEST("1G scrolls a region vertically (RIP_Scroll, D-14)");
     init_fixture(&s, &ctx);
-    /* Paint a pixel at (5, 5) (card space).  After 1G copies (5,5)-(7,7)
-     * (EGA) to dest (20, 20) (EGA), the same pixel should appear there. */
+    /* Slot 95 records  FF FF FF FF 01 01 FF  -- twelve characters:
+     *     x0 y0 x1 y1 mode:1 excl:1 dest_y
+     * and the handler at RVA 0x00D7E0 (which names itself "RIP_Scroll")
+     * performs  OffsetRect(&r, 0, dest_y - y0).  dx is a hardcoded zero, so
+     * X never moves and there is no destination X field to read.
+     *
+     * Payload: x0=05 y0=05 x1=07 y1=07 mode=0 excl=0 dest_y=0K (20).
+     * excl=0 makes the rect edges inclusive, giving a 3x3 region. */
     draw_set_color(0xC8);
     draw_pixel(5, 5);
-    /* MegaNum 2-digit: 5="05", 7="07", 20="0K". */
-    feed_script(&s, &ctx, "!|1G05050707000K0K|");
-    /* scale_y(20) = 22 in card space.  Pre-paint relative offset (0,0)
-     * inside the source rect lands at (20, 22) in dest. */
+    feed_script(&s, &ctx, "!|1G05050707000K|");
+    /* scale_y(20) = 22.  The painted pixel sits at the rect's top-left, so it
+     * lands at (x0, 22) -- same X. */
+    if (draw_get_pixel(5, 22) != 0xC8)
+        FAIL("1G did not move the region to dest_y");
+    /* RIPlib previously required fourteen characters and read a destination
+     * *pair* at offsets 10 and 12, which would have landed this at (20, 22).
+     * Under that reading this twelve-character command is dropped outright,
+     * so both of these assertions fail against the old code. */
+    else if (draw_get_pixel(20, 22) == 0xC8)
+        FAIL("1G moved in X -- the old dest_x reading is still live");
+    else
+        PASS();
+}
+
+static void test_l1_copy_blit_normalises_source_rect(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1g normalises an inverted source rect (RIP_CopyBlit, D-14)");
+    init_fixture(&s, &ctx);
+    /* Slot 96 records  FF FF FF FF FF FF 01 01  -- fourteen characters.  The
+     * handler at RVA 0x00B7A4 orders both source pairs through 0x1003112E
+     * (the helper '|K' uses) instead of discarding an inverted rect.
+     *
+     * Payload writes the source rect X-inverted: sx0=07 sy0=05 sx1=05 sy1=07,
+     * dest (0K,0K), mode=0, reserved=0. */
+    draw_set_color(0xC8);
+    draw_pixel(5, 5);
+    feed_script(&s, &ctx, "!|1g070505070K0K00|");
+    /* After ordering, the source rect is x 5..7 and the painted pixel sits at
+     * its top-left, landing at dest (20, scale_y(20) = 22).  RIPlib used to
+     * require sx1 >= sx0 and silently drew nothing here. */
     if (draw_get_pixel(20, 22) == 0xC8)
         PASS();
     else
-        FAIL("1G did not copy pixel to destination");
+        FAIL("1g dropped an inverted source rect instead of ordering it");
+}
+
+static void test_l1_copy_blit_requires_full_record(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1g rejects a truncated record");
+    init_fixture(&s, &ctx);
+    /* Thirteen characters -- one short of the record's fourteen.  RIPlib gated
+     * on twelve and treated the mode digit as optional, so a truncated command
+     * still blitted with mode 0. */
+    draw_set_color(0xC8);
+    draw_pixel(5, 5);
+    feed_script(&s, &ctx, "!|1g050507070K0K0|");
+    if (draw_get_pixel(20, 22) != 0xC8)
+        PASS();
+    else
+        FAIL("1g acted on a thirteen-character record");
+}
+
+static void test_l0_mouse_region_ext_five_vertices(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|: registers a 21-char five-vertex region (D-14)");
+    init_fixture(&s, &ctx);
+    /* Slot 11 records  XY x10, mega1  -- twenty-one characters, and the
+     * handler at RVA 0x01DD70 coordinate-maps five consecutive (x,y) pairs.
+     * RIPlib required twenty-two, so every valid command was dropped whole.
+     *
+     * Vertices (10,10) (20,10) (20,20) (10,20) (15,15), then one digit. */
+    feed_script(&s, &ctx, "!|:0A0A0K0A0K0K0A0K0F0F1|");
+    if (s.num_mouse_regions != 1)
+        FAIL("|: did not register a region from a 21-character record");
+    else if (s.mouse_regions[0].x0 != 10 || s.mouse_regions[0].x1 != 20)
+        FAIL("|: bounding box X does not span the five vertices");
+    else if (s.mouse_regions[0].y1 <= s.mouse_regions[0].y0)
+        FAIL("|: bounding box Y does not span the five vertices");
+    else if (!s.mouse_regions[0].active)
+        FAIL("|: region not marked active");
+    else
+        PASS();
 }
 
 static void test_l1_clipboard_get_put_roundtrip(void) {
@@ -1801,15 +1886,19 @@ static void test_mouse_radio_deselects_others(void) {
 
     TEST("MF_RADIO click deselects other regions in same group");
     init_fixture(&s, &ctx);
-    /* 1M format: num:2 x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1 res:4 text.
-     * flags digit 2 → spec bit 1 → RIP_MF_RADIO. */
-    feed_script(&s, &ctx, "!|1M010505 0F0F0020000R1|");  /* radio #1 (5..15) */
-    feed_script(&s, &ctx, "!|1M0214141E1E0020000R2|");   /* radio #2 (40..54) */
-    /* Click region #2.  Note the typo above (' 0F') was intentional fixing. */
-    /* Reset s and re-feed without the space typo. */
-    init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|1M0105050F0F0020000R1|");
-    feed_script(&s, &ctx, "!|1M0214141E1E0020000R2|");
+    /* 1U format: x0:XY y0:XY x1:XY y1:XY hotkey:2 flags:1 res:1 text.
+     * flags digit 2 -> spec bit 1 -> RIP_MF_RADIO.
+     *
+     * These flags live on '|1U' RIP_Button (slot 107: XY XY XY XY mega2
+     * mega1 mega1), not on '|1M', which has no flag field -- see D-15. */
+    feed_script(&s, &ctx, "!|1U05050F0F0020<>R1<>H1|");   /* radio #1 (5..15)  */
+    feed_script(&s, &ctx, "!|1U14141E1E0020<>R2<>H2|");   /* radio #2 (40..50) */
+    if (s.num_mouse_regions != 2) {
+        /* Guards against the vacuous pass this test used to give: with no
+         * regions registered, "both inactive" is trivially true. */
+        FAIL("RADIO fixture did not register two regions");
+        return;
+    }
     rip_mouse_event_state(&s, 50, 50, true);
     /* First match wins — region 0 is the older one, region 1 was clicked
      * (assuming it was found by the loop second).  Both must end up
@@ -1827,8 +1916,9 @@ static void test_mouse_send_char_uses_hotkey(void) {
 
     TEST("MF_SEND_CHAR sends hotkey instead of host text");
     init_fixture(&s, &ctx);
-    /* hotkey = 'X' = 88 = mega2 "2G" (2*36+16=88).  flags '1' → SEND_CHAR. */
-    feed_script(&s, &ctx, "!|1M010A0A1E0U2G10000IGNORED|");
+    /* hotkey = 'X' = 88 = mega2 "2G" (2*36+16=88).  flags '1' -> SEND_CHAR.
+     * Carried by '|1U', not '|1M' -- see D-15. */
+    feed_script(&s, &ctx, "!|1U0A0A1E0U2G10<>Btn<>IGNORED|");
     tx_reset();
     rip_mouse_event_state(&s, 25, 20, true);
     if (tx_len == 2 && tx_capture[0] == 88 && tx_capture[1] == '\r')
@@ -1843,8 +1933,8 @@ static void test_mouse_toggle_inverts_active(void) {
 
     TEST("MF_TOGGLE flips region active state on each click");
     init_fixture(&s, &ctx);
-    /* flags digit '4' → spec bit 2 → RIP_MF_TOGGLE. */
-    feed_script(&s, &ctx, "!|1M010A0A1E0U0040000T|");
+    /* flags digit '4' -> spec bit 2 -> RIP_MF_TOGGLE.  Carried by '|1U'. */
+    feed_script(&s, &ctx, "!|1U0A0A1E0U0040<>T<>|");
     bool first = s.mouse_regions[0].active;
     rip_mouse_event_state(&s, 25, 20, true);
     bool after_first = s.mouse_regions[0].active;
@@ -5385,7 +5475,10 @@ int main(void) {
     test_back_color_command_propagates_to_draw_layer();
     test_port_switch_restores_pattern_back_color();
     test_port_switch_restores_custom_line_pattern();
-    test_l1_copy_region_blits_pixels();
+    test_l1_scroll_moves_region_vertically();
+    test_l1_copy_blit_normalises_source_rect();
+    test_l1_copy_blit_requires_full_record();
+    test_l0_mouse_region_ext_five_vertices();
     test_l0_copy_region_scales_destination_rect();
     test_l1_clipboard_get_put_roundtrip();
     test_write_icon_caches_clipboard_for_load_icon();

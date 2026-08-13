@@ -1,6 +1,6 @@
 # Syntax audit: RIPlib and bbs-land against the driver
 
-**Date:** 2026-08-12 · **RIPlib:** v2.0.1 · **bbs-land:** `remote-imaging-protocol@main`
+**Date:** 2026-08-12, revised 2026-08-13 · **RIPlib:** v2.0.3 · **bbs-land:** `remote-imaging-protocol@main`
 **Arbiter:** `RIPSCRIP.DLL`, 592,896 bytes, MD5 `bade8b1f4e467ac7ad4edb2639738d4c`, from a RIPtel 3.1 install
 
 This audit answers one question: **where do the two projects disagree about the shape of a command, and who is right?** Not the names — those were reconciled in v2.0.0 — but the argument layouts: how many fields, how wide, in what order.
@@ -60,16 +60,25 @@ Each project's field lists were extracted and compared to the driver's, with thr
 
 | | compared | exact | notation only | **different** |
 | --- | --- | --- | --- | --- |
-| **RIPlib** (after fixes) | 47 | 19 | 19 | **3** |
+| **RIPlib** (after v2.0.3) | 51 | 23 | 21 | **7** |
+| **RIPlib** (as audited, v2.0.2) | 51 | 17 | 21 | **13** |
 | **bbs-land** | 80 | 52 | 15 | **13** |
 
 RIPlib's smaller comparable set is a limitation of the method, not a measure of coverage: field lists were read from handler comments, and not every handler spells one out.
+
+Two corrections to how this table was produced, both of which moved the numbers:
+
+**The extractor only read the `case` line.** Several handlers wrap their field list onto a continuation line, and reading the first line alone silently truncated them — which showed up as phantom disagreements. It now reads the whole leading comment block, stopping at the first sentence so the prose that follows is not mined for `name:value` pairs. That raised the comparable set from 47 to 51.
+
+**The earlier printing of this table did not add up.** It reported 47 compared against 19 + 19 + 3 = 41 classified. The counts above are consistent by construction.
+
+The seven remaining differences are **not** seven defects. Four — `|1D`, `|1F`, `|3G`, `|3R` — are commands whose trailing field is variable-length (a filename, a variable name), which the extractor cannot express as a width and reports as `?`. `|1i` is the reserved-tail false alarm described below. `|1T` is a notation correction with no behaviour attached. That leaves one genuine open item, `|3e`, described below.
 
 ---
 
 ## RIPlib's defects, and what the evidence was
 
-Nine genuine differences were found. Six are fixed, one was a false alarm, three are recorded unresolved.
+Nine genuine differences were found in the first pass. Five are fixed below, one was a false alarm, one (`|3e`) remains open, and the three originally recorded as unresolved were settled in v2.0.3 — see [Resolved in v2.0.3](#resolved-in-v203--the-arbiter-i-had-skipped). Re-running the corrected comparison then found three more, in the mouse-region and button path.
 
 ### Fixed in v2.0.1
 
@@ -92,8 +101,10 @@ args[1]  ->  > 0xFF               "Start is out of range"
 
 ### Fixed in this audit
 
-**`|3e` RIP_BAUD_EMULATION — read a `mega4` where the record says `mega2`.**
-Slot 123 records one `mega2`. RIPlib preferred a `mega4` whenever four characters were available, reading two fields as one. *bbs-land documents `rate:4` as well* — that reading comes from the 2.0 draft, while the 3.0 driver's record says 2. **Both projects were wrong against the binary.**
+**`|3e` RIP_BAUD_EMULATION — reads a `mega4` where the record says `mega2`.**
+Slot 123 records one `mega2`. RIPlib prefers a `mega4` whenever four characters are available, reading two fields as one. *bbs-land documents `rate:4` as well* — that reading comes from the 2.0 draft, while the 3.0 driver's record says 2. **Both projects disagree with the binary.**
+
+*Correction (2026-08-13):* this section previously listed `|3e` as fixed. It was not. The code accepts **both** widths — `mega4` when four characters are present, `mega2` otherwise — which its own comment describes as deliberate, and which is a compromise between the two documented readings rather than a match to the driver. It is left as it stands, because narrowing to `mega2` would break 2.0-era content that emits four digits, but it is an open disagreement and is counted as one in the table above, not a fix.
 
 **`|1I` RIP_LOAD_ICON — read a 2-digit mode over two 1-digit fields.**
 Slot 97 records `FF FF 01 01 01 01 01`: two coordinates then **five single-digit fields**. RIPlib read `mega2(p+4)`, spanning the driver's `args[2]` and `args[3]`, which agrees only while `args[3]` is 0. The filename offset (9) was already correct, so only the mode decode changed.
@@ -102,17 +113,58 @@ Slot 97 records `FF FF 01 01 01 01 01`: two coordinates then **five single-digit
 
 **`|1i` RIP_ImageStyle.** The record says `n n n n 4 12` — 24 characters — and RIPlib reads 12. Every corpus payload is **exactly 24 characters**, and the 12-character tail is reserved. RIPlib reads the meaningful prefix and ignores the remainder. Correct as written.
 
-### Recorded, not guessed (D-14)
+### Resolved in v2.0.3 — the arbiter I had skipped
 
-Three disagreements are left in place because the correct reading cannot be established:
+Three disagreements were originally left in place on the grounds that the record says only what is *accepted*, and that none of the three has a corpus use to validate a new reading against.
 
-**`|1G` RIP_COPY_REGION.** Slot 95 records `FF FF FF FF 01 01 FF` — four coordinates, two single digits, then **one** further coordinate; twelve characters. RIPlib requires fourteen and reads a destination *pair* at offsets 10 and 12, citing the earlier reconstruction's "8 args". Only one trailing coordinate exists in the record, so a destination pair cannot be mapped onto it without inventing a field.
+That reasoning skipped the evidence which had already settled `|D` two sections above: **the handler**. The record and the handler answer different questions, and the handler answers the one being asked. Disassembling all three settled all three — and all three were wrong.
 
-**`|:` RIP_MOUSE_REGION_EXT.** Slot 11 records argc 11 — ten coordinates and one digit, 21 characters. RIPlib requires 22 and reads six fields.
+**`|1G` is `RIP_Scroll`, not `RIP_COPY_REGION`.** The handler at `0x00D7E0` names itself in its own diagnostics — `"RIP_Scroll"`, `"Invalid mode parameter"`, `"Nothing to do"` — and the export census had *already* listed `RIP_Scroll` as present and distinct from `RIP_CopyBlit`; it was never connected to a slot. `RIP_COPY_REGION` is `|,` (slot 8, ten coordinates), so RIPlib had one name on two commands. The move is:
 
-**`|1g` COPY_BLIT.** Slot 96 records argc 8 — six coordinates then two single digits. RIPlib reads seven fields and stops after the first trailing digit.
+```
+OffsetRect(&rect, 0, args[6] - args[1])
+```
 
-All three come from the original reconstruction rather than the dispatch record, all three disagree with it, and **none is exercised by any shipped scene** — which is precisely why they survived. A command no scene sends is a command no test can check. Replacing a coherent implementation with an uninterpretable one would be a downgrade, so they stay, recorded.
+`dx` is a hardcoded **zero**. The region moves vertically only, there is no destination X, and `args[6]` is a destination *Y* rather than a delta — which is exactly why the record carries one trailing coordinate and not two. `args[4]` is a mode `0..6` (`cmp edi,6 / jbe`), `args[5]` selects inclusive or exclusive edges. RIPlib read fourteen characters and invented a destination pair.
+
+**`|:` is five vertices, not a rect plus hotkey and flags.** The handler at `0x01DD70` loads all eleven arguments and coordinate-maps exactly five consecutive `(x,y)` pairs. RIPlib required 22 characters against the record's 21, **so every valid command was dropped in full** — the one defect here with unconditional effect — and read `args[4]`/`args[5]`, a coordinate pair, as a hotkey and a flag byte. The region now registers as the bounding box of the five vertices.
+
+**`|1g` — length and ordering.** The handler at `0x00B7A4` loads `args[0..6]` and never reads `args[7]`, so RIPlib's seven-field reading was right and the trailing digit is reserved. Two things were not: RIPlib gated on 12 characters and treated the mode as optional, so a truncated command still blitted; and it required `sx1 >= sx0`, silently drawing nothing for an inverted rect, where the handler *orders* both source pairs through `0x1003112E` — the same helper `|K` uses.
+
+So the count is not six of nine resolved but **nine of nine**, and the three that looked unresolvable were the three nobody had pointed the right instrument at.
+
+The lesson is narrower than the one recorded on 2026-08-12. "No corpus use" is a reason that *tests* cannot settle a command. It is not a reason that *evidence* cannot. A command no scene sends is a command no test can check — and the handler is still right there.
+
+---
+
+## What re-running the comparison then found (v2.0.3)
+
+Fixing the extractor and re-running it surfaced three more defects, in the mouse-region and button path. The first is the largest the audit found anywhere, measured by shipped uses.
+
+**`|1M` RIP_Mouse read two 1-digit flags as one 2-digit hotkey.** Slot 101 records `mega2, XY×4, mega1, mega1, mega2, mega3`; the handler at `0x00CEF8` loads those args separately; the 1.54 specification names `args[5]`/`args[6]` `invertable` and `resetafter`; bbs-land names them `clk` and `clr`. Three independent sources, one layout. RIPlib glued the two into a hotkey and then took its `SEND_CHAR`/`RADIO`/`TOGGLE` bits from `p[12]` — which the record types as **reserved**.
+
+The corpus quantifies it. Across 36 `|1M` commands in 22 scenes:
+
+| column | field | values |
+| --- | --- | --- |
+| 10 | `clk` | `'1'` ×35, `'3'` ×1 |
+| 11 | `clr` | `'0'` ×36 |
+| 12 | reserved — *RIPlib's flags* | `'0'` ×36 |
+| 13–16 | reserved | `'0'` ×36 |
+
+So the hotkey was always the constant **36**, the flags were always **0**, and `clk` — set on 35 of 36 regions — was never captured. `RIP_MOUSE` has no hotkey field. Host command text was never affected: the offset 17 was right all along.
+
+**`|1U` RIP_Button parsed its hotkey and flags and threw them away.** Slot 107 records exactly what RIPlib's own comment said, yet registration hardcoded `hotkey = 0` and `flags = MF_ACTIVE`. Together with the `|1M` defect this left the `SEND_CHAR`/`RADIO`/`TOGGLE` dispatch **unreachable from any command** — code that was only ever read, never written.
+
+**`|1U` buttons never became clickable.** Registration was gated on a non-empty host command. All 39 `|1U` commands in the shipped corpus carry two separators with an *empty* third segment (`<>Clear<>`), so not one registered a region. Button hit-testing was dead for all shipped content.
+
+The handler's comment claimed a lone segment serves as both label and host command, "see the host-fallback at registration below". No such fallback has ever existed. The comment was corrected rather than the behaviour, and the gate removed.
+
+### How these survived
+
+The `|1M` misreading was invisible to every corpus render test, because mouse regions are not drawn — and invisible to the unit tests, because those tests were written from the implementation. That is the same failure the `|D` fix called out one release earlier, and it recurred in the same codebase within a week.
+
+Worse, the `MF_RADIO` test was passing **vacuously**: its fixture registered zero regions, and "both regions inactive" is trivially true of regions that do not exist. A test that asserts a negative must first assert its own fixture. It now does.
 
 ---
 
@@ -159,9 +211,15 @@ Their `x:XY y:XY border:CM` is the correct **wire** layout and RIPlib implements
 
 **A test written from the implementation proves nothing.** The v2.0.0 `|D` test passed against swapped fields because its payload was authored to match the code rather than derived from the evidence. Every fix in this audit carries a regression test that fails against the old reading.
 
-**Unexercised commands are where defects survive.** Eight of RIPlib's nine defects had zero corpus uses. The corpus is an excellent regression net for what it covers and silent about everything else.
+**Unexercised commands are where defects survive — but not only there.** Eight of the first nine defects had zero corpus uses, which made the corpus look like the limiting factor. The second pass broke that pattern: `|1M` had 37 uses across 22 scenes, and `|1U` 39. Heavy use protects a command only along the axis the tests actually observe. Mouse regions are never *drawn*, so no render test could see them, and the unit tests that did look were written from the implementation.
 
-**The record and the handler answer different questions.** The record says what is accepted; the handler says what happens. `|D`'s field order needed the handler; `|F`'s stub needed the handler; `|k`'s width needed only the record.
+**The record and the handler answer different questions.** The record says what is accepted; the handler says what happens. `|D`'s field order needed the handler; `|F`'s stub needed the handler; `|1G`'s identity needed the handler; `|k`'s width needed only the record.
+
+**"No corpus use" is not "no evidence".** Three commands sat recorded-but-unresolved for a release on the reasoning that nothing could validate a new reading. That confused *tests* with *evidence*. The handler was available the whole time and settled all three in an afternoon. When an item is parked as unresolvable, the thing to write down is which instrument was tried — not just that the answer was not found.
+
+**A test that asserts a negative must first assert its own fixture.** The `MF_RADIO` test checked that two regions ended up inactive, against a fixture that registered zero regions. It passed for a year by asserting a property of the empty set.
+
+**Measure the measuring instrument.** The comparison's own extractor read only the first line of each handler comment, truncating any field list that wrapped — and its published summary row did not add up (47 compared against 41 classified). Both were fixed before the second pass; both had been quietly shaping the conclusions.
 
 ---
 

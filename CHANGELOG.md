@@ -5,6 +5,59 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.3] — 2026-08-13
+
+Patch release. Resolves the three argument layouts 2.0.2 recorded as
+unresolved, by disassembling their handlers rather than reasoning from the
+dispatch record alone — and, in doing so, finds three further defects in the
+mouse-region and button path. All nine of the audit's genuine disagreements
+are now settled; see [design/syntax-audit.md](design/syntax-audit.md) and
+D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
+
+### Fixed
+
+- **`|1G` is `RIP_Scroll`, not `RIP_COPY_REGION`.** The handler names itself
+  in its own diagnostics, and `RIP_COPY_REGION` is `|,` — the name had been
+  on two commands at once. The move is `OffsetRect(&r, 0, dest_y - y0)` with
+  `dx` a hardcoded zero: vertical only, with no destination X field. RIPlib
+  read 14 characters against the record's 12 and invented a destination pair.
+  Now `x0 y0 x1 y1 mode:1 excl:1 dest_y`.
+- **`|:` `RIP_MOUSE_REGION_EXT` is five vertices**, not a rectangle with a
+  hotkey and flags. RIPlib required 22 characters against the record's 21, so
+  **every valid command was dropped in full**. Now registers the bounding box
+  of the five vertices.
+- **`|1g` `RIP_CopyBlit`** gated on 12 characters instead of 14 and treated
+  the mode digit as optional, so a truncated command still blitted; and it
+  discarded inverted source rects that the driver orders. Both corrected.
+- **`|1M` `RIP_Mouse` read two 1-digit flags as one 2-digit hotkey.** The
+  record, the handler and the 1.54 specification agree the fields are `clk`
+  and `clr` (`invertable`/`resetafter`); RIPlib glued them into a hotkey and
+  then took its flag bits from a *reserved* column. Across the 36 commands in
+  22 shipped scenes that column is uniformly `'0'`, so the hotkey was always
+  the constant 36 and the flags were always 0. `RIP_MOUSE` has no hotkey
+  field. Host command text was unaffected — the offset was and remains 17.
+- **`|1U` `RIP_Button` parsed its hotkey and flags and discarded both**,
+  leaving the `SEND_CHAR`/`RADIO`/`TOGGLE` dispatch unreachable from any
+  command. Now wired to the fields the record, the spec and bbs-land all
+  agree carry them.
+- **`|1U` buttons never became clickable.** Region registration was gated on
+  a non-empty host command, and all 39 buttons in the shipped corpus carry an
+  empty one (`<>Clear<>`). The region is now registered regardless; dispatch
+  already guards on `text_len` before sending.
+
+### Added
+
+- `RIP_MF_INVERT` and `RIP_MF_RESET` for `|1M`'s `clk` and `clr` flags.
+- Regression tests for each fix above, each verified to fail against the
+  previous reading. The `MF_RADIO` test now asserts its fixture registered
+  two regions — it had been passing vacuously against zero.
+
+### Changed
+
+- Documentation corrected for `|1G` (§3.10), `|:` (§4.14) and the appendix
+  command table; `|1g` added to the appendix, where it had been missing
+  despite being implemented. Stale field lists on `|1I` and `|1w` corrected.
+
 ## [2.0.2] — 2026-08-12
 
 Patch release. Completes the syntax audit begun in 2.0.1 by comparing every

@@ -30,36 +30,72 @@ before drawing a new screen with fresh interactive elements.
 
      Function:     Define Mouse Region
      Command:      |1M
-     Arguments:    x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1 text
-     Format:       !|1M<x0><y0><x1><y1><hotkey><flags><text>|
-     Example:      !|1M0A0F1E2A0D0SELECT 1\r|
+     Arguments:    num:2 x0:XY y0:XY x1:XY y1:XY clk:1 clr:1 res:5 text
+     Format:       !|1M<num><x0><y0><x1><y1><clk><clr><res><text>|
+     Example:      !|1M010A0A1E0U1000000SELECT 1\r|
 
 Defines a rectangular mouse-clickable region on screen.
 
+CORRECTED.  This was documented — and implemented — as carrying a
+2-digit hotkey followed by a 1-digit flags field.  It carries neither.
+Slot 101 records
+
+     mega2, XY, XY, XY, XY, mega1, mega1, mega2, mega3
+
+and the handler (RVA 0x00CEF8) loads those arguments separately.  The
+1.54 specification names the two single digits 'invertable' and
+'resetafter'; bbs-land names them clk and clr.  RIP_MOUSE has no hotkey
+field, and the flags that were being read from column 12 are reserved —
+in the shipped corpus that column is '0' on all 36 commands.  See D-15.
+
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x0,y0       2,2     coords    Top-left corner
-     x1,y1       2,2     coords    Bottom-right corner
-     hotkey      2       0-255     ASCII key equivalent (0=none)
-     flags       1       0-15      Behavior flags
-     text        var     ASCII     Host command string
+     num         2       0-1295    Region number
+     x0,y0       XY      coords    Top-left corner
+     x1,y1       XY      coords    Bottom-right corner
+     clk         1       0-35      Invert the region while clicked
+     clr         1       0-35      Clear the mouse-field set after
+                                   this region fires
+     res         5       0         Reserved (record splits this as
+                                   mega2 + mega3)
+     text        var     ASCII     Host command string, at offset 17
 
-Flags:
+RIPlib maps clk to RIP_MF_INVERT and clr to RIP_MF_RESET.
 
-     Bit   Value   Name            Description
-     ---   -----   -----------     ---------------------------
-     0     0x01    MF_SEND_CHAR    Send hotkey char, not text
-     2     0x04    MF_ACTIVE       Region is active (always set)
-     4     0x10    (reserved)
-     5     0x20    MF_RADIO        Radio-button group behavior
-     6     0x40    MF_TOGGLE       Toggle state on each click
+The MF_SEND_CHAR / MF_RADIO / MF_TOGGLE flags below are carried by
+RIP_BUTTON (§3.4), not by this command.
 
-Click behavior:
+Click behavior (all mouse regions):
      1. If MF_TOGGLE: XOR-invert region visually, toggle active
      2. If MF_SEND_CHAR and hotkey != 0: send hotkey + CR
      3. Default: send text string + CR to BBS
      4. First matching region wins (top-to-bottom scan)
      5. One-shot: region deactivates after click (unless toggle)
+
+Two distinct numbering schemes are involved, and the table here used to
+conflate them.  RIP_BUTTON's flags field is a wire value whose BITS
+select behaviours; rip_mouse_region_t.flags is the DLL's internal field
+record byte, whose VALUES are unrelated to those bit positions.
+
+     RIP_BUTTON flags field (wire, §3.4):
+
+     Bit   Selects
+     ---   ---------------------------------------
+     0     MF_SEND_CHAR — send hotkey char, not text
+     1     MF_RADIO     — radio-button group behaviour
+     2     MF_TOGGLE    — toggle state on each click
+
+     rip_mouse_region_t.flags (internal byte):
+
+     Value   Name            Set by
+     -----   -----------     ---------------------------
+     0x01    MF_INVERT       |1M clk
+     0x02    MF_HAS_LABEL    label present
+     0x04    MF_ACTIVE       always set on registration
+     0x08    MF_SEND_CHAR    |1U flags bit 0
+     0x10    MF_RESET        |1M clr
+     0x20    MF_RADIO        |1U flags bit 1
+     0x40    MF_TOGGLE       |1U flags bit 2
 
 
 ---------------------------------------------------------------------
@@ -110,7 +146,7 @@ Style flags (in flags parameter):
 
      Function:     Create Button (draw + register mouse region)
      Command:      |1U
-     Arguments:    x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:1 res:1 text
+     Arguments:    x0:XY y0:XY x1:XY y1:XY hotkey:2 flags:1 res:1 text
      Format:       !|1U<x0><y0><x1><y1><hotkey><flags><res><text>|
 
 Creates a visual button at the specified position using the
@@ -119,12 +155,23 @@ handling.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x0,y0       2,2     coords    Top-left corner (y0 scale_y)
-     x1,y1       2,2     coords    Bottom-right (y1 scale_y1)
+     x0,y0       XY      coords    Top-left corner (y0 scale_y)
+     x1,y1       XY      coords    Bottom-right (y1 scale_y1)
      hotkey      2       0-255     ASCII key equivalent
      flags       1       0-15      Region flags (see §3.2)
      res         1       0         Reserved
      text        var     ASCII     icon<>label<>host_command
+
+This command is where the hotkey and the MF_SEND_CHAR / MF_RADIO /
+MF_TOGGLE flags live — slot 107 records XY, XY, XY, XY, mega2, mega1,
+mega1, and the 1.54 specification and bbs-land agree.  RIPlib parsed
+both fields and discarded them until v2.0.3, which left that dispatch
+path unreachable from any command; see D-15.
+
+Text segmentation: a lone segment with no '<>' is the LABEL only and
+does not become the host command.  A button whose host command is empty
+still registers a clickable region — every |1U in the shipped corpus is
+of that shape ("<>Clear<>") — and simply sends nothing when clicked.
 
 Button rendering:
      1. Fill surface with button style surface color
@@ -235,25 +282,45 @@ Deactivates the current text block region.
 
 
 ---------------------------------------------------------------------
-3.10  RIP_COPY_REGION — Copy Screen Region
+3.10  RIP_Scroll — Scroll a Region Vertically
 ---------------------------------------------------------------------
 
-     Function:     Copy Screen Region to Another Position
+     Function:     Move a Screen Region Vertically
      Command:      |1G
-     Arguments:    x0:2 y0:2 x1:2 y1:2 res:2 dest_x:2 dest_y:2
-     Format:       !|1G<x0><y0><x1><y1><res><dx><dy>|
+     Arguments:    x0:XY y0:XY x1:XY y1:XY mode:1 excl:1 dest_y:XY
+     Format:       !|1G<x0><y0><x1><y1><mode><excl><dest_y>|
 
-Copies a rectangular region of the screen to a new position.
-Handles overlapping source and destination correctly (uses
-memmove-order row copying).
+CORRECTED from RIP_COPY_REGION, which is a different command — '|,'
+at Level 0 (§4.5), ten coordinates.  This letter carried that name
+too, so the name sat on two commands at once.
+
+The handler (RVA 0x00D7E0) names itself RIP_Scroll in its own
+diagnostics, and the export table already listed RIP_Scroll as
+present and distinct from RIP_CopyBlit.  Its move is
+
+     OffsetRect(&rect, 0, dest_y - y0)
+
+with dx a hardcoded zero: the region moves vertically only, and
+there is no destination X field.  That is why the record carries
+one trailing coordinate rather than two, and why the twelve
+characters here are not the fourteen previously documented.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x0,y0       2,2     coords    Source top-left
-     x1,y1       2,2     coords    Source bottom-right
-     res         2       0         Reserved
-     dest_x      2       0-639     Destination X
-     dest_y      2       0-349     Destination Y (scale_y)
+     x0,y0       XY      coords    Region top-left
+     x1,y1       XY      coords    Region bottom-right
+     mode        1       0-6       0 = plain move; 1-6 additionally
+                                   run a post-scroll effect
+     excl        1       0-1       0 = edges inclusive, non-zero =
+                                   exclusive
+     dest_y      XY      coords    Destination Y (scale_y)
+
+The copy order flips on dest_y >= y0 so overlapping moves do not
+smear.  A dest_y equal to y0 is a no-op ("Nothing to do"), and a
+mode above 6 is rejected ("Invalid mode parameter").
+
+RIPlib implements the move.  The mode 1-6 effect routines are
+accepted but not performed; see D-14.
 
 
 ---------------------------------------------------------------------

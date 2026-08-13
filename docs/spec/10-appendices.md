@@ -78,7 +78,7 @@ LEVEL 0 — Extended Commands (v2.0+):
      _    FILLED_OVAL_CHORD      12    !|_<cx><cy><st><end><rx><ry>|  (was DRAW_TO)
      {    ANIMATION_FRAME        12    !|{<x0><y0><x1><y1><x2><y2>|
      K    FILLED_RECTANGLE       8     !|K<x0><y0><x1><y1>|  (was KILL_MOUSE_EXT)
-     :    MOUSE_REGION_EXT       var   !|:<x0><y0><x1><y1><hk><fl>..|
+     :    MOUSE_REGION_EXT       21    !|:<x0><y0>..<x4><y4><fl>|  (five vertices)
      ;    POLY_MARKER            14    !|;<x><y><num><x2><y2><rot><fl>|  (was BUTTON_EXT)
      b    EXT_TEXT_WINDOW        var   !|b<x0><y0>..<flags>|
      d    ONE_DRAWING_PALETTE    7     !|d<index><bits><rgb>|  (BASE 64; was EXT_FONT_STYLE)
@@ -119,12 +119,13 @@ LEVEL 1 — Interactive (prefix '1'):
      T    BEGIN_TEXT             10    !|1T<x0><y0><x1><y1><r>|
      t    REGION_TEXT            var   !|1t<justify><text>|
      E    END_TEXT               0     !|1E|
-     G    COPY_REGION            14    !|1G<x0><y0>..<dy>|
+     G    SCROLL                 12    !|1G<x0><y0><x1><y1><md><ex><dy>|  (was COPY_REGION)
      I    LOAD_ICON              var   !|1I<x><y>..<filename>|
      W    WRITE_ICON             var   !|1W...|
      A    PLAY_AUDIO             var   !|1A<filename>|
      Z    PLAY_MIDI              var   !|1Z<filename>|
      i    IMAGE_STYLE            6     !|1i<x0><y0><x1><y1><fl>|  (was 1S)
+     g    COPY_BLIT              14    !|1g<sx0><sy0><sx1><sy1><dx><dy><md><r>|
      N    SET_ICON_DIR           var   !|1N<path>|
      F    FILE_QUERY             var   !|1F<mode><res><filename>|
      D    DEFINE_VARIABLE        var   !|1D<name>=<value>|

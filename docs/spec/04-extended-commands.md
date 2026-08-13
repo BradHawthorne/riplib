@@ -283,11 +283,22 @@ RIP_KILL_ENCLOSED_MOUSE_FIELDS, which is a separate and real command.
 
      Function:     Extended Mouse Region
      Command:      |:
-     Arguments:    x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:2 res×5
-     Format:       !|:<x0><y0><x1><y1><hotkey><flags><res...>|
+     Arguments:    x0:XY y0:XY x1:XY y1:XY x2:XY y2:XY
+                   x3:XY y3:XY x4:XY y4:XY flags:1
+     Format:       !|:<x0><y0><x1><y1><x2><y2><x3><y3><x4><y4><flags>|
 
-Extended version of RIP_MOUSE with additional flag bits
-and reserved fields for future use.
+CORRECTED.  This was documented as a rectangle carrying a 2-digit
+hotkey and a 2-digit flags field, twenty-two characters in all.
+
+Slot 11 records XY×10 followed by a single mega1 — twenty-one
+characters — and the handler (RVA 0x01DD70) loads all eleven
+arguments and coordinate-maps exactly five consecutive (x,y)
+pairs.  This is a five-vertex region, not a rectangle: the fields
+previously read as hotkey and flags are the third vertex.
+
+RIPlib registers the bounding box of the five vertices as the
+hit-area.  The polygon itself is not retained, so hit-testing is a
+conservative over-approximation.  See D-14.
 
 
 ---------------------------------------------------------------------

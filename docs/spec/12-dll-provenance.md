@@ -1093,41 +1093,149 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
-D-14 THREE FIELD LISTS THAT DISAGREE WITH THE DISPATCH RECORD, LEFT
-     UNCHANGED.  Recorded 2026-08-12 from a field-by-field comparison of
-     every RIPlib handler against the driver's own argument types.  Of 47
-     comparable commands, 19 match exactly, 19 differ only in notation
-     (a literal 2 where the record says width-negotiated, identical at
-     the default), and 9 genuinely differ.  Six of those nine were
-     resolved -- '|k', '|=', '|D' in v2.0.1, '|3e' and '|1I' here, and
-     '|1i' proved to be a false alarm (its 24-character payloads carry a
-     12-character reserved tail RIPlib correctly ignores).  These three
-     are NOT resolved, and are recorded rather than guessed:
+D-15 THE MOUSE-REGION AND BUTTON PATH: THREE DEFECTS FOUND WHILE
+     RESOLVING D-14.  Recorded 2026-08-13.  Re-running the field-list
+     comparison after the D-14 fixes surfaced these; the first is the
+     largest defect the audit found anywhere, measured by shipped uses.
 
-     '|1G' RIP_COPY_REGION.  Slot 95 records argc 7,
-     FF FF FF FF 01 01 FF -- four coordinates, two single digits, then
-     ONE further coordinate, twelve characters in total.  RIPlib requires
-     fourteen and reads a destination PAIR at offsets 10 and 12, citing
-     the earlier reconstruction's "8 args".  Only one trailing coordinate
-     exists in the record, so a destination pair cannot be mapped onto it
-     without inventing a field.  The command has no corpus uses, so
-     neither reading can be validated against content.  Left as it is:
-     RIPlib's version at least performs a coherent copy, and replacing it
-     with a layout that cannot be interpreted would be worse.
+     '|1M' RIP_Mouse READ TWO 1-DIGIT FLAGS AS ONE 2-DIGIT HOTKEY.
+     Slot 101 records  mega2, XY, XY, XY, XY, mega1, mega1, mega2, 0x03
+     and the handler (RVA 0x00CEF8) loads args[1..7] as separate values.
+     The 1.54 specification names args[5] and args[6] 'invertable' and
+     'resetafter'; bbs-land names them clk and clr.  Three independent
+     sources, one layout.  RIPlib read args[5]+args[6] as a single
+     2-digit hotkey and then took its MF_SEND_CHAR / MF_RADIO /
+     MF_TOGGLE bits from p[12] -- which the record types as reserved.
 
-     '|:' RIP_MOUSE_REGION_EXT.  Slot 11 records argc 11, ten coordinates
-     and one single digit -- twenty-one characters.  RIPlib requires
-     twenty-two and reads six fields.  No corpus uses.
+     The corpus settles the impact.  Across 36 '|1M' commands in 22
+     scenes:
 
-     '|1g' COPY_BLIT.  Slot 96 records argc 8, six coordinates then two
-     single digits.  RIPlib reads seven fields and stops after the first
-     of the two trailing digits.  No corpus uses.
+          char 10 (clk)   '1' x35, '3' x1     <- a real, varying field
+          char 11 (clr)   '0' x36
+          char 12 (res)   '0' x36             <- RIPlib's "flags"
+          chars 13-16     '0' x36
 
-     The common shape is worth naming: all three come from the original
-     reconstruction rather than from the dispatch record, all three
-     disagree with it, and none is exercised by shipped content -- which
-     is exactly why they survived.  A command no scene sends is a command
-     no test can check.
+     So the old hotkey was always the constant 36, the old flags were
+     always 0 -- SEND_CHAR, RADIO and TOGGLE could never fire from
+     content -- and clk, set on 35 of 36 regions, was never captured.
+     RIP_MOUSE has no hotkey field at all.  The text offset (17) was
+     correct throughout, so host command strings were never affected.
+     Fixed in v2.0.3; RIP_MF_INVERT and RIP_MF_RESET added.
+
+     '|1U' RIP_Button PARSED ITS HOTKEY AND FLAGS AND DISCARDED THEM.
+     Slot 107 records XY, XY, XY, XY, mega2, mega1, mega1 -- which is
+     exactly what RIPlib's own comment said -- yet registration set
+     r->hotkey = 0 and r->flags = MF_ACTIVE unconditionally.  Combined
+     with the '|1M' defect above, that left the SEND_CHAR / RADIO /
+     TOGGLE dispatch code unreachable from ANY command: it was only ever
+     read, never written.  Fixed in v2.0.3 by wiring the fields the
+     record, the 1.54 specification and bbs-land all agree carry them.
+
+     '|1U' BUTTONS NEVER BECAME CLICKABLE.  Region registration was
+     gated on host_len > 0, and host_len is non-zero only when the text
+     carries TWO '<>' separators with a non-empty third segment.  All 39
+     '|1U' commands in the shipped corpus carry two separators and an
+     EMPTY third segment ("<>Clear<>", "<>Pattern<>"), so not one of
+     them registered a region.  Button hit-testing was dead for all
+     shipped content.  Fixed in v2.0.3: the region registers regardless,
+     and the dispatch already guards on text_len before sending, so a
+     hostless button sends nothing while still supporting hover,
+     SEND_CHAR and TOGGLE.
+
+     The handler comment had claimed that a lone segment with no '<>'
+     serves as both label and host command, "see the host-fallback at
+     registration below".  No such fallback has ever been in the code.
+     The comment is corrected rather than the behaviour: a single
+     segment is the label, per the specification.
+
+     A note on how these survived.  The '|1M' misreading was invisible
+     to every corpus render test because mouse regions are not drawn,
+     and invisible to the unit tests because those tests were authored
+     from the implementation -- the same failure the '|D' fix in v2.0.1
+     called out.  The MF_RADIO test was passing VACUOUSLY: its fixture
+     registered zero regions, and "both regions inactive" is trivially
+     true of regions that do not exist.  It now asserts its own fixture.
+
+D-14 THREE FIELD LISTS THAT DISAGREED WITH THE DISPATCH RECORD.
+     RESOLVED 2026-08-13 by disassembling the handlers.  Recorded
+     2026-08-12 from a field-by-field comparison of every RIPlib handler
+     against the driver's own argument types.  Of 47 comparable commands,
+     19 match exactly, 19 differ only in notation (a literal 2 where the
+     record says width-negotiated, identical at the default), and 9
+     genuinely differ.  Six of those nine were resolved -- '|k', '|=',
+     '|D' in v2.0.1, '|3e' and '|1I' in v2.0.2, and '|1i' proved to be a
+     false alarm (its 24-character payloads carry a 12-character reserved
+     tail RIPlib correctly ignores).
+
+     The remaining three were left recorded rather than guessed, on the
+     grounds that the record says only what is ACCEPTED and none of the
+     three has a corpus use to validate against.  That reasoning skipped
+     the evidence that had already settled '|D': the record and the
+     handler answer different questions, and the handler answers the one
+     that was actually being asked.  All three are now resolved from
+     their handlers, and all three were wrong in RIPlib:
+
+     '|1G' IS RIP_Scroll, NOT RIP_COPY_REGION.  Slot 95, handler RVA
+     0x00D7E0, which names itself in its own diagnostics: "RIP_Scroll"
+     with "Invalid mode parameter" and "Nothing to do".  The export table
+     already listed RIP_Scroll as present and distinct from RIP_CopyBlit
+     (see the export census above); it was never connected to a slot.
+     RIP_COPY_REGION is '|,' -- slot 8, ten coordinates, Level 0 -- so
+     RIPlib had the name on two commands at once.  The handler:
+
+          SetRect(&r, args[0], args[1], args[2], args[3])
+          if (args[5] == 0) { r.right++; r.bottom++; }
+          if (IsRectEmpty(&r)) return
+          if (args[6] == r.top) -> "Nothing to do"
+          if (args[4] > 6)      -> "Invalid mode parameter"
+          OffsetRect(&r, 0, args[6] - args[1])
+
+     dx is a hardcoded ZERO.  The move is vertical only, there is no
+     destination X field at all, and args[6] is a destination Y rather
+     than a delta -- which is exactly why the record carries one trailing
+     coordinate and not two.  args[5] selects inclusive (0) or exclusive
+     edges; args[4] is a mode 0..6, where 0 exits straight after the move
+     and 1..6 each run a further post-scroll effect routine.  The pixel
+     loop flips order on dest_y >= y0 so overlapping moves do not smear.
+     RIPlib read fourteen characters and invented a destination pair at
+     offsets 10 and 12.  Fixed in v2.0.3; only the move is implemented,
+     modes 1..6 are accepted and their effect routines are not.
+
+     '|:' RIP_MOUSE_REGION_EXT IS FIVE VERTICES.  Slot 11 records argc 11
+     (XY x10 + mega1, twenty-one characters); handler RVA 0x01DD70 loads
+     args[0..10] and coordinate-maps exactly five consecutive (x,y)
+     pairs.  It is a five-vertex region, not a rectangle carrying a
+     hotkey and flags.  RIPlib had two defects: it required twenty-two
+     characters, so every valid command was dropped in full, and it read
+     args[4] and args[5] -- which the record types as coordinates and the
+     handler maps as a pair -- as a hotkey and a flag byte.  Fixed in
+     v2.0.3.  rip_mouse_region_t has no vertex list, so the region
+     registers as the bounding box of the five vertices: a conservative
+     over-approximation for hit-testing rather than a rectangle invented
+     from two of the coordinates.
+
+     '|1g' RIP_CopyBlit -- LENGTH AND ORDERING.  Slot 96 records argc 8
+     (six coordinates then two single digits, fourteen characters);
+     handler RVA 0x00B7A4 names itself "riprocmd - RIP_CopyBlit()".  It
+     loads args[0..6] and never reads args[7], so the trailing digit is
+     accepted and reserved -- RIPlib's seven-field reading was right.
+     Two things were not: RIPlib gated on twelve characters and treated
+     the mode as optional, so a truncated command still blitted with mode
+     0; and it required sx1 >= sx0, silently drawing nothing for an
+     inverted rect, where the handler orders both source pairs through
+     0x1003112E -- the same helper '|K' RIP_FILLED_RECTANGLE uses.  The
+     mode check is cmp ebx,5 / jbe, so 0..5 are legal; RIPlib's raster
+     ops stop at DRAW_MODE_NOT (4), so 5 is accepted and drawn as COPY.
+     Fixed in v2.0.3.
+
+     The common shape is worth naming, and it is not the one recorded on
+     2026-08-12.  All three came from the original reconstruction rather
+     than from the driver, and none is exercised by shipped content --
+     which is why they survived.  But "no corpus use" was taken as a
+     reason to leave them alone, when it is only a reason that TESTS
+     cannot settle them.  The handler could, and did.  A command no scene
+     sends is a command no test can check; it is not a command no
+     evidence can reach.
 
 D-13 STATE RECORDED "FOR THE HOST" THAT NO HOST CAN READ.  Recorded
      2026-08-12 by diffing every field of rip_state_s against its uses:
