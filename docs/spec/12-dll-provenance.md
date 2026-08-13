@@ -1093,6 +1093,61 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-18 AUDITING BY WHAT THE CODE READS, NOT BY WHAT ITS COMMENT CLAIMS.
+     Recorded 2026-08-13.
+
+     The field-list comparison can only see a command whose comment
+     spells a signature out.  Thirty-two implemented commands have none,
+     so they had never been compared to anything -- "zero disagreements"
+     was a statement about 51 commands, not about the parser.
+
+     A second instrument closes that: read the actual accessor calls in
+     each handler body -- mega2(p + 4), mega_digit(p[9]) and friends --
+     rebuild the offset/width layout the code really uses, and check it
+     against the record's field boundaries.  A read is a defect when its
+     offset is not a field boundary, or its width differs from the field
+     starting there.  That is the shape of every offset defect found in
+     D-14 through D-17: '|3G' reading at 0 against a prefix of 8, '|1M'
+     reading two digits across two 1-digit fields, '|2P' taking the high
+     half of a mega4.  It covers 68 commands and 269 individual reads --
+     comments optional.
+
+     It found two, both leniency rather than misplacement:
+
+     '|3D' RIP_DELAY fell back to a mega2 when fewer than four characters
+     were present, though slot 122 records a single mega4.  That is the
+     same tolerance removed from '|3e' in D-16, and no corpus scene sends
+     '|3D'.  Removed.
+
+     '|k' RIP_BACK_COLOR falls back to a single digit below two
+     characters.  This was removed for the same reason and then PUT BACK,
+     because the corpus contradicted the assumption: of 133 '|k' commands
+     in shipped scenes, 132 are two characters and one -- N2_BUSI.RIP,
+     "|k0" -- is one.  Tightening to match the record exactly would drop
+     a command real content sends, for no gain: the defect that mattered
+     was reading ONE digit when TWO were present, fixed in v2.0.1.  It is
+     now a documented tolerance rather than an unexamined fallback, and
+     the audit carries it by name rather than silently passing it.
+
+     TWO CORRECTIONS TO THE INSTRUMENTS, both of which had been shaping
+     results:
+
+     Overloaded letters.  An extra signature is stored as a CONTINUATION
+     row whose letter byte is 0x00, identified only by sharing the named
+     entry's handler pointer.  Filtering rows on a printable letter drops
+     them, so '|h' presented as one signature instead of six and its
+     4- and 6-character layouts read as defects.  Grouping by handler
+     rather than by letter fixes it -- and independently confirms D-2:
+     slots 32-37 all carry handler 0x1001CAE1 with totals 8, 4, 6, 8, 3,
+     3, exactly as recorded there.
+
+     Coverage as a measured quantity.  Of 114 dispatch entries carrying a
+     command letter: 51 have comparable field lists, 32 are implemented
+     without one (now covered by the offset audit), 12 record argc with
+     no type bytes (nothing to compare), 5 are variable-length, and 14
+     are the Level 2 family that D-17 brought in.  Stating the gap is
+     what made D-17 findable at all.
+
 D-17 LEVEL 2 WAS NEVER AUDITED AT ALL.  Recorded 2026-08-13.
 
      D-16 closed the field-list comparison at zero disagreements across

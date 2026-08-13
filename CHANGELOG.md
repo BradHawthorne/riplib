@@ -88,6 +88,29 @@ Three of the tests that had to change were carrying payloads authored against
 the defective readings — `|2P...0200` encodes 2 only if the flags field is
 two digits at offset 9. See D-17.
 
+Finally, a second audit instrument was added that checks **what the code
+reads** rather than what its comment claims — rebuilding each handler's real
+offset/width layout from its accessor calls and testing that against the
+record's field boundaries. It covers 68 commands and 269 individual reads,
+where the comment-based comparison could only reach 51. It found:
+
+- **`|3D` `RIP_DELAY` fell back to a `mega2`** below four characters, though
+  slot 122 records a single `mega4` — the same leniency removed from `|3e`.
+  Removed; no corpus scene sends `|3D`.
+- **`|k`'s single-digit fallback was removed and then restored.** The corpus
+  contradicted the assumption: of 133 `|k` commands in shipped scenes, 132
+  are two characters and one (`N2_BUSI.RIP`, `"|k0"`) is one. Matching the
+  record exactly would drop a command real content sends, for no gain. It is
+  now a documented tolerance the audit names rather than an unexamined
+  fallback.
+
+Both audit instruments were themselves corrected: overloaded letters store
+their extra signatures as **continuation rows with a `0x00` letter byte**,
+identified only by sharing the named entry's handler pointer, so filtering on
+a printable letter made `|h` present as one signature instead of six. Grouping
+by handler fixes it — and independently confirms D-2 (slots 32–37, all on
+`0x1001CAE1`, totals 8/4/6/8/3/3). See D-18.
+
 ### Added
 
 - `RIP_MF_INVERT` and `RIP_MF_RESET` for `|1M`'s `clk` and `clr` flags.

@@ -2445,10 +2445,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * unusable on a cooperative or single-threaded host, which
                    * is most of RIPlib's targets.  The request is recorded and
                    * the host decides; rip_take_delay() hands it over. */
+            /* Slot 122 records a single mega4.  The mega2 fallback that used
+             * to follow accepted a truncated record the driver rejects --
+             * the same leniency removed from '|3e'.  D-18. */
             if (len >= 4)
                 s->delay_ticks = (uint32_t)mega4(p);
-            else if (len >= 2)
-                s->delay_ticks = (uint32_t)mega2(p);
             break;
 
         /* RIPlib extensions.  '&' and '-' were previously bound at Level 0,
@@ -4216,7 +4217,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * pick it up without waiting for the next 'S'/'s'/'D'. */
         if (len >= 1) {
             /* Width-negotiated: the payload is normalised to 2 digits before
-             * dispatch when '|M' has selected anything else (D-11). */
+             * dispatch when '|M' has selected anything else (D-11).
+             *
+             * The single-digit fallback is a DELIBERATE tolerance, not an
+             * oversight, and was briefly removed before the corpus corrected
+             * the assumption: of 133 '|k' commands in shipped scenes, 132 are
+             * two characters and one (N2_BUSI.RIP, "|k0") is one.  Rejecting
+             * the short form to match the record exactly would drop a command
+             * real content sends, for no gain -- the defect that mattered was
+             * reading ONE digit when TWO were present, which is fixed.  D-18. */
             s->back_color = (uint8_t)((len >= 2 ? mega2(p) : mega_digit(p[0])) & 0x0F);
             int8_t card_pat = bgi_fill_to_card(s->fill_pattern);
             draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
