@@ -85,6 +85,7 @@ extern uint16_t palette_read_rgb565(uint8_t index);
  * See D-16. */
 #define RIP_GOTOURL_RESERVED  8   /* |3G: slot 126, one 8-digit field       */
 #define RIP_REGVAR_RESERVED  14   /* |3R: slot 127, mega4 + mega2 + 8 digits */
+#define RIP_READSCENE_RESERVED 8  /* |1R: slot 104, mega2 + 6 digits         */
 
 /* Reset the per-frame command-level prefix flags.  Used by the FSM at
  * every dispatch boundary (CR/LF, '|', error recovery) to start the
@@ -3348,9 +3349,26 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Scene / file operations (no filesystem) ──────────── */
-        case 'R': /* RIP_READ_SCENE — request scene file from host side */
-            if (len > 0 && rip_filename_is_safe(p, len))
-                rip_icon_request_file(&s->icon_state, p, len);
+        case 'R': /* RIP_READ_SCENE — res:2 res:6 filename
+                   *
+                   * CORRECTED.  Slot 104 records mega2 + a 6-digit field, so
+                   * the fixed prefix is EIGHT characters and the filename
+                   * starts there (D-16: the record types only the numeric
+                   * argument array; a trailing string follows it).
+                   *
+                   * The corpus is unambiguous -- every one of the 25 '|1R'
+                   * commands in it begins with exactly eight zeros:
+                   *     DRAGON.RIP   "00000000dragon.txt"
+                   *     BUTTONS.RIP  "00000000<<IF $COLORS$..."
+                   * RIPlib took the filename from offset 0, so it requested
+                   * "00000000dragon.txt" -- every scene-file request it made
+                   * was for a name no host could match.  D-19. */
+            if (len > RIP_READSCENE_RESERVED) {
+                const char *fn = p + RIP_READSCENE_RESERVED;
+                int fnlen = len - RIP_READSCENE_RESERVED;
+                if (rip_filename_is_safe(fn, fnlen))
+                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+            }
             break;
         case 'F': /* RIP_FILE_QUERY — mode:2 res:4 filename
                    * E5: DLL extended response format (rip_images.c):
@@ -3623,6 +3641,21 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* Level 0 commands */
     switch (s->cmd_char) {
+
+    /* ── Comment ─────────────────────────────────────────────── */
+    case '!': /* RIP_COMMENT — slot 0, argc 0; the rest of the line is text
+               * with no rendering effect.
+               *
+               * This is the most frequent command in shipped content: 709
+               * occurrences across the corpus, 544 of them empty, the rest
+               * carrying prose or rule-off lines ("!|! Show our bounding
+               * box", "!|!------").  RIPlib consumed them correctly before
+               * this case existed -- the Level 0 switch has no default, so an
+               * unmatched letter simply falls out and does nothing -- but it
+               * did so by accident rather than by intent, and a coverage
+               * audit could not tell the two apart.  Stated explicitly so the
+               * command is implemented rather than merely survived.  D-19. */
+        break;
 
     /* ── Drawing state ───────────────────────────────────────── */
     case 'c': /* RIP_COLOR */

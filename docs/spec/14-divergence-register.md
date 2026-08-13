@@ -1,0 +1,214 @@
+=====================================================================
+14.  DIVERGENCE REGISTER
+=====================================================================
+
+14.1  THE MEASURE
+---------------------------------------------------------------------
+
+RIPlib's measure of correctness is the shipped TeleGrafix driver:
+
+     RIPSCRIP.DLL, 592,896 bytes
+     MD5 bade8b1f4e467ac7ad4edb2639738d4c
+     from a RIPtel 3.1 install
+
+Not a specification document, not another implementation, and not
+RIPlib's own history.  Where any of those disagree with the driver, the
+driver wins and the disagreement is recorded here with its reasoning.
+
+Two refinements, both learned the hard way and both load-bearing:
+
+  * WHERE THE HANDLER CONTRADICTS THE RECORD, THE HANDLER WINS.  The
+    dispatch record says what the driver ACCEPTS; the handler says what
+    it DOES.  '|D's field order, '|F's stub and '|1G's identity were all
+    settled by the handler against a record that could not decide them.
+
+  * WHERE SHIPPED CONTENT CONTRADICTS BOTH, CONTENT IS EVIDENCE ABOUT
+    THE WORLD, NOT ABOUT THE DRIVER.  It cannot overrule the driver on
+    what a field MEANS, but it can and does overrule a decision to
+    reject input the driver would reject -- see 14.4.
+
+Reproduce every table below with:
+
+     python scripts/dll-dispatch-table.py <path>/RIPSCRIP.DLL
+     python scripts/dll-argtypes.py       <path>/RIPSCRIP.DLL
+     python scripts/dll-disasm.py         <path>/RIPSCRIP.DLL <rva>
+
+
+14.2  DIVERGENCES FROM bbs-land/remote-imaging-protocol
+---------------------------------------------------------------------
+
+Thirteen commands where their reference and the driver disagree.
+RIPlib follows the driver in every one.  Offered as evidence, not as a
+verdict on their record: several are plainly sourced from the 1.54
+specification or the 2.0 draft rather than from the 3.0 driver, and a
+reference documenting an earlier generation of the protocol is not
+wrong so much as scoped differently.
+
+The split that matters is whether the TOTAL width agrees.  A consumer
+that mis-subdivides a command decodes that one command badly; a
+consumer that gets the total wrong desynchronises everything after it.
+
+14.2.1  TOTALS DIFFER -- seven commands, stream desync
+
+     cmd   driver          chars  bbs-land      chars
+     ----  --------------  -----  ------------  -----
+     |2A   mega1, mega2      3    2               2
+     |2B   mega1, mega2      3    2               2
+     |2E   mega1, mega2      3    2               2
+     |2T   mega1, mega2      3    1 1             2
+     |2Y   mega1, mega2      3    1 1             2
+     |2s   mega1, mega2      3    1 2 3           6
+     |3e   mega2             2    4               4
+
+     The Switch* family is one shape -- a slot digit plus a 2-digit
+     field -- recorded identically across slots 111, 112, 114, 118, 119
+     and 121.  The corpus agrees: every '|2s' in shipped content is
+     three characters ("!|2s000", "!|2s100").  A consumer reading six
+     over-consumes three bytes and loses the rest of the frame.
+
+     '|3e' RIP_BAUD_EMULATION is the one place BOTH projects disagreed
+     with the driver, and RIPlib was wrong for longer: it preferred a
+     mega4 whenever four characters were available, which is the 2.0
+     draft's rate:4.  Slot 123 records a single mega2 and the handler
+     (RVA 0x038BE1) loads exactly ONE argument -- mov edi,[eax] -- and
+     stores it.  There is no second field.  Corrected; see D-16.
+
+14.2.2  SAME TOTAL, DIFFERENT SUBDIVISION -- six commands
+
+     cmd   driver                    bbs-land            chars
+     ----  ------------------------  ------------------  -----
+     |1I   n n 1 1 1 1 1             n n 2 1 1 1           9
+     |1M   2 n n n n 1 1 2 3         2 n n n n 1 1 5      17
+     |1R   2 6                       8                     8
+     |1T   n n n n 1 1               n n n n 2            10
+     |1w   1 3                       4                     4
+     |2W   1 n n n n 2 2             1 n n n n 4          13
+
+     The stream stays in sync; individual fields decode wrong.  Four of
+     the six merge two adjacent reserved fields into one, which is
+     harmless while both are zero and wrong the moment either is not.
+
+     '|1M' is the exception that mattered, and it cut against RIPlib.
+     Their 1+1 split of args[5]/args[6] agrees with the driver and with
+     the 1.54 specification's 'invertable'/'resetafter'; RIPlib read
+     those two single digits as ONE 2-digit hotkey and took its flag
+     bits from a reserved column.  Their reference was closer to the
+     driver than RIPlib's code was.  See D-15.
+
+     '|1R' is the other one with teeth.  The driver's 8-character fixed
+     prefix is exactly where the filename begins, and shipped content
+     confirms it -- all 25 '|1R' commands in the corpus start with eight
+     zeros ("00000000dragon.txt").  RIPlib read the filename from offset
+     0.  See D-19.
+
+
+14.3  DIVERGENCES FROM THE DRIVER THAT RIPlib MAKES DELIBERATELY
+---------------------------------------------------------------------
+
+Recorded so that "RIPlib follows the driver" is a checkable claim
+rather than a slogan.
+
+14.3.1  SECURITY: '|3G' RIP_GotoURL LAUNCHES NOTHING
+
+     The driver opens the URL.  RIPlib does not, ever, and will not be
+     configured into doing so: with no handler registered the URL is
+     validated and stored in rip_state_t.goto_url and nothing else
+     happens.  Schemes are restricted to http:// and https://;
+     javascript:, data:, file: and vbscript: are refused outright
+     rather than delegated to host policy, because those are what turn
+     "open a link" into code execution.  A host wanting click-through
+     registers a handler and decides for itself.
+
+     This is a deliberate refusal to match the driver's behaviour and
+     is not up for reconciliation.  See "Fix SV-2/S2" in src/ripscrip.c.
+
+14.3.2  NO FILE I/O, NO PROCESS LAUNCH
+
+     '|2W' RIP_PortWrite, '|1W' RIP_WRITE_ICON and the file-query family
+     validate their arguments the way the driver does and stop there.
+     RIPlib has no filesystem.  Requests are surfaced to the embedder
+     through the icon/file request queue instead.
+
+14.3.3  '|k' RIP_BACK_COLOR ACCEPTS A ONE-CHARACTER PAYLOAD
+
+     Slot 43 types the argument as colour-width -- two characters at the
+     default colour mode -- and RIPlib also accepts one.
+
+     This was removed to match the record exactly, and then restored,
+     because the corpus contradicted the assumption behind the removal:
+     of 133 '|k' commands in shipped scenes, 132 are two characters and
+     one -- N2_BUSI.RIP, "|k0" -- is one.  Rejecting the short form
+     would drop a command real content sends, for no gain.  The defect
+     that mattered here was reading ONE digit when TWO were present,
+     fixed in v2.0.1.
+
+     The general rule this establishes: the record says what the driver
+     accepts, not what content exists.  Tightening a gate to match the
+     record is right by default and wrong where shipped scenes say
+     otherwise, and the corpus is what tells the two apart.  See D-18.
+
+14.3.4  MODES ACCEPTED BUT NOT PERFORMED
+
+     '|1G' RIP_Scroll validates its mode field 0..6 as the driver does
+     and performs the block move, which is common to all seven modes.
+     Modes 1..6 additionally run post-scroll effect routines that are
+     not implemented.  A scene using them scrolls correctly and loses
+     the effect.  See D-14.
+
+     '|1g' RIP_CopyBlit accepts modes 0..5 per the driver; RIPlib's
+     raster ops stop at DRAW_MODE_NOT (4), so mode 5 is accepted and
+     drawn as COPY.
+
+14.3.5  APPROXIMATED HIT AREAS
+
+     '|:' RIP_MOUSE_REGION_EXT defines a five-vertex region.
+     rip_mouse_region_t holds a rectangle, so RIPlib registers the
+     BOUNDING BOX of the five vertices: a conservative
+     over-approximation for hit-testing rather than a rectangle invented
+     from two of the coordinates.  See D-14.
+
+14.3.6  COMMANDS NOT IMPLEMENTED
+
+     '|`' -- slot 83, argc 11 (XY x10 + mega1).  Its handler (RVA
+     0x01D963) is structurally identical to '|:' RIP_MOUSE_REGION_EXT:
+     the same call sequence, five consecutive coordinate-pair maps, then
+     SetBkMode.  It is evidently a sibling of that command, but it
+     carries no name in the export table and no shipped scene uses it,
+     so its semantics cannot be established.  Recorded rather than
+     guessed.
+
+     Level 2 '|2C' RIP_PortCopy, '|2R' and the Switch* family ARE
+     implemented; see D-17.
+
+14.3.7  RIPlib-ORIGINAL COMMANDS
+
+     '|1V' SET_VIEWPORT_EXT and '|1X' CLIPBOARD_OP have no dispatch
+     entry.  They are RIPlib extensions and are documented as such in
+     11-dll-deviations.md DEV.4.  Level 3 '|3&' and '|3-' likewise --
+     neither letter appears among the driver's Level 3 commands
+     (D, e, ESC, G, R, U), so nothing in the protocol is displaced.
+
+
+14.4  WHAT THIS REGISTER IS FOR
+---------------------------------------------------------------------
+
+A claim of conformance is only as good as the set it was measured over,
+and every count in this file is reproducible from the scripts in 14.1.
+Three findings in this project came from measuring the MEASUREMENT
+rather than the code:
+
+  * The field-list comparison read only the first line of each handler
+    comment, silently truncating any signature that wrapped.
+
+  * It dropped every CONTINUATION row of an overloaded command -- rows
+    whose letter byte is 0x00, identified only by sharing the named
+    entry's handler pointer -- so '|h' presented as one signature
+    instead of six, and '|t', '|x' and '|z' as one instead of three.
+
+  * An elided field list in a reference ("c1:2 c2:2 ... c16:2") yields
+    only the pairs literally written, which reported '|Q' as a 32-vs-6
+    divergence where the reference in fact agrees.
+
+Each of those would have overstated or understated this register.  The
+counts here are 13 divergences from bbs-land, 7 of them affecting the
+total width -- reproduced twice by independent paths.

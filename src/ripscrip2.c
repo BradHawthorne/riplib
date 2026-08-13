@@ -792,7 +792,12 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      * the driver does and stops there — consistent with how the library
      * treats every other storage-oriented command. */
     case RIP2_CMD_PORT_WRITE: {
-        if (raw_len < 9)
+        /* Slot 120 records mega1, XY, XY, XY, XY, mega2, mega2 -- thirteen
+         * characters, with the bitmap filename following as a string tail
+         * (D-16).  RIPlib gated on nine, the width of the port and rect
+         * alone, so a record truncated before its flags was still acted on.
+         * No corpus scene sends '|2W'.  D-19. */
+        if (raw_len < 13)
             break;
         uint8_t port_num = (uint8_t)mega1(raw + 0);
         int16_t wx0 = (int16_t)mega2l(raw + 1), wy0 = (int16_t)mega2l(raw + 3);

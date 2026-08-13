@@ -1093,6 +1093,62 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-19 THE STRING-OFFSET RULE APPLIED TO THE REST OF THE TABLE.
+     Recorded 2026-08-13, while building the divergence register that
+     RIPtel-is-the-measure requires (14-divergence-register.md).
+
+     D-16 established that the dispatch record types only the numeric
+     argument array, so the record's fixed width IS the offset at which
+     a trailing string begins.  That rule was applied to the four
+     commands the field-list audit could see.  Enumerating every command
+     with a string tail found a fifth, and it is the one with teeth.
+
+     '|1R' RIP_READ_SCENE TOOK ITS FILENAME FROM OFFSET 0.  Slot 104
+     records mega2 + a 6-digit field: an 8-character fixed prefix.  The
+     corpus is unambiguous -- all 25 '|1R' commands in shipped scenes
+     begin with exactly eight zeros:
+
+          DRAGON.RIP   "00000000dragon.txt"
+          BUTTONS.RIP  "00000000<<IF $COLORS$<\"256\">>BLUEBACK.FN..."
+
+     RIPlib passed the whole payload as the filename, so every
+     scene-file request it made was for "00000000dragon.txt" -- a name
+     no host could match.  The feature was inert wherever it was used.
+     Fixed, with a regression test that fails against the old offset.
+
+     '|2W' RIP_PortWrite gated on nine characters -- the width of its
+     port and rect alone -- where slot 120 records thirteen, with the
+     bitmap filename following.  Tightened.  No corpus scene sends it.
+
+     '|!' RIP_COMMENT IS NOW IMPLEMENTED RATHER THAN MERELY SURVIVED.
+     It is the most frequent command in shipped content: 709 occurrences
+     across the corpus, 544 empty, the rest carrying prose or rule-off
+     lines ("!|! Show our bounding box", "!|!------").  RIPlib consumed
+     them correctly, because the Level 0 switch has no default and an
+     unmatched letter falls out doing nothing -- but by accident rather
+     than intent, and a coverage audit cannot tell those apart.  Stated
+     explicitly as a no-op case.
+
+     A LEVEL BOUNDARY WAS OFF BY ONE IN THE AUDIT TOOLING.  level_of()
+     placed the Level 0 / Level 1 split after slot 83; it is after slot
+     84.  Handler addresses settle it independently: each level's
+     handlers occupy their own region, and the sustained transition into
+     the Level 1 region (0x00Axxx-0x00Dxxx) happens at slot 85, not 84.
+     So '|{' (slot 84, XY x6) is a LEVEL 0 command -- which is exactly
+     where RIPlib implements it, and exactly what 13-dll-command-table.md
+     already recorded.  The repository's own table was right; only the
+     scratch tooling was wrong, and it had been reporting '|{' as an
+     unimplemented Level 1 command because of it.
+
+     ONE MORE MEASUREMENT ARTEFACT, for the same reason as the two in
+     D-18.  A reference that elides a repeated field ("c1:2 c2:2 ...
+     c16:2") yields only the pairs literally written, so '|Q'
+     RIP_SET_PALETTE reported as a 32-versus-6 divergence when the
+     reference, the driver and RIPlib all agree on sixteen 2-digit
+     entries.  Excluding elided lists takes the bbs-land divergence
+     count from a spurious 17 back to 13 -- which is what the first
+     audit reported, now reproduced by an independent path.
+
 D-18 AUDITING BY WHAT THE CODE READS, NOT BY WHAT ITS COMMENT CLAIMS.
      Recorded 2026-08-13.
 

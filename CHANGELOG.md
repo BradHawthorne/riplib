@@ -104,6 +104,28 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+Applying the string-offset rule to the *rest* of the table — while building
+the divergence register that "RIPtel is the measure" requires — found a fifth
+command, and the one with teeth:
+
+- **`|1R` `RIP_READ_SCENE` took its filename from offset 0.** Slot 104 records
+  an 8-character fixed prefix, and all 25 `|1R` commands in the corpus begin
+  with exactly eight zeros (`"00000000dragon.txt"`). RIPlib requested
+  `"00000000dragon.txt"` — a name no host could match, so **scene loading was
+  inert wherever it was used**.
+- **`|2W` `RIP_PortWrite` gated on 9 characters** where slot 120 records 13.
+- **`|!` `RIP_COMMENT` is now implemented rather than merely survived** — the
+  most frequent command in shipped content (709 occurrences). It was consumed
+  correctly only because the Level 0 switch has no default, which is accident
+  rather than intent.
+
+New: [`docs/spec/14-divergence-register.md`](docs/spec/14-divergence-register.md)
+— the standing record of every place RIPlib diverges from bbs-land (13, all
+resolved in the driver's favour, 7 affecting total width) and every place it
+deliberately diverges from the driver itself (the `|3G` no-launch policy, no
+file I/O, the `|k` tolerance, accepted-but-unperformed modes, approximated hit
+areas, and the two commands left unimplemented).
+
 Both audit instruments were themselves corrected: overloaded letters store
 their extra signatures as **continuation rows with a `0x00` letter byte**,
 identified only by sharing the named entry's handler pointer, so filtering on

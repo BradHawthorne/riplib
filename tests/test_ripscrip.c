@@ -4047,6 +4047,26 @@ static void test_level3_goto_url_rejects_control_chars(void) {
     else FAIL("|3G accepted an invalid URL character");
 }
 
+static void test_l1_read_scene_skips_reserved_prefix(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1R takes the filename at offset 8 (D-19)");
+    init_fixture(&s, &ctx);
+    /* Slot 104 records mega2 + a 6-digit field: an 8-character fixed prefix,
+     * with the filename following (D-16).  Every |1R in the corpus begins
+     * with exactly eight zeros -- DRAGON.RIP sends "00000000dragon.txt".
+     * RIPlib read from offset 0 and requested "00000000dragon.txt", a name
+     * no host could match. */
+    feed_script(&s, &ctx, "!|1R00000000dragon.txt|");
+    if (s.icon_state.request_count != 1) {
+        FAIL("|1R queued no file request"); return;
+    }
+    /* The queue stores the name uppercased with its extension stripped. */
+    if (strcmp(s.icon_state.request_queue[0], "DRAGON") == 0)
+        PASS();
+    else
+        FAIL("|1R requested the wrong filename");
+}
+
 static void test_level3_goto_url_skips_reserved_prefix(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|3G skips the 8-digit reserved prefix (D-16)");
@@ -5642,6 +5662,7 @@ int main(void) {
     test_level3_url_handler_opt_in();
     test_level3_url_scheme_allowlist();
     test_level3_goto_url_rejects_control_chars();
+    test_l1_read_scene_skips_reserved_prefix();
     test_level3_goto_url_skips_reserved_prefix();
     test_level3_register_var_skips_reserved();
     test_level3_encoded_stream_announcement();
