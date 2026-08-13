@@ -1353,6 +1353,65 @@ static void rip_request_asset_expanded(rip_state_t *s, const char *name,
         (void)rip_icon_request_file(&s->icon_state, expanded, n);
 }
 
+static bool rip_url_scheme_allowed(const char *u, int len);
+
+/* Validate and store a GotoURL argument, after expanding $VARIABLE$.
+ *
+ * '|3G' is one of the twelve entries that reach the driver's interpolation
+ * scanner (D-28), so the URL it receives is the EXPANDED one.  RIPlib checked
+ * the raw text, which meant a URL assembled from a variable was judged on the
+ * unexpanded string.
+ *
+ * ORDER IS THE WHOLE POINT HERE.  Expansion happens first and validation
+ * second, never the reverse: a variable whose value carries a scheme --
+ * "$X$:alert(1)" with X set to "javascript" -- must be judged on what it
+ * becomes, not on what it looks like.  Checking first and expanding after
+ * would let content walk a scheme straight past the allow-list.
+ *
+ * The rest is unchanged and stays deliberate: RIPlib launches nothing, the
+ * allow-list is http/https only, and over-length is a rejection rather than a
+ * truncation because silently shortening a URL can change which host it names.
+ *
+ * Its own frame, for the reason rip_request_asset_expanded() has one.
+ */
+static void rip_set_goto_url(rip_state_t *s, const char *url, int url_len) {
+    char raw[RIP_USER_VAR_VALUE_MAX * 2 + 2];
+    char expanded[RIP_USER_VAR_VALUE_MAX * 2 + 2];
+    int n, i;
+
+    if (url_len <= 0)
+        return;                     /* the driver's "No URL string present" */
+    if (url_len > (int)sizeof(raw) - 1)
+        return;                     /* too long to be a URL we would store */
+    memcpy(raw, url, (size_t)url_len);
+    raw[url_len] = '\0';
+
+    n = rip_expand_variables(s, raw, url_len, expanded, (int)sizeof(expanded));
+    if (n <= 0 || n >= (int)sizeof(s->goto_url))
+        return;
+
+    /* "Invalid URL character found": a URL field carries no control bytes and
+     * no whitespace. */
+    for (i = 0; i < n; i++) {
+        if ((unsigned char)expanded[i] < 0x21 ||
+            (unsigned char)expanded[i] > 0x7E)
+            return;
+    }
+    /* Scheme allow-list.  Everything except http/https is refused outright --
+     * javascript:, data:, file:, vbscript: and friends are what turn "open a
+     * link" into code execution, and no host policy should have to
+     * re-litigate them. */
+    if (!rip_url_scheme_allowed(expanded, n))
+        return;
+
+    memcpy(s->goto_url, expanded, (size_t)n);
+    s->goto_url[n] = '\0';
+    /* Opt-in only.  With no handler registered the URL is merely stored --
+     * RIPlib itself launches nothing, ever. */
+    if (s->url_handler)
+        s->url_handler(s->goto_url, n);
+}
+
 static int unescape_text(const char *src, int len, char *dst, int dst_max) {
     int j = 0;
     if (dst_max <= 0) return 0;
@@ -2400,42 +2459,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
              * payloads the corpus sends, which settles the encoding.  RIPlib
              * read the URL from offset 0 and so would have folded those eight
              * reserved digits into the front of the URL.  See D-16. */
-            {
-                const char *u = p + RIP_GOTOURL_RESERVED;
-                int ulen = len - RIP_GOTOURL_RESERVED;
-                /* A payload with no room for a URL is the driver's
-                 * "No URL string present" -- store nothing. */
-                if (ulen > 0 && ulen < (int)sizeof(s->goto_url)) {
-                    /* "URL too long" is a rejection, not a truncation:
-                     * silently shortening a URL can change which host it
-                     * points at. */
-                    int ok = 1;
-                    for (int i = 0; i < ulen; i++) {
-                        /* "Invalid URL character found": a URL field carries
-                         * no control bytes and no whitespace. */
-                        if ((unsigned char)u[i] < 0x21 ||
-                            (unsigned char)u[i] > 0x7E) {
-                            ok = 0;
-                            break;
-                        }
-                    }
-                    /* Scheme allow-list.  Everything except http/https is
-                     * refused outright -- javascript:, data:, file:,
-                     * vbscript: and friends are what turn "open a link" into
-                     * code execution, and no host policy should have to
-                     * re-litigate them. */
-                    if (ok && !rip_url_scheme_allowed(u, ulen))
-                        ok = 0;
-                    if (ok) {
-                        memcpy(s->goto_url, u, (size_t)ulen);
-                        s->goto_url[ulen] = '\0';
-                        /* Opt-in only.  With no handler registered the URL is
-                         * merely stored -- RIPlib itself launches nothing. */
-                        if (s->url_handler)
-                            s->url_handler(s->goto_url, ulen);
-                    }
-                }
-            }
+            rip_set_goto_url(s, p + RIP_GOTOURL_RESERVED,
+                             len - RIP_GOTOURL_RESERVED);
             break;
 
         case 'U': /* RIP_BeginEncodedStream — type:2 length:4
@@ -3119,11 +3144,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
         case 'p': /* Image-by-name — res:4 <filename>
                    * Handler RVA 0x00C2C6, "Invalid image filename". */
+            /* Reaches the driver's interpolation scanner like '|1R' and
+             * '|1b' do, so its name expands too.  D-28. */
             if (len >= 4) {
-                const char *fn = p + 4;
-                int fnlen = len - 4;
-                if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
-                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+                rip_request_asset_expanded(s, p + 4, len - 4);
             }
             break;
 

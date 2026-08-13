@@ -4180,6 +4180,34 @@ static void test_l1_load_bitmap_filename_offset(void) {
         FAIL("|1b requested the wrong filename");
 }
 
+static void test_level3_goto_url_expands_then_validates(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G validates the EXPANDED url, not the raw text (D-28)");
+    init_fixture(&s, &ctx);
+    /* '|3G' is one of the twelve entries reaching the driver's interpolation
+     * scanner, so the URL it judges is the expanded one.  Order is the whole
+     * point: a variable carrying a scheme must be judged on what it BECOMES.
+     * Checking first and expanding after would walk javascript: straight past
+     * the allow-list.
+     *
+     * SCHEME is set to "javascript", then referenced.  The raw text
+     * "$SCHEME$:alert(1)" passes no scheme test either way; what matters is
+     * that the expansion is not stored. */
+    feed_script(&s, &ctx, "!|1D00000SCHEME=javascript|");
+    feed_script(&s, &ctx, "!|3G00000000$SCHEME$:alert(1)|");
+    if (s.goto_url[0] != '\0') {
+        FAIL("|3G stored a url whose expansion is a refused scheme"); return;
+    }
+    /* And the converse: an allowed scheme assembled from a variable must be
+     * accepted, or the expansion would be useless. */
+    feed_script(&s, &ctx, "!|1D00000HOST=example.com|");
+    feed_script(&s, &ctx, "!|3G00000000http://$HOST$/x|");
+    if (strcmp(s.goto_url, "http://example.com/x") == 0)
+        PASS();
+    else
+        FAIL("|3G did not expand a variable inside an allowed url");
+}
+
 static void test_l1_read_scene_expands_variables(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|1R expands $VAR$ in the filename (D-28)");
@@ -5823,6 +5851,7 @@ int main(void) {
     test_preproc_directive_inside_command_payload();
     test_preproc_unknown_directive_passes_through();
     test_l1_load_bitmap_filename_offset();
+    test_level3_goto_url_expands_then_validates();
     test_l1_read_scene_expands_variables();
     test_l1_read_scene_skips_reserved_prefix();
     test_level3_goto_url_skips_reserved_prefix();
