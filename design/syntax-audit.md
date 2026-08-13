@@ -74,13 +74,13 @@ Two corrections to how this table was produced, both of which moved the numbers:
 
 **The earlier printing of this table did not add up.** It reported 47 compared against 19 + 19 + 3 = 41 classified. The counts above are consistent by construction.
 
-The seven remaining differences are **not** seven defects. Four — `|1D`, `|1F`, `|3G`, `|3R` — are commands whose trailing field is variable-length (a filename, a variable name), which the extractor cannot express as a width and reports as `?`. `|1i` is the reserved-tail false alarm described below. `|1T` is a notation correction with no behaviour attached. That leaves one genuine open item, `|3e`, described below.
+The seven remaining differences are **not** seven defects. Four — `|1D`, `|1F`, `|3G`, `|3R` — are commands whose trailing field is variable-length (a filename, a variable name), which the extractor cannot express as a width and reports as `?`. `|1i` is the reserved-tail false alarm described below. `|1T` is a notation correction with no behaviour attached. `|3e` is described below and is now resolved. **None of the seven is an open disagreement.**
 
 ---
 
 ## RIPlib's defects, and what the evidence was
 
-Nine genuine differences were found in the first pass. Five are fixed below, one was a false alarm, one (`|3e`) remains open, and the three originally recorded as unresolved were settled in v2.0.3 — see [Resolved in v2.0.3](#resolved-in-v203--the-arbiter-i-had-skipped). Re-running the corrected comparison then found three more, in the mouse-region and button path.
+Nine genuine differences were found in the first pass. Six are fixed below, one was a false alarm, and the three originally recorded as unresolved were settled in v2.0.3 — see [Resolved in v2.0.3](#resolved-in-v203--the-arbiter-i-had-skipped). Re-running the corrected comparison then found three more, in the mouse-region and button path.
 
 ### Fixed in v2.0.1
 
@@ -103,10 +103,12 @@ args[1]  ->  > 0xFF               "Start is out of range"
 
 ### Fixed in this audit
 
-**`|3e` RIP_BAUD_EMULATION — reads a `mega4` where the record says `mega2`.**
-Slot 123 records one `mega2`. RIPlib prefers a `mega4` whenever four characters are available, reading two fields as one. *bbs-land documents `rate:4` as well* — that reading comes from the 2.0 draft, while the 3.0 driver's record says 2. **Both projects disagree with the binary.**
+**`|3e` RIP_BAUD_EMULATION — read a `mega4` where the record says `mega2`.**
+Slot 123 records one `mega2`. RIPlib preferred a `mega4` whenever four characters were available, reading two fields as one. *bbs-land documents `rate:4` as well* — that reading comes from the 2.0 draft, while the 3.0 driver's record says 2. **Both projects disagreed with the binary.**
 
-*Correction (2026-08-13):* this section previously listed `|3e` as fixed. It was not. The code accepts **both** widths — `mega4` when four characters are present, `mega2` otherwise — which its own comment describes as deliberate, and which is a compromise between the two documented readings rather than a match to the driver. It is left as it stands, because narrowing to `mega2` would break 2.0-era content that emits four digits, but it is an open disagreement and is counted as one in the table above, not a fix.
+*This section has been corrected twice, which is worth admitting.* It first claimed the fix had landed when it had not; the correction then said the code was a deliberate accept-both compromise and would stay that way. Both statements are now out of date: the handler settles it — `mov edi,[eax]` loads exactly **one** argument and stores it, so there is no second field to read — and the code has read `mega2` since that was established. Nothing was protected by the compromise, because no corpus scene sends `|3e` at all.
+
+The reason this is called out rather than quietly edited: the stale paragraph was still asserting an open disagreement long after the code had matched the driver, and it was believed. A document that describes the code has to be re-read when the code changes, or it becomes a more confident source than the code itself.
 
 **`|1I` RIP_LOAD_ICON — read a 2-digit mode over two 1-digit fields.**
 Slot 97 records `FF FF 01 01 01 01 01`: two coordinates then **five single-digit fields**. RIPlib read `mega2(p+4)`, spanning the driver's `args[2]` and `args[3]`, which agrees only while `args[3]` is 0. The filename offset (9) was already correct, so only the mode decode changed.

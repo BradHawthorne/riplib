@@ -104,6 +104,29 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**A comment that was wrong twice over — and the check that should have caught
+it.** A note above the Level 0 Line case claimed `'@' = RIP_PIXEL` and that
+`'X'` "is not in the DLL command table". Both are false: slot 16's handler
+names itself `RIP_TextXY()`, and `'X'` is slot 70 with a handler calling
+`GDI32!SetPixel`. It also described a `case '@'` that wasn't beneath it. The
+**code was right throughout** — `'@'` has always been `RIP_TEXT_XY` and `'X'`
+`RIP_PIXEL`; only the note was wrong.
+
+That is the *fourth* documentation defect of one shape in a single day (`|1I`,
+`|y`, `|3e`, `|@`), every one found by accident while looking for something
+else — and the `|3e` paragraph was quoted back as an open item in a status
+report hours after the code had stopped matching it. Prose about code doesn't
+notice when the code changes, and a stale conclusion reads as *more*
+authoritative than the behaviour it misdescribes.
+
+New: [`scripts/dll-validate-claims.py`](scripts/dll-validate-claims.py) —
+adversarial by construction. It states each load-bearing claim as a predicate
+and tries to **refute** it from the image, the corpus and the source: handler
+self-naming, the fixed-radix sets, every string-tail prefix width, the corpus
+population figures, and what the code now does, including negatives. A claim it
+cannot re-derive is reported UNVERIFIED rather than passed. 29 claims, all
+holding; verified to fail by re-injecting the `|3e` compromise. See D-27.
+
 The `|1R`/`|1b` fixes confirmed against shipped content rather than authored
 payloads. Replaying DRAGON.RIP through v2.0.2 and through the current tree and
 printing the asset names it asks the host for:

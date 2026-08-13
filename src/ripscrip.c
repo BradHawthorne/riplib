@@ -3955,11 +3955,6 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* ── Pixel ───────────────────────────────────────────────── */
-    /* DLL command table entry 16: '@' = RIP_PIXEL (2 args: XY,XY).
-     * An earlier RIPlib draft incorrectly mapped 'X' to RIP_PIXEL — 'X' is not in
-     * the DLL command table.  '@' is the correct command letter. */
-
     /* ── Line ────────────────────────────────────────────────── */
     case 'L': /* RIP_LINE */
         if (len >= 8) {
@@ -4157,16 +4152,27 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         if (len > 0)
             rip_render_text(s, p, len);
         break;
-    /* v1.54 spec: '@' = RIP_TEXT_XY — draw text at pixel position. */
-    case '@': /* RIP_TEXT_XY — x:2 y:2 text */
+    /* '@' = RIP_TEXT_XY.  Slot 16 records XY, XY and the handler (RVA
+     * 0x020CBC) names itself RIP_TextXY(); its text is the out-of-band
+     * string tail the record cannot express (D-16), which is why an
+     * argc of 2 describes a command that plainly carries a string.
+     *
+     * A comment above the Line case used to assert that '@' was RIP_PIXEL
+     * and that 'X' "is not in the DLL command table".  Both claims were
+     * wrong -- 'X' is slot 70, and its handler calls GDI32!SetPixel -- and
+     * the comment described a `case '@'` that was not beneath it.  The code
+     * was right throughout; only the note was wrong.  D-27. */
+    case '@': /* RIP_TEXT_XY — x:XY y:XY text */
         if (len >= 4) {
             s->draw_x = mega2(p);
             s->draw_y = scale_y(mega2(p + 2));
             rip_render_text(s, p + 4, len - 4);
         }
         break;
-    /* v1.54 spec: 'X' = RIP_PIXEL — draw single pixel at (x,y). */
-    case 'X': /* RIP_PIXEL — x:2 y:2 */
+    /* 'X' = RIP_PIXEL.  Slot 70 records XY, XY and its handler (RVA
+     * 0x01E1D1) calls GDI32!SetPixel, so the letter is confirmed from the
+     * driver and not only from the 1.54 specification.  D-27. */
+    case 'X': /* RIP_PIXEL — x:XY y:XY */
         if (len >= 4) {
             draw_pixel(mega2(p), scale_y(mega2(p + 2)));
         }

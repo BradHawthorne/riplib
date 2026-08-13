@@ -1093,6 +1093,69 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-27 A COMMENT THAT WAS WRONG TWICE OVER, AND THE CHECK THAT SHOULD
+     HAVE CAUGHT IT.  Recorded 2026-08-13.
+
+     Above the Level 0 Line case sat this note:
+
+          DLL command table entry 16: '@' = RIP_PIXEL (2 args: XY,XY).
+          An earlier RIPlib draft incorrectly mapped 'X' to RIP_PIXEL --
+          'X' is not in the DLL command table.  '@' is the correct
+          command letter.
+
+     Both of its factual claims are false, and it was not attached to the
+     case it described.
+
+     '@' IS NOT RIP_PIXEL.  Slot 16's handler (RVA 0x020CBC) pushes
+     "RIP_TextXY()" before its own diagnostics -- "Can't draw to a
+     disabled viewport", "Unable to allocate temp string", "$TEXTDATA$".
+     It is the text command.  Its record reads XY, XY with argc 2, which
+     looks too narrow for text until D-16 is applied: the string is
+     passed out-of-band and never appears in the record, so an argc of 2
+     is exactly what a command taking two coordinates and a string looks
+     like from the table alone.
+
+     'X' IS IN THE TABLE.  Slot 70, record XY, XY, handler RVA 0x01E1D1,
+     which calls GDI32!SetPixel.  It is the pixel command, and the letter
+     is therefore confirmed from the driver rather than resting on the
+     1.54 specification alone.
+
+     THE CODE WAS RIGHT THROUGHOUT.  RIPlib has implemented '@' as
+     RIP_TEXT_XY and 'X' as RIP_PIXEL all along; only the note was wrong.
+     It had evidently been written during an earlier correction, left
+     behind when the cases moved, and then stated with enough confidence
+     to be believed.  Removed, and both cases annotated with the handler
+     evidence that settles them.
+
+     THE PATTERN, which is the reason this record exists at all.  This is
+     the FOURTH documentation defect of one shape found in a single day:
+
+          '|1I'  a field list still describing the defect after the fix
+          '|y'   "is not implemented yet", written before it was
+          '|3e'  a section calling the code an accept-both compromise
+                 for a day after the compromise had been removed
+          '|@'   the note above
+
+     Every one was found by accident, while looking for something else.
+     Three of them had been read and believed in the course of this same
+     audit -- the '|3e' paragraph was quoted back as an open item in a
+     status report hours after the code had stopped matching it.  A
+     document that describes code becomes, once stale, a MORE confident
+     source than the code, because it states a conclusion where the code
+     only shows behaviour.
+
+     THE CHECK.  scripts/dll-validate-claims.py states each load-bearing
+     claim as a predicate and re-derives its evidence from the image, the
+     corpus and the source, reporting the ones that no longer hold.  It
+     is adversarial by construction: it tries to REFUTE, and a claim it
+     cannot re-derive is reported UNVERIFIED rather than passed.  29
+     claims at the time of writing -- handler self-naming, the
+     fixed-radix sets, every string-tail prefix width, five corpus
+     population claims, and five statements about what the source now
+     does, including one negative ("'|3e' no longer falls back to
+     mega4").  Verified to fail: re-injecting the '|3e' compromise
+     refutes exactly one claim and the tool exits non-zero.
+
 D-26 THE D-25 FIXES, CONFIRMED AGAINST SHIPPED CONTENT -- AND ONE
      QUESTION THEY EXPOSED.  Recorded 2026-08-13.
 

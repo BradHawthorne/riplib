@@ -44,8 +44,29 @@ which point every one of them found more of the same.  It exits non-zero
 on a defect, so it can gate a build, and it lists the deliberate
 tolerances in 14.3.3 by name rather than passing them silently.
 
-It is not run in CI: RIPSCRIP.DLL is not vendored, and will not be.
-Run it by hand against a RIPtel install when the parser changes.
+and re-derive the findings themselves with:
+
+     python scripts/dll-validate-claims.py <path>/RIPSCRIP.DLL
+
+That one is adversarial by construction.  It states each load-bearing
+claim in this register and in 12-dll-provenance.md as a predicate, then
+tries to REFUTE it from the image, the shipped corpus and the source --
+handler self-naming, the fixed-radix sets, every string-tail prefix
+width, the corpus population figures quoted below, and what the code now
+does, including negatives such as "'|3e' no longer falls back to mega4".
+A claim it cannot re-derive is reported UNVERIFIED rather than passed.
+
+It exists because four documentation defects of one shape were found in
+a single day, each by accident: a field list that still described a
+defect after the fix, a note saying '|y' "is not implemented yet"
+written before it was, a section calling '|3e' an accept-both compromise
+a day after that compromise was removed, and a comment asserting that
+'X' "is not in the DLL command table" when 'X' is slot 70.  Prose about
+code does not notice when the code changes, and a stale conclusion reads
+as more authoritative than the behaviour it misdescribes.  See D-27.
+
+Neither tool is run in CI: RIPSCRIP.DLL is not vendored, and will not
+be.  Run both by hand against a RIPtel install when the parser changes.
 
 
 14.2  DIVERGENCES FROM bbs-land/remote-imaging-protocol
