@@ -337,6 +337,16 @@ Release, plus dedicated UBSan/ASan, coverage-floor, embedded ARM archive,
 `-fanalyzer`, and two lints — platform-independence and parser/spec
 agreement — for 12 jobs in total.
 
+A local sanitizer build is **not** equivalent to the Linux job, which is
+worth knowing before trusting one. UBSan's `nonnull-attribute` check —
+passing NULL to a parameter declared never-null, such as `memcpy`'s
+source at zero length — fires only because *glibc* annotates those
+functions that way. Windows CRT headers carry no such annotation, so the
+check cannot trigger there under any compiler, clang included. A real
+defect of exactly that shape passed every local suite and was caught only
+by the Linux job. ASan is no help either: a zero-length copy touches no
+memory. Reproduce that class on Linux, or trust CI for it.
+
 ## Origins
 
 RIPlib is extracted from the [A2GSPU](https://github.com/BradHawthorne) firmware — the rendering software for an RP2350-based Apple IIgs GPU coprocessor that provides DVI output, RIPscrip terminal rendering, and 10 BGI stroke fonts.  RIPlib is a parallel project: the drawing engine was designed for that embedded use, but is fully platform-independent.
