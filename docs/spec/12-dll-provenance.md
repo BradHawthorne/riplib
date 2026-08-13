@@ -1093,6 +1093,59 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-23 RADIX SELECTION AND LEVEL 2 OFFSETS, BOTH CHECKED MECHANICALLY.
+     Recorded 2026-08-13.  No defects; recorded because "no defects" is
+     only worth anything when it is reproducible.
+
+     PER-COMMAND RADIX.  D-12 established that the radix is chosen per
+     command by a 2-bit field in the flag word at dispatch entry +0x26,
+     consulted before the global base byte.  Re-deriving that
+     classification straight from the binary reproduces it exactly:
+
+          flag 1  always base 36    '|J' '|N'                 2 commands
+          flag 2  always base 64    '|D' '|d' '|h' '|y'       4 commands
+          flag 3  follow the global base                     95 commands
+          flag 0  unset -- all argc-0, nothing to decode     13 commands
+
+     Checking which decoder RIPlib actually calls for each of the six
+     fixed-radix commands: zero mismatches.  '|J' and '|N' use the
+     base-36 helpers, '|D', '|d', '|h' and '|y' the base-64 ones.
+
+     This class is worth a standing check rather than a one-off, because
+     getting it wrong is silent and total: rip_mega_digit() is
+     case-insensitive, so a base-64 field decoded with it folds 'a'..'z'
+     onto 10..35 and returns 0 for '#' and '&'.  That is what corrupted
+     61 of TUNNEL.RIP's 65 palette entries before '|d' was fixed --
+     nothing crashed, the colours were simply wrong.
+
+     LEVEL 2 OFFSETS, MECHANICALLY.  D-17 audited the Drawing Ports
+     family BY HAND.  That found '|2P's flags defect, but hand-checking
+     is not repeatable -- and it is exactly what let '|2P's invented flag
+     bits (D-22) survive in the same handler that was being inspected.
+     The offset audit now covers ripscrip2.c as well: seven distinct
+     handler bodies (eleven commands; the Switch* family shares one body
+     through five fall-through labels), zero flagged.
+
+     Two corrections to that second instrument, both of which would have
+     reported false results:
+
+       - Stopping the handler body at the first `break;`, which is what
+         the ripscrip.c version does, truncates EVERY Level 2 handler at
+         its length gate -- that gate's break is on line two.  Only one
+         command got examined before this was fixed.
+
+       - '|2R' composes its mega4 by hand, mega1(raw+0)*46656 +
+         mega1(raw+1)*1296 + ..., which is four 1-digit reads spelling
+         one 4-digit field.  Correct code, reported as four defects
+         until runs of consecutive single digits landing on a record
+         boundary were collapsed.
+
+     A STALE COMMENT, found by the radix check.  '|d's comment stated
+     that '|y' RIP_ExtendedFontStyle "is not implemented yet".  It was
+     implemented on 2026-08-12 under D-5, at Level 0, decoding base 64
+     as its flag requires; the note was left behind.  Corrected.  Same
+     class as the stale field lists on '|1I', '|1w', '|1M' and '|1T'.
+
 D-22 NON-NUMERIC GUARDS, AND A FLAG MAPPING THAT WAS ONLY HARMLESS
      BECAUSE ANOTHER BUG HID IT.  Recorded 2026-08-13.
 

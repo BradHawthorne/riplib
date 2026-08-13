@@ -4988,11 +4988,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                *
                * Extended font style is command '|y' (RIP_ExtendedFontStyle,
                * slot 75, 11 arguments) — see docs/spec/12-dll-provenance.md
-               * D-5.  '|y' is not implemented yet; its full field layout has
-               * not been recovered, and guessing it would be worse than the
-               * gap.  Parsing '|d' as font style, however, actively corrupted
+               * D-5.  '|y' IS implemented, at Level 0 below; this note used
+               * to say it was not, and was left behind when it landed on
+               * 2026-08-12.  Parsing '|d' as font style actively corrupted
                * font state on any stream that set a palette entry, so that
-               * behaviour is removed rather than kept pending '|y'. */
+               * behaviour was removed. */
         if (len >= 7) {
             /* Base 64: the dispatch entry's flag word marks '|d' as always
              * using the extended radix.  Decoded as base 36 this command is

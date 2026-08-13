@@ -104,6 +104,32 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**Radix selection and Level 2 offsets, both now checked mechanically.** No
+defects — recorded because "no defects" only means something when it is
+reproducible.
+
+The per-command radix (D-12) re-derives exactly from the binary: flag `1` =
+always base 36 (`|J`, `|N`), `2` = always base 64 (`|D`, `|d`, `|h`, `|y`),
+`3` = follow the global base (95), `0` = unset on the 13 argc-0 commands.
+RIPlib calls the right decoder for all six fixed-radix commands. This class
+deserves a standing check because getting it wrong is *silent and total* —
+`rip_mega_digit()` is case-insensitive, so a base-64 field decoded with it
+folds `a`–`z` onto 10–35 and returns 0 for `#`/`&`, which is what corrupted 61
+of TUNNEL.RIP's 65 palette entries before `|d` was fixed.
+
+The offset audit now covers `ripscrip2.c` too — D-17 checked Level 2 *by
+hand*, which is not repeatable and is exactly what let `|2P`'s invented flag
+bits survive in the very handler being inspected. Seven distinct handler
+bodies (11 commands), zero flagged. Two corrections to that instrument first:
+stopping the body at the first `break;` truncates every Level 2 handler at its
+length gate, and `|2R` composes its `mega4` by hand from four 1-digit reads,
+which read as four defects until consecutive runs were collapsed.
+
+The radix check also caught a **stale comment**: `|d` claimed `|y`
+`RIP_ExtendedFontStyle` "is not implemented yet". It was implemented on
+2026-08-12 under D-5 and decodes base 64 as its flag requires. Same class as
+the stale field lists on `|1I`, `|1w`, `|1M` and `|1T`. See D-23.
+
 **Non-numeric guards audited, and one bug found hiding behind another.**
 Classifying the driver's remaining guards — protection, zero-value, viewport,
 vertex-count, parameter-count, allocation — put most classes to rest at once.
