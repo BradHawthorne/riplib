@@ -4047,6 +4047,43 @@ static void test_level3_goto_url_rejects_control_chars(void) {
     else FAIL("|3G accepted an invalid URL character");
 }
 
+static void test_l0_one_palette_rejects_out_of_range(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|a rejects a colour above 63 instead of folding it (D-21)");
+    init_fixture(&s, &ctx);
+    /* The handler validates cmp ebx,0x3F / jbe and reports "Invalid Color
+     * Parameter"; it rejects rather than clamps.  RIPlib masked with & 0x3F,
+     * so 64 ("1S" = 1*36+28) folded onto 0 and painted the wrong colour.
+     *
+     * Set slot 1 to a known in-range colour, then try to overwrite it with
+     * an out-of-range one: the slot must keep its first value. */
+    feed_script(&s, &ctx, "!|a010Z|");          /* 0Z = 35, in range */
+    {
+        uint16_t before = palette_read_rgb565((uint8_t)(RIPLIB_PALETTE_BASE + 1));
+        feed_script(&s, &ctx, "!|a011S|");      /* 1S = 64, out of range */
+        if (palette_read_rgb565((uint8_t)(RIPLIB_PALETTE_BASE + 1)) == before)
+            PASS();
+        else
+            FAIL("|a acted on an out-of-range colour");
+    }
+}
+
+static void test_l0_font_style_rejects_bad_font_number(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|Y rejects a font number above 10 (D-21)");
+    init_fixture(&s, &ctx);
+    /* cmp ebx,0xA / jbe -> "Illegal font number".  The driver rejects the
+     * whole command, keeping the previous font; RIPlib accepted any value
+     * and fell through to the bitmap fallback. */
+    feed_script(&s, &ctx, "!|Y03000500|");      /* font 3, valid */
+    if (s.font_id != 3) { FAIL("setup: |Y did not set font 3"); return; }
+    feed_script(&s, &ctx, "!|Y0B000500|");      /* font 11, out of range */
+    if (s.font_id == 3)
+        PASS();
+    else
+        FAIL("|Y accepted a font number the driver rejects");
+}
+
 static void test_l1_read_scene_skips_reserved_prefix(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|1R takes the filename at offset 8 (D-19)");
@@ -5662,6 +5699,8 @@ int main(void) {
     test_level3_url_handler_opt_in();
     test_level3_url_scheme_allowlist();
     test_level3_goto_url_rejects_control_chars();
+    test_l0_one_palette_rejects_out_of_range();
+    test_l0_font_style_rejects_bad_font_number();
     test_l1_read_scene_skips_reserved_prefix();
     test_level3_goto_url_skips_reserved_prefix();
     test_level3_register_var_skips_reserved();

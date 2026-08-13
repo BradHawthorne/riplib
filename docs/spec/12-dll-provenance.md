@@ -1093,6 +1093,68 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-21 VALUE RANGES AUDITED AS A CLASS.  Recorded 2026-08-13.
+
+     The driver validates its fields explicitly and names each failure:
+
+          cmp edi, 6
+          jbe ok
+          push "Invalid mode parameter"
+          push "RIP_Scroll"
+          call <reporter>
+
+     Those bounds had been matched only where a handler happened to be
+     read for some other reason.  Extracting all of them at once --
+     anchoring on the error reporter, whose call sites are preceded by
+     the two strings they report, and walking back to the guarding
+     compare -- gives the driver's whole validation table.
+
+     A NOTE ON METHOD, because the first attempt was wrong in a way this
+     project has already been burned by.  Disassembling a fixed byte
+     count from each handler entry runs straight into whatever function
+     follows: '|!', a zero-argument handler, came back carrying font,
+     palette and text-window diagnostics.  That is exactly how a
+     neighbouring handler's strings were once attributed to '|3e'
+     (D-16).  Bounding each handler at the next entry in address order,
+     and at its own epilogue, fixed it.
+
+     ALREADY MATCHING, verified rather than assumed:
+
+          |;   marker < 36, rotation < 360, flags <= 3   exact match
+          |r   mode < 4, domain < 2                      exact match
+          |d   index <= 0xFF, bits == 8, rgb <= 0xFFFFFF exact match
+          |q   font attributes <= 0x0F                   exact match
+
+     TWO DIVERGENCES, both fixed:
+
+     '|a' RIP_ONE_PALETTE MASKED WHERE THE DRIVER REJECTS.  The handler
+     (RVA 0x019BF0) validates the colour with cmp ebx,0x3F / jbe and
+     reports "Invalid Color Parameter"; RIPlib applied & 0x3F, which
+     folds 64 onto 0 and paints a wrong colour where the driver paints
+     nothing.  RIPlib had already made the opposite choice for '|d'
+     ("out-of-range values are an error, not something to clamp into a
+     wrong colour") and for '|q'; '|a' was the last place still masking.
+     Every '|a' in the corpus is in range -- values 2, 9, 20, 52, 54, 59
+     and 61 -- so nothing shipped depended on the fold.
+
+     '|Y' RIP_FontStyle DID NOT CHECK THE FONT NUMBER.  The handler
+     validates all three fields:
+
+          cmp ebx,0xA    jbe  -> font 0..10  "Illegal font number"
+          cmp [ebp-8],1  jbe  -> dir  0..1   "Illegal direction"
+          [ebp-0xc] in 1..10  -> size 1..10  (silent reject)
+
+     RIPlib enforced the size and not the font number, so a font the
+     driver rejects outright was accepted and fell through to the 8x16
+     bitmap fallback -- where the driver keeps the previously selected
+     font.  Corpus fonts run 0..10, so nothing shipped is affected.
+
+     DIRECTION 2 AND 3 ARE KEPT.  The driver accepts only 0 and 1;
+     RIPlib accepts 0..3, with 2 and 3 as its own vertical-glyph
+     directions.  That is a deliberate extension, recorded in
+     14-divergence-register.md 14.3, not an unenforced bound -- and the
+     corpus uses only 0 and 1, so it displaces nothing.
+
 D-20 LENGTH GATES AUDITED AS A CLASS.  Recorded 2026-08-13.
 
      Six defects of one shape had been found one at a time -- '|1g'

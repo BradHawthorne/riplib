@@ -104,6 +104,32 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**Value ranges audited as a class.** The driver validates its fields
+explicitly and names each failure (`cmp edi,6` → `"Invalid mode parameter"`),
+and those bounds had been matched only where a handler happened to be read for
+another reason. Extracting all of them — anchoring on the error reporter and
+walking back to the guarding compare — gives the driver's whole validation
+table. `|;`, `|r`, `|d` and `|q` already matched exactly. Two did not:
+
+- **`|a` `RIP_ONE_PALETTE` masked where the driver rejects.** The handler
+  validates `cmp ebx,0x3F / jbe` → `"Invalid Color Parameter"`; RIPlib applied
+  `& 0x3F`, folding 64 onto 0 and painting a wrong colour where the driver
+  paints nothing. RIPlib had already made the opposite choice for `|d` and
+  `|q`; this was the last place still masking.
+- **`|Y` `RIP_FontStyle` never checked the font number.** The handler enforces
+  font 0–10, direction 0–1 and size 1–10; RIPlib enforced only the size, so a
+  font the driver rejects was accepted and fell through to the bitmap fallback
+  where the driver keeps the previous font.
+
+Directions 2 and 3 stay: they are RIPlib's own vertical-glyph extensions, now
+recorded in the register §14.3.5, and the corpus uses only 0 and 1. See D-21.
+
+Worth noting how the first attempt at this failed: disassembling a fixed byte
+count from each handler entry ran into the *next* function, so `|!` — a
+zero-argument handler — came back carrying font and palette diagnostics. That
+is exactly how a neighbouring handler's strings were once misattributed to
+`|3e`. Bounding each handler at the next entry fixed it.
+
 **Length gates audited as a class.** Six defects of one shape had been found
 one at a time (`|1g`, `|1i`, the `Switch*` family, `|2p`, `|2W`, `|1R`), each
 caught by looking at that command for another reason. Checking the whole table

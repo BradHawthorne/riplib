@@ -3728,6 +3728,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
              * 2 = vertical CCW glyphs, top-to-bottom  (RIPlib)
              * 3 = vertical CW  glyphs, top-to-bottom  (RIPlib; this is what
              *     dir=1 did before the 2026-08-12 X3 correction) */
+            /* The handler (RVA 0x01C87E) validates all three:
+             *     cmp ebx,0xA   jbe   -> font 0..10  "Illegal font number"
+             *     cmp [ebp-8],1 jbe   -> dir  0..1   "Illegal direction"
+             *     [ebp-0xc] in 1..10  -> size 1..10  (silent reject)
+             * RIPlib enforced the size but not the font number, so a font
+             * the driver rejects outright was accepted and fell through to
+             * the 8x16 bitmap fallback -- the driver keeps the previous font
+             * instead.  Corpus fonts run 0..10, so nothing shipped is
+             * affected.  Directions 2 and 3 are RIPlib extensions and are
+             * deliberately kept; see 14.3 and the note above.  D-21. */
+            if (fid > 10) break;
             if (fdir > 3) break;
             if (fsize < 1 || fsize > 10) break;
             s->font_id = fid;
@@ -3847,11 +3858,26 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
         }
         break;
-    case 'a': /* RIP_ONE_PALETTE — set one entry to EGA 64-color index */
+    case 'a': /* RIP_ONE_PALETTE — set one entry to EGA 64-color index
+               *
+               * The handler (RVA 0x019BF0) validates the colour with
+               * cmp ebx,0x3F / jbe and reports "Invalid Color Parameter"
+               * otherwise -- it REJECTS the command rather than clamping.
+               * RIPlib masked with & 0x3F, which silently folds 64 onto 0
+               * and paints the wrong colour instead of doing nothing.
+               *
+               * That is the same choice already made for '|d' ("out-of-range
+               * values are an error, not something to clamp into a wrong
+               * colour") and for '|q' font attributes; '|a' was the one place
+               * still masking.  Every '|a' in the corpus is in range -- the
+               * values used are 2, 9, 20, 52, 54, 59 and 61 -- so nothing
+               * shipped depends on the fold.  D-21. */
         if (len >= 4) {
-            uint8_t idx = mega2(p) & 0x0F;
-            uint8_t ega64 = mega2(p + 2) & 0x3F;
-            palette_write_rgb565(palette_slot(idx), ega64_to_rgb565(ega64));
+            uint16_t idx = (uint16_t)mega2(p);
+            uint16_t ega64 = (uint16_t)mega2(p + 2);
+            if (ega64 <= 63)
+                palette_write_rgb565(palette_slot(idx & 0x0F),
+                                     ega64_to_rgb565((uint8_t)ega64));
         }
         break;
 

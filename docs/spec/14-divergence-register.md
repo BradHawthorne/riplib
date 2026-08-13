@@ -169,7 +169,25 @@ rather than a slogan.
      raster ops stop at DRAW_MODE_NOT (4), so mode 5 is accepted and
      drawn as COPY.
 
-14.3.5  APPROXIMATED HIT AREAS
+14.3.5  '|Y' TEXT DIRECTIONS 2 AND 3
+
+     The driver validates the direction field with cmp [ebp-8],1 / jbe
+     and reports "Illegal direction" above 1, so it accepts only:
+
+          0   horizontal
+          1   BGI VERT_DIR, bottom-to-top
+
+     RIPlib accepts two more, as its own extension:
+
+          2   vertical CCW glyphs, top-to-bottom
+          3   vertical CW  glyphs, top-to-bottom
+
+     Every '|Y' in the corpus uses direction 0 or 1, so the extension
+     displaces no shipped content.  The font number and size bounds ARE
+     enforced as the driver enforces them (0..10 and 1..10); it is only
+     the direction range that is wider on purpose.  See D-21.
+
+14.3.6  APPROXIMATED HIT AREAS
 
      '|:' RIP_MOUSE_REGION_EXT defines a five-vertex region.
      rip_mouse_region_t holds a rectangle, so RIPlib registers the
@@ -177,7 +195,7 @@ rather than a slogan.
      over-approximation for hit-testing rather than a rectangle invented
      from two of the coordinates.  See D-14.
 
-14.3.6  COMMANDS NOT IMPLEMENTED
+14.3.7  COMMANDS NOT IMPLEMENTED
 
      '|`' -- slot 83, argc 11 (XY x10 + mega1).  Its handler (RVA
      0x01D963) is structurally identical to '|:' RIP_MOUSE_REGION_EXT:
@@ -190,7 +208,7 @@ rather than a slogan.
      Level 2 '|2C' RIP_PortCopy, '|2R' and the Switch* family ARE
      implemented; see D-17.
 
-14.3.7  RIPlib-ORIGINAL COMMANDS
+14.3.8  RIPlib-ORIGINAL COMMANDS
 
      '|1V' SET_VIEWPORT_EXT and '|1X' CLIPBOARD_OP have no dispatch
      entry.  They are RIPlib extensions and are documented as such in
