@@ -354,7 +354,7 @@ line thickness.
      Command:      |R
      Arguments:    x0:2 y0:2 x1:2 y1:2
      Format:       !|R<x0><y0><x1><y1>|
-     Example:      !|R0A0F1E2A|    (10,15) to (30,42)
+     Example:      !|R0A0F0U16|    (10,15) to (30,42)
 
 Draws a rectangular outline. Coordinates define the top-left
 and bottom-right corners.
@@ -380,7 +380,7 @@ and bottom-right corners.
      Command:      |B
      Arguments:    x0:2 y0:2 x1:2 y1:2
      Format:       !|B<x0><y0><x1><y1>|
-     Example:      !|B0A0F1E2A|    filled (10,15) to (30,42)
+     Example:      !|B0A0F0U16|    filled (10,15) to (30,42)
 
 Draws a filled rectangle using the current fill color and fill
 pattern. No outline is drawn — use RIP_RECTANGLE for the outline.

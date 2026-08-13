@@ -26,7 +26,7 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
 
 A separate pass audited the prose itself rather than the code, on the
 principle that a corrected handler and a stale paragraph describing it
-are the same defect to a reader. **Sixteen documentation defects, none
+are the same defect to a reader. **Twenty-four documentation defects, none
 affecting behaviour.** Two new checkers now gate the classes that
 produced them.
 
@@ -46,10 +46,21 @@ produced them.
   the 2.0.2/2.0.3 work and left stale in the chapter — including `|1I`,
   whose stale list had already been noticed once and fixed only in the
   code.
-- **Two worked examples were arithmetically wrong.** `|=` showed a
-  ten-character payload for an eight-character command, and `|L` showed
-  ten characters with a spurious field and a `4Q` that decodes to 170
-  where its own comment claimed 150.
+- **Seven worked examples were arithmetically wrong**, in two families.
+  `|=` showed a ten-character payload for an eight-character command,
+  and `|L` showed ten characters with a spurious field. The other five
+  were **MegaNum read as hexadecimal**: `1E` and `2A` were written for
+  30 and 42, which is what they mean in hex — in base 36 they are 50 and
+  82. This affected `|R`, `|B`, the `|1U` example in §1.6, and the
+  chained-command walkthrough in §1.10. `0A` and `0F` mean the same in
+  both bases, which is why a hex misreading looks right until a value
+  exceeds 15. The spec's flagship first example in §1.2 carried the same
+  fault in a third form: `4Q` decoded as 150 where it is 170.
+- **`|2P`'s example in §1.3 decoded to nonsense** — port 0 (which cannot
+  be redefined) with coordinates (36,360)-(1,144). Replaced with the
+  corrected §5.2 example.
+- **§1.10 carried an unfinished editorial aside** in its output —
+  "set draw color to 15 (white... wait, this sets color, not fill)".
 - **`|1B` stated a 30-character payload**; the record totals 36 and
   RIPlib gates on 36.
 - **`|k` was documented as `color:1`.** The record types it as a colour
@@ -79,9 +90,13 @@ produced them.
   four things: the `Example:` payload matches the `Arguments:` widths,
   every MegaNum in it decodes to the value its own comment claims, the
   field split matches the dispatch record, and any stated character
-  total is right. Blocks it cannot check mechanically are reported as
-  skipped with a reason rather than silently passed. Wired into CI in
-  its no-DLL mode.
+  total is right. It then sweeps **every** `!|…|` literal in every
+  chapter — including the free-prose worked examples in §1, which no
+  block check can see — and length-checks each against its record.
+  Blocks it cannot check mechanically are reported as skipped with a
+  reason rather than silently passed, and the docstring states the
+  known limits so a pass is not read as more than it is. Wired into CI
+  in its no-DLL mode.
 
 ### Fixed
 

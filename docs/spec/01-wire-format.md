@@ -12,7 +12,7 @@
                     SimVU (Brad Hawthorne)
 
                      Protocol ID:   RIPSCRIP032001
-                     Library:       RIPlib v2.0.0
+                     Library:       RIPlib v2.0.1
 
                         May 2026
              ------------------------------------------
@@ -72,8 +72,8 @@ Where:
 
 Example — draw a line from (100,50) to (200,150):
 
-     Wire:     !  |  L  2  S  1  E  5  K  4  Q  |
-     Hex:      21 7C 4C 32 53 31 45 35 4B 34 51 7C
+     Wire:     !  |  L  2  S  1  E  5  K  4  6  |
+     Hex:      21 7C 4C 32 53 31 45 35 4B 34 36 7C
      Decoded:  !  |  L  x0=100  y0=50  x1=200  y1=150  |
 
 The leading '!' must appear at a line boundary (after CR, LF, FF,
@@ -114,7 +114,7 @@ in production wire streams.
 Level 0 commands have NO prefix — the command letter immediately
 follows the '|' delimiter:
 
-     !|L2S1E5K4Q|          Level 0: RIP_LINE
+     !|L2S1E5K46|          Level 0: RIP_LINE
 
 Level 1 commands are prefixed with '1':
 
@@ -122,7 +122,7 @@ Level 1 commands are prefixed with '1':
 
 Level 2 commands are prefixed with '2':
 
-     !|2P010A0014001E00|   Level 2: RIP_DEFINE_PORT
+     !|2P10A000K0U|        Level 2: RIP_DEFINE_PORT
 
 
 ---------------------------------------------------------------------
@@ -285,7 +285,7 @@ The '<>' separator is used in button text to delimit fields:
 
 Example — button with icon, label, and host command:
 
-     !|1U0A0F1E2A0100MYICON<>Click Here<>SELECTION 1\r|
+     !|1U0A0F0U160100MYICON<>Click Here<>SELECTION 1\r|
 
 
 ---------------------------------------------------------------------
@@ -397,12 +397,17 @@ an entire screen of drawing commands. The parser processes each
 
 Example — draw a red filled rectangle then a white text label:
 
-     !|c0F|B0A0F1E2A|@0C11Hello|
+     !|c0F|B0A0F0U16|@0C11Hello|
 
-     c0F        → set draw color to 15 (white... wait, this sets
-                   color, not fill). Actual: set color index 15.
-     B0A0F1E2A  → filled bar from (10,15) to (30,42)
+     c0F        → set draw colour to index 15 (EGA white)
+     B0A0F0U16  → filled bar from (10,15) to (30,42)
      @0C11Hello → text at (12,37): "Hello"
+
+     Every field above is a 2-digit MegaNum, which is BASE 36 -- so
+     '0U' is 30 and '16' is 42.  Reading these as hexadecimal is a
+     standing trap: '0A' and '0F' happen to mean the same in both
+     bases, which makes a hex misreading look right for exactly as
+     long as the values stay below 16.
 
 
 ---------------------------------------------------------------------

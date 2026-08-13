@@ -25,9 +25,28 @@ Checks per block:
   4. TOTAL    a 'Format:' line that states a character count states the
               right one
 
+And once over every chapter, not only the blocks:
+
+  5. LITERALS every '!|...|' anywhere in docs/spec is length-checked
+              against the record for its command.  Segment 1's worked
+              examples sit in free prose and carried the same "'4Q' is
+              150" mistake as segment 2's '|L' block; the block checks
+              found one and only a hand pass found the other.
+              Only OVER-length is reported -- a shorter literal may
+              legitimately omit optional trailing fields, and the
+              record alone cannot say which those are.  Commands with
+              a trailing string are excluded, since their literals are
+              longer than the record by design.
+
 A block that cannot be checked mechanically is reported as SKIPPED with
 its reason, never silently passed -- counts are blind to values, and a
 run that "passes" 105 blocks while skipping 90 is not evidence.
+
+Known limits, stated so the pass is not read as more than it is: the
+decode check needs the example to carry its own decoded values, either
+as 'name=value' or as a tuple with exactly one number per field; 76 of
+the 105 blocks have no Example: line at all; and nothing here checks
+prose claims about SEMANTICS, only about widths, values and splits.
 
     python scripts/check-spec-examples.py [<path>/RIPSCRIP.DLL]
 """
@@ -167,6 +186,7 @@ def main():
 
     driver = load_driver(a.dll) if a.dll else {}
     defects, skips = [], []
+    no_tail = set()          # commands with no trailing string
     checked = {"width": 0, "decode": 0, "split": 0, "total": 0}
     nblocks = 0
 
@@ -245,8 +265,18 @@ def main():
                                        % (where, payload, len(payload), want))
                     else:
                         checked["width"] += 1
+                        gloss = ex[m.end():]
                         claims = dict(re.findall(
-                            r"\b([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(-?\d+)", ex[m.end():]))
+                            r"\b([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(-?\d+)", gloss))
+                        # Many glosses use coordinate tuples instead of
+                        # name=value -- "(0,100) to (200,150)".  Fall back to
+                        # matching the integers positionally, but only when
+                        # there are exactly as many as there are fields, so a
+                        # stray number in prose cannot create a false hit.
+                        if not claims:
+                            nums = re.findall(r"-?\d+", gloss)
+                            if len(nums) == len(fields) and fields:
+                                claims = {fn: v for (fn, _), v in zip(fields, nums)}
                         if not claims:
                             skips.append((where, "Example: states no decoded values"))
                         else:
@@ -269,6 +299,8 @@ def main():
 
             # --- 3. the field split against the record --------------------
             key = parse_cmd(b["cmd"])
+            if key is not None and not tail:
+                no_tail.add(key)
             if not driver:
                 continue
             if key is None:
@@ -294,7 +326,52 @@ def main():
                                    % (where, sum(widths), "/".join(map(str, widths)),
                                       sum(dwidths), "/".join(map(str, dwidths))))
 
+    # --- 5. LITERALS ------------------------------------------------------
+    # Command blocks are not the only place a wire example appears.  Segment
+    # 1's worked examples sit in free prose and carried the same '4Q' = 170
+    # mistake as segment 2's '|L' block -- one was found by the block check
+    # and the other only by hand.  So sweep every literal '!|...|' in every
+    # chapter and length-check it against the record for its command.
+    # A literal can only be length-checked when the command has no trailing
+    # string -- '!|1I0A0F000000MYICON|' is correct and much longer than the
+    # record.  The blocks above already say which commands those are, so
+    # reuse that rather than guessing from the literal.
+    PLACEHOLDER = re.compile(r"^(cmd\d*|params?|letter|opcode|args?)$", re.I)
+    nlit = 0
+    if driver:
+        for p in sorted(SPEC.glob("*.md")):
+            for n, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
+                for lit in re.findall(r"!\|([A-Za-z0-9][^|<>\s]*)\|", line):
+                    if PLACEHOLDER.match(lit):
+                        continue
+                    key = parse_cmd("|" + lit[:2]) or parse_cmd("|" + lit[:1])
+                    if key is None or key not in driver or key not in no_tail:
+                        continue
+                    dwidths, argc = driver[key]
+                    if argc < 0 or not dwidths:
+                        continue
+                    prefix = 2 if (len(lit) > 1 and lit[0] in "123") else 1
+                    payload = lit[prefix:]
+                    # Only fixed-width commands can be length-checked: a
+                    # string tail or an optional field makes any length legal.
+                    if not payload or not payload.isalnum():
+                        continue
+                    # Only OVER-length is unambiguous.  A shorter literal may
+                    # legitimately omit optional trailing fields -- '|Y'
+                    # without its flags, '|2P' without flags and reserved --
+                    # and the record alone cannot say which fields those are.
+                    # Over-length is what the '|=' and '|L' examples were.
+                    want = sum(dwidths)
+                    if len(payload) <= want:
+                        nlit += 1
+                    else:
+                        defects.append("%s:%d: literal '!|%s|' carries %d "
+                                       "char(s); the record for that command "
+                                       "allows at most %d"
+                                       % (p.name, n, lit, len(payload), want))
     print("scanned %d command block(s) across %d chapter(s)" % (nblocks, len(CHAPTERS)))
+    if driver:
+        print("literal wire examples length-checked: %d" % nlit)
     print("verified: width %d   decode %d   split %d   stated-total %d"
           % (checked["width"], checked["decode"], checked["split"], checked["total"]))
     print("skipped (not mechanically checkable): %d" % len(skips))
