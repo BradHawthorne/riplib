@@ -333,6 +333,11 @@ struct rip_state_s {
     uint8_t  write_mode;     /* 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT
                               * (RIPscrip wire order; see drawing.h
                               * DRAW_MODE_* and docs/spec §2.3) */
+    /* '|=' arg0: the off/draw selector that precedes the style.  Recorded
+     * rather than applied -- the dash pattern RIPlib builds already carries
+     * the on/off bits, and what the driver does with this field separately
+     * has not been established. */
+    uint8_t  line_off_draw;
     uint8_t  line_style;     /* 0=solid, 1=dotted, 2=center, 3=dashed, 4=user */
     uint16_t line_pattern;   /* Active 16-bit dash pattern passed to drawing.c */
     uint8_t  line_thick;     /* 1 or 3 */

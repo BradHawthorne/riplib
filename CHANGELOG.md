@@ -5,6 +5,54 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] — 2026-08-12
+
+Patch release. Three argument-layout bugs, all found by diffing RIPlib's
+handlers against bbs-land's [3.0 command reference](https://github.com/bbs-land/remote-imaging-protocol)
+field by field rather than comparing command names alone. **Their reference
+was right on all three.**
+
+### Fixed
+
+- **`|k` RIP_BACK_COLOR read one digit instead of a colour-width field.**
+  The dispatch record types this argument `0xFE` — colour, whose width comes
+  from `|M` SET_COLOR_MODE and is 2 by default. Reading a single digit made
+  `|k04` set background **0** instead of 4, and `|k3K` set **3** instead of
+  128. This was wrong on 132 uses across 22 of the shipped scenes, so it is
+  the one with real rendering impact.
+- **`|=` RIP_LINE_STYLE merged two fields into one.** The dispatch record is
+  `mega1, mega1, mega4, mega2` — four arguments, the first two a separate
+  `off_draw` selector and `style`. RIPlib read the leading two digits as a
+  single `mega2` style. That coincides with the correct reading whenever
+  `off_draw` is 0, which is every payload in the shipped corpus, so nothing
+  rendered differently — but the field was lost and a non-zero `off_draw`
+  would have mis-read the style. The handler validates `args[1] <= 4`, the
+  BGI line-style range, which is what identifies which field is which.
+- **`|D` RIP_SET_DRAWING_PALETTE had count and start swapped.** The handler
+  checks `args[0]` against `0x100` ("More than 256 entries") and against the
+  argument count, and `args[1]` against `0xFF` ("Start is out of range"), so
+  **count comes first**. No shipped scene uses `|D`, so nothing rendered
+  wrong; the layout was simply inverted.
+
+### Changed
+
+- `rip_state_t` gains `line_off_draw`, recording `|=`'s first field. It is
+  recorded rather than applied: the dash pattern RIPlib builds already
+  carries the on/off bits, and what the driver does with this field
+  separately is not established.
+- README corrected against the code — four claims were wrong (stale test
+  counts, a self-contradictory fill-pattern count, a vertical-text claim
+  describing behaviour that had been reverted, and an unsupported driver
+  version label) and the v2.0.0 realignment was not mentioned at all.
+
+### Notes
+
+Command-name agreement with bbs-land's 3.0 reference went from 35/49 to
+49/51 in v2.0.0; the two remaining differences are naming style, not
+meaning. This release closes the argument-layout gaps that a name-only
+comparison could not see. Findings flowing the other way are filed as
+[bbs-land issue #2](https://github.com/bbs-land/remote-imaging-protocol/issues/2).
+
 ## [2.0.0] — 2026-08-12
 
 Major release. RIPlib's command set is realigned to the shipping

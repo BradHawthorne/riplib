@@ -3623,6 +3623,56 @@ static void painted_bbox(int *bx0, int *by0, int *bx1, int *by1) {
             }
 }
 
+/* Three field-layout bugs found by diffing RIPlib against bbs-land's 3.0
+ * command reference.  bbs-land was right on all three; these lock in the
+ * corrected readings. */
+static void test_back_color_uses_colour_width(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("|k reads a colour-width field, not a single digit");
+    init_fixture(&s, &ctx);
+    /* '|k' is typed 0xFE (colour) in the dispatch record, so its width comes
+     * from '|M' and is 2 by default.  Reading one digit made "|k04" set
+     * background 0 instead of 4 -- wrong on 132 uses across 22 scenes. */
+    feed_script(&s, &ctx, "!|k04|");
+    if (s.back_color != 4) { FAIL("|k04 did not set background 4"); return; }
+    feed_script(&s, &ctx, "!|k0A|");
+    if (s.back_color != 10) { FAIL("|k0A did not set background 10"); return; }
+    PASS();
+}
+
+static void test_line_style_splits_off_draw_and_style(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("|= reads off_draw and style as two 1-digit fields");
+    init_fixture(&s, &ctx);
+    /* Dispatch record: mega1, mega1, mega4, mega2 -- four fields.  RIPlib
+     * merged the first two into one mega2, which coincides with the correct
+     * reading only while off_draw is 0.  "|=13..." must give off_draw 1,
+     * style 3; the old code read style = 1*36+3 = 39. */
+    feed_script(&s, &ctx, "!|=13FFFF03|");
+    if (s.line_off_draw != 1) { FAIL("|= off_draw not decoded"); return; }
+    if (s.line_style != 3)    { FAIL("|= style not decoded as one digit"); return; }
+    PASS();
+}
+
+static void test_drawing_palette_count_precedes_start(void) {
+    rip_state_t s; comp_context_t ctx;
+
+    TEST("|D takes count before start");
+    init_fixture(&s, &ctx);
+    /* The handler checks args[0] against 0x100 ("More than 256 entries")
+     * and args[1] against 0xFF ("Start is out of range"), so count is
+     * first.  count "01" = 1, start "0A" = 10, bits 8, one RGB "001u".
+     * With the fields swapped this wrote entry 1 instead of 10. */
+    feed_script(&s, &ctx, "!|D010A8" "001u" "|");
+    if (palette_read_rgb565(10) != 15) {
+        FAIL("|D wrote the wrong palette entry");
+        return;
+    }
+    PASS();
+}
+
 static void test_wide_coordinates_render_the_same_shape(void) {
     rip_state_t s; comp_context_t ctx;
     int ax0, ay0, ax1, ay1, bx0, by0, bx1, by1;
@@ -3980,11 +4030,13 @@ static void test_cmd_D_palette_block_uses_base64(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|D writes a palette block in base 64");
     init_fixture(&s, &ctx);
-    /* start "0z" = 61, count "02" = 2, bits 8, then two 24-bit RGB values.
-     * "00#0" uses digit '#' = 62, so the value is 62 << 6 = 3968; "001u"
-     * uses 'u' = 56, giving 1*64 + 56 = 120.  Both digits are outside the
-     * base-36 alphabet, which is the point. */
-    feed_script(&s, &ctx, "!|D0z028" "00#0" "001u" "|");
+    /* COUNT comes first, then start -- the handler checks args[0] against
+     * 0x100 ("More than 256 entries") and args[1] against 0xFF ("Start is
+     * out of range").  So: count "02" = 2, start "0z" = 61, bits 8, then
+     * two 24-bit RGB values.  "00#0" uses digit '#' = 62, giving
+     * 62 << 6 = 3968; "001u" uses 'u' = 56, giving 1*64 + 56 = 120.  Both
+     * digits are outside the base-36 alphabet, which is the point. */
+    feed_script(&s, &ctx, "!|D020z8" "00#0" "001u" "|");
     /* entry 61 gets 3968 = 0x000F80 -> r 0, g 15, b 128
      *   rgb565 = ((0&0xF8)<<8) | ((15&0xFC)<<3) | ((128&0xF8)>>3) = 96 + 16 */
     if (palette_read_rgb565(61) != (uint16_t)((((0 & 0xF8) << 8)) |
@@ -5401,6 +5453,9 @@ int main(void) {
     test_ext_mouse_region_ext_colon();
     test_skewed_oval_family_extents();
     test_ext_poly_marker_semicolon();
+    test_back_color_uses_colour_width();
+    test_line_style_splits_off_draw_and_style();
+    test_drawing_palette_count_precedes_start();
     test_wide_coordinates_render_the_same_shape();
     test_char_spacing_changes_text_extent();
     test_bezier_honours_stream_step_count();

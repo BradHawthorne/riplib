@@ -3501,9 +3501,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 draw_set_fill_style((uint8_t)card_pat, s->palette[s->back_color]);
         }
         break;
-    case '=': /* RIP_LINE_STYLE: style:2, user_pat:4, thick:2 */
+    /* Dispatch slot 14, argc 4: mega1, mega1, mega4, mega2 -- FOUR fields.
+     * RIPlib read the first two digits as a single mega2 style, which
+     * coincides with the correct reading whenever off_draw is 0 (every
+     * payload in TeleGrafix's shipped content) and silently mis-reads the
+     * style otherwise.  The handler validates args[1] <= 4, which is the
+     * BGI line-style range, confirming args[1] is the style and args[0] is
+     * the separate off/draw selector.  bbs-land documents this correctly as
+     * `off_draw:1 style:1 user_pat:4 thick:2`. */
+    case '=': /* RIP_LINE_STYLE -- off_draw:1 style:1 user_pat:4 thick:2 */
         if (len >= 2) {
-            s->line_style = (uint8_t)mega2(p);
+            s->line_off_draw = (uint8_t)mega_digit(p[0]);
+            s->line_style    = (uint8_t)mega_digit(p[1]);
             if (len >= 8) {
                 int16_t thick = scale_y(mega2(p + 6)); /* Fix B6: scale thickness to card Y */
                 if (thick < 1) thick = 1;
@@ -4056,13 +4065,20 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Background color (v2.0+) ---------------------------------------- */
     /* DLL command table entry 43: 'k' = RIP_BACK_COLOR (1 arg: COL) */
-    case 'k': /* RIP_BACK_COLOR -- color:1.
+    /* Dispatch slot 43, argc 1, type 0xFE -- a COLOUR argument, whose width
+     * comes from '|M' SET_COLOR_MODE and is 2 by default.  RIPlib read a
+     * single digit, so '|k04' set background 0 instead of 4 and '|k3K' set
+     * 3 instead of 128; 132 uses across 22 shipped scenes were affected.
+     * bbs-land documents this correctly as `color:CM`. */
+    case 'k': /* RIP_BACK_COLOR -- color:CM (2 digits at the default mode).
                * Per BGI/RIP semantics, back_color is the OFF-bit color in
                * patterned fills and the clear color for RIP_ERASE_VIEW.
                * Push the new value into the draw layer so subsequent fills
                * pick it up without waiting for the next 'S'/'s'/'D'. */
         if (len >= 1) {
-            s->back_color = mega_digit(p[0]) & 0x0F;
+            /* Width-negotiated: the payload is normalised to 2 digits before
+             * dispatch when '|M' has selected anything else (D-11). */
+            s->back_color = (uint8_t)((len >= 2 ? mega2(p) : mega_digit(p[0])) & 0x0F);
             int8_t card_pat = bgi_fill_to_card(s->fill_pattern);
             draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
                                 s->palette[s->back_color & 0x0F]);
@@ -4507,8 +4523,14 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     case 'D': /* RIP_SET_DRAWING_PALETTE — start:2 count:2 bits:1 (rgb:4)×count */
         if (len >= 5) {
             /* Base 64, same flag as '|d' -- see D-12. */
-            uint16_t start = (uint16_t)mega2_64(p);
-            int      count = mega2_64(p + 2);
+            /* FIELD ORDER, from the handler's own validation: args[0] is
+             * checked against 0x100 ("More than 256 entries") and against
+             * argc ("Invalid number of parameters", argc == count + 3),
+             * while args[1] is checked against 0xFF ("Start is out of
+             * range").  So COUNT comes first.  RIPlib had these swapped;
+             * bbs-land documents the correct order as `num:2 start:2`. */
+            int      count = mega2_64(p);
+            uint16_t start = (uint16_t)mega2_64(p + 2);
             uint8_t  bits  = (uint8_t)mega_digit64(p[4]);
             int i;
 
