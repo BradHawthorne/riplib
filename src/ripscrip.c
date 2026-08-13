@@ -2759,7 +2759,21 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     r->icon_path[0] = '\0';
                     r->hover = false;
                     if (host_len > 127) host_len = 127;
-                    memcpy(r->text, host_text, (size_t)host_len);
+                    /* host_text is NULL when the button's label carries no
+                     * host command -- which is every '|1U' in the shipped
+                     * corpus ("<>Clear<>").  memcpy's source must be a valid
+                     * pointer even when the length is zero (C11 7.24.1p2),
+                     * so this needs a guard, not merely a correct size.
+                     *
+                     * The registration gate above used to be host_len > 0,
+                     * which made the call unreachable; removing that gate so
+                     * hostless buttons become clickable (D-15) is what
+                     * exposed it.  ASan cannot see this -- nothing is read --
+                     * and neither can UBSan on Windows, because the check is
+                     * nonnull-attribute and only glibc annotates memcpy that
+                     * way.  It reproduces on the Linux sanitizer job only. */
+                    if (host_len > 0)
+                        memcpy(r->text, host_text, (size_t)host_len);
                     r->text_len = (uint8_t)host_len;
                     r->active = true;
                     s->num_mouse_regions++;
