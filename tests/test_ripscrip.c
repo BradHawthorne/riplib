@@ -785,11 +785,29 @@ static void test_l1_image_style_stored(void) {
 
     TEST("1i stores image display style");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|1i000000000002|");  /* rect 0,0-0,0; flags = 2 (center) */
+    /* Slot 98 records XY XY XY XY mega4 res:12 -- 24 characters, which is
+     * the width of every |1i payload in the corpus.  rect 0,0-0,0;
+     * flags = 2 (center); twelve reserved digits. */
+    feed_script(&s, &ctx, "!|1i000000000002000000000000|");
     if (s.image_style == 2)
         PASS();
     else
         FAIL("1i image_style not stored");
+}
+
+static void test_l1_image_style_requires_full_record(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1i rejects a truncated record (D-16)");
+    init_fixture(&s, &ctx);
+    /* Twelve characters: the meaningful prefix without the reserved tail.
+     * RIPlib gated on 12 and acted on it; the driver's record is 24. */
+    feed_script(&s, &ctx, "!|1i000000000002|");
+    if (!s.icon_style_active)
+        PASS();
+    else
+        FAIL("1i acted on a 12-character record");
 }
 
 static void test_n_flags_unsupported_coordinate_width(void) {
@@ -3940,13 +3958,13 @@ static void test_level3_goto_url_records_without_launching(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|3G records the URL and launches nothing");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|3Ghttp://example.com/x|");
+    feed_script(&s, &ctx, "!|3G00000000http://example.com/x|");
     if (strcmp(s.goto_url, "http://example.com/x") != 0) {
         FAIL("|3G did not record the URL"); return;
     }
     /* Security: RIPlib never launches. Nothing may be sent to the host. */
     tx_reset();
-    feed_script(&s, &ctx, "!|3Ghttp://evil.example/y|");
+    feed_script(&s, &ctx, "!|3G00000000http://evil.example/y|");
     if (tx_len == 0) PASS();
     else FAIL("|3G emitted host traffic");
 }
@@ -3968,13 +3986,13 @@ static void test_level3_url_handler_opt_in(void) {
     init_fixture(&s, &ctx);
     url_cb_calls = 0;
     /* default: no handler -> stored, never invoked */
-    feed_script(&s, &ctx, "!|3Ghttp://a.example/1|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000http://a.example/1|\r\n");
     if (url_cb_calls != 0) { FAIL("handler ran without being registered"); return; }
     if (strcmp(s.goto_url, "http://a.example/1") != 0) {
         FAIL("URL not stored in the default configuration"); return;
     }
     rip_set_url_handler(&s, url_cb);
-    feed_script(&s, &ctx, "!|3Ghttp://a.example/2|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000http://a.example/2|\r\n");
     if (url_cb_calls == 1 && strcmp(url_cb_last, "http://a.example/2") == 0) PASS();
     else FAIL("registered handler was not invoked with the URL");
 }
@@ -3985,13 +4003,13 @@ static void test_level3_url_scheme_allowlist(void) {
     init_fixture(&s, &ctx);
     rip_set_url_handler(&s, url_cb);
     url_cb_calls = 0;
-    feed_script(&s, &ctx, "!|3Gjavascript:alert(1)|\r\n");
-    feed_script(&s, &ctx, "!|3Gfile:///etc/passwd|\r\n");
-    feed_script(&s, &ctx, "!|3Gdata:text/html;base64,AAA|\r\n");
-    feed_script(&s, &ctx, "!|3Gvbscript:x|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000javascript:alert(1)|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000file:///etc/passwd|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000data:text/html;base64,AAA|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000vbscript:x|\r\n");
     if (url_cb_calls != 0) { FAIL("a dangerous scheme reached the handler"); return; }
     if (s.goto_url[0] != '\0') { FAIL("a dangerous scheme was stored"); return; }
-    feed_script(&s, &ctx, "!|3GHTTPS://ok.example/z|\r\n");   /* case-insensitive */
+    feed_script(&s, &ctx, "!|3G00000000HTTPS://ok.example/z|\r\n");   /* case-insensitive */
     if (url_cb_calls == 1) PASS();
     else FAIL("uppercase HTTPS was refused");
 }
@@ -4000,10 +4018,48 @@ static void test_level3_goto_url_rejects_control_chars(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|3G rejects control characters in the URL");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|3Ghttp://ok.example|\r\n");
-    feed_script(&s, &ctx, "!|3Gbad\007url|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000http://ok.example|\r\n");
+    feed_script(&s, &ctx, "!|3G00000000bad\007url|\r\n");
     if (strcmp(s.goto_url, "http://ok.example") == 0) PASS();
     else FAIL("|3G accepted an invalid URL character");
+}
+
+static void test_level3_goto_url_skips_reserved_prefix(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3G skips the 8-digit reserved prefix (D-16)");
+    init_fixture(&s, &ctx);
+    /* Slot 126 records a single 8-digit field, and the URL follows it.
+     * Literal type codes are digit counts, not string markers: |1e
+     * (XY XY XY XY 1 1 4 2 8) and |1i (XY XY XY XY 4 12) both sum to 24,
+     * which is exactly the payload width the corpus sends for each.
+     *
+     * The prefix here is deliberately made of digits that would form a
+     * valid URL character run, so the old reading stores a WRONG url
+     * rather than failing validation -- which is the failure that mattered:
+     * an embedder handed a URL pointing somewhere else. */
+    feed_script(&s, &ctx, "!|3G12345678http://ok.example/p|");
+    if (strcmp(s.goto_url, "http://ok.example/p") == 0) PASS();
+    else if (strcmp(s.goto_url, "12345678http://ok.example/p") == 0)
+        FAIL("|3G folded the reserved digits into the URL");
+    else
+        FAIL("|3G did not record the URL");
+}
+
+static void test_level3_register_var_skips_reserved(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3R reads the variable name at offset 14 (D-16)");
+    init_fixture(&s, &ctx);
+    /* Slot 127 records mega4, mega2 and an 8-digit field -- a 14-character
+     * fixed prefix.  RIPlib read the name from offset 6, inside the
+     * reserved field, prefixing every name with eight stray digits. */
+    feed_script(&s, &ctx, "!|3R00010012345678MYVAR|");
+    if (s.user_var_count != 1)
+        FAIL("|3R registered no variable");
+    else if (strcmp(s.user_var_names[0], "MYVAR") == 0)
+        PASS();
+    else
+        /* The old reading started at offset 6, giving "12345678MYVAR". */
+        FAIL("|3R registered the name with the reserved digits attached");
 }
 
 static void test_level3_encoded_stream_announcement(void) {
@@ -4047,7 +4103,8 @@ static void test_level1_image_style(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|1i RIP_ImageStyle sets the image area and mode");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|1i0A0A32320002|");
+    /* 24 characters: rect + flags:4 + the record's 12 reserved digits. */
+    feed_script(&s, &ctx, "!|1i0A0A32320002000000000000|");
     if (s.icon_style_active && s.icon_style_x0 == 10 && s.image_style == 2) PASS();
     else FAIL("|1i did not record the image style");
 }
@@ -5390,6 +5447,7 @@ int main(void) {
     test_l1_mouse_region_define();
     test_l1_button_registers_region();
     test_l1_image_style_stored();
+    test_l1_image_style_requires_full_record();
     test_l3_delay_is_recorded_not_slept();
     test_n_flags_unsupported_coordinate_width();
     test_l1_viewport_ext();
@@ -5560,6 +5618,8 @@ int main(void) {
     test_level3_url_handler_opt_in();
     test_level3_url_scheme_allowlist();
     test_level3_goto_url_rejects_control_chars();
+    test_level3_goto_url_skips_reserved_prefix();
+    test_level3_register_var_skips_reserved();
     test_level3_encoded_stream_announcement();
     test_level2_switch_palette_slot();
     test_level1_copy_blit();

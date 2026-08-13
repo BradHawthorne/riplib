@@ -58,11 +58,13 @@ So the record is machine-readable, complete for all 129 entries, and self-valida
 
 Each project's field lists were extracted and compared to the driver's, with three outcomes: exact match, **notation-only** (a literal `2` where the record says width-negotiated — identical at default settings, divergent the moment `|n` or `|M` changes a width), and genuinely different.
 
-| | compared | exact | notation only | **different** |
-| --- | --- | --- | --- | --- |
-| **RIPlib** (after v2.0.3) | 51 | 23 | 21 | **7** |
-| **RIPlib** (as audited, v2.0.2) | 51 | 17 | 21 | **13** |
-| **bbs-land** | 80 | 52 | 15 | **13** |
+| | compared | exact | notation only | prefix + string | **different** |
+| --- | --- | --- | --- | --- | --- |
+| **RIPlib** (after v2.0.3) | 51 | 26 | 21 | 4 | **0** |
+| **RIPlib** (as audited, v2.0.2) | 51 | 17 | 21 | 0 | **13** |
+| **bbs-land** | 80 | 52 | 15 | 0 | **13** |
+
+The fourth column is a class the first pass did not have. The dispatch record types only the **numeric argument array**; a trailing string is passed out-of-band — `RIP_Define` and `RIP_GotoURL` both fetch it from a different stack slot than the args array. So a string never appears in the record, and a field list that matches the record exactly and then documents one further variable field is *correct*, not divergent.
 
 RIPlib's smaller comparable set is a limitation of the method, not a measure of coverage: field lists were read from handler comments, and not every handler spells one out.
 
@@ -200,6 +202,40 @@ Their `x:XY y:XY border:CM` is the correct **wire** layout and RIPlib implements
 `|"` `|&` `|+` `|-` `|;` `|U` `|[` `|]` `|_` `|g` `|u` `|w` `|1G` `|1e` `|1g` are documented with a literal `:2` where the record types the field as coordinate. Identical at default settings; wrong the moment `|n` selects another width.
 
 **This is precisely the class of defect `|k` was on RIPlib's side** — a fixed width where the driver negotiates one. Same failure, opposite document.
+
+---
+
+## Taking it to zero
+
+Four items remained after the mouse-path fixes. Working them out required settling one encoding question that had been quietly load-bearing all along.
+
+**Are literal type codes digit counts, or string markers?** `RIP_GotoURL`'s record is a bare `0x08` and its handler takes only a string — which invites reading `0x08` as "a string follows". Arithmetic settles it:
+
+| command | record | sum | corpus payload |
+| --- | --- | --- | --- |
+| `\|1e` | `XY XY XY XY 1 1 4 2` **8** | **24** | exactly 24, all digits, no string |
+| `\|1i` | `XY XY XY XY 4` **12** | **24** | exactly 24 |
+
+Two independent confirmations. **The codes are digit counts.** And since the record covers only the numeric array, its fixed width is exactly the offset a trailing string begins at. Checking all four commands RIPlib documents with a string tail:
+
+| | record fixed prefix | RIPlib read at | |
+| --- | --- | --- | --- |
+| `\|1D` | 3+2 = 5 | 5 | correct |
+| `\|1F` | 2+4 = 6 | 6 | correct |
+| `\|3G` | 8 | **0** | **off by 8** |
+| `\|3R` | 4+2+8 = 14 | **6** | **off by 8** |
+
+Both wrong by exactly the width of the trailing literal they never skipped.
+
+**`|3G` folded eight reserved digits onto the front of every URL.** RIPlib launches nothing — the `SV-2/S2` neutering stands — so nothing could execute. But it handed the embedder a URL pointing somewhere other than the one sent, and an embedder acting on `goto_url` under its own policy deserves the real one. The failure mode is quiet by construction: a reserved field of *digits* keeps the string inside the allowed character set, so validation passes and a **wrong** URL is stored rather than none.
+
+**`|3R` prefixed every registered variable name with eight stray digits**, so no name a scene registered could ever be matched.
+
+**`|1i` gated on 12 characters against a 24-character record** — ignoring the reserved tail is right, acting on a command that carries only the prefix is not. Same defect class as `|1g`.
+
+**`|3e` was the last one.** Its handler loads exactly one argument (`mov edi,[eax]`) and stores it — there is no second field, and the record's `mega2` stands. No corpus scene sends `|3e` at all, so nothing was protected by the accept-both compromise; it now reads `mega2`, per the arbiter.
+
+That takes RIPlib to **zero disagreements** against the driver's record.
 
 ---
 

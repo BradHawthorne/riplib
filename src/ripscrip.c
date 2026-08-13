@@ -77,6 +77,15 @@ extern uint16_t palette_read_rgb565(uint8_t index);
  * (640×400 = 256 KB), uploaded icon cache, and file staging buffer. */
 #define RIP_PSRAM_ARENA_SIZE (1024u * 1024u)
 
+/* Fixed numeric prefixes that precede a trailing string argument.  The
+ * dispatch record types only the numeric argument array; a string follows
+ * it, so the record's fixed width IS the string's offset.  Literal type
+ * codes are digit counts, never string markers -- '|1e' and '|1i' both sum
+ * to exactly the 24-character payloads the corpus sends, which settles it.
+ * See D-16. */
+#define RIP_GOTOURL_RESERVED  8   /* |3G: slot 126, one 8-digit field       */
+#define RIP_REGVAR_RESERVED  14   /* |3R: slot 127, mega4 + mega2 + 8 digits */
+
 /* Reset the per-frame command-level prefix flags.  Used by the FSM at
  * every dispatch boundary (CR/LF, '|', error recovery) to start the
  * next command in a clean Level 0 state. */
@@ -2298,7 +2307,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
          * using any of the five rendered nothing with no diagnosis. */
         switch (s->cmd_char) {
 
-        case 'G': /* RIP_GotoURL — url:string
+        case 'G': /* RIP_GotoURL — res:8 url:string
                    * Handler RVA 0x0251CB.  Diagnostics: "No URL string
                    * present", "Invalid URL character found", "URL too long".
                    *
@@ -2310,31 +2319,47 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * for the embedder to display or act on under its own policy,
                    * and nothing is launched.  A host that wants click-through
                    * reads s->goto_url and decides for itself. */
-            if (len > 0 && len < (int)sizeof(s->goto_url)) {
-                /* "URL too long" is a rejection, not a truncation: silently
-                 * shortening a URL can change which host it points at. */
-                int ok = 1;
-                for (int i = 0; i < len; i++) {
-                    /* "Invalid URL character found": a URL field carries no
-                     * control bytes and no whitespace. */
-                    if ((unsigned char)p[i] < 0x21 || (unsigned char)p[i] > 0x7E) {
-                        ok = 0;
-                        break;
+            /* Slot 126 records a single 8-digit field, and the URL string
+             * follows it.  Literal type codes are digit COUNTS, never string
+             * markers -- '|1e' (XY XY XY XY 1 1 4 2 8 = 24) and '|1i'
+             * (XY XY XY XY 4 12 = 24) both sum to exactly the 24-character
+             * payloads the corpus sends, which settles the encoding.  RIPlib
+             * read the URL from offset 0 and so would have folded those eight
+             * reserved digits into the front of the URL.  See D-16. */
+            {
+                const char *u = p + RIP_GOTOURL_RESERVED;
+                int ulen = len - RIP_GOTOURL_RESERVED;
+                /* A payload with no room for a URL is the driver's
+                 * "No URL string present" -- store nothing. */
+                if (ulen > 0 && ulen < (int)sizeof(s->goto_url)) {
+                    /* "URL too long" is a rejection, not a truncation:
+                     * silently shortening a URL can change which host it
+                     * points at. */
+                    int ok = 1;
+                    for (int i = 0; i < ulen; i++) {
+                        /* "Invalid URL character found": a URL field carries
+                         * no control bytes and no whitespace. */
+                        if ((unsigned char)u[i] < 0x21 ||
+                            (unsigned char)u[i] > 0x7E) {
+                            ok = 0;
+                            break;
+                        }
                     }
-                }
-                /* Scheme allow-list.  Everything except http/https is refused
-                 * outright -- javascript:, data:, file:, vbscript: and friends
-                 * are what turn "open a link" into code execution, and no host
-                 * policy should have to re-litigate them. */
-                if (ok && !rip_url_scheme_allowed(p, len))
-                    ok = 0;
-                if (ok) {
-                    memcpy(s->goto_url, p, (size_t)len);
-                    s->goto_url[len] = '\0';
-                    /* Opt-in only.  With no handler registered the URL is
-                     * merely stored -- RIPlib itself launches nothing, ever. */
-                    if (s->url_handler)
-                        s->url_handler(s->goto_url, len);
+                    /* Scheme allow-list.  Everything except http/https is
+                     * refused outright -- javascript:, data:, file:,
+                     * vbscript: and friends are what turn "open a link" into
+                     * code execution, and no host policy should have to
+                     * re-litigate them. */
+                    if (ok && !rip_url_scheme_allowed(u, ulen))
+                        ok = 0;
+                    if (ok) {
+                        memcpy(s->goto_url, u, (size_t)ulen);
+                        s->goto_url[ulen] = '\0';
+                        /* Opt-in only.  With no handler registered the URL is
+                         * merely stored -- RIPlib itself launches nothing. */
+                        if (s->url_handler)
+                            s->url_handler(s->goto_url, ulen);
+                    }
                 }
             }
             break;
@@ -2350,19 +2375,24 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
-        case 'R': /* Register text variable — id:4 flags:2 name:string
+        case 'R': /* Register text variable — id:4 flags:2 res:8 name:string
                    * Handler RVA 0x0252F2.  Diagnostics: "Can't register text
                    * variable - invalid variable name".  Maps onto RIPlib's
-                   * existing user-variable store. */
-            if (len >= 6) {
-                const char *nm = p + 6;
-                int nlen = len - 6;
-                if (nlen > 0)
-                    (void)rip_user_var_set(s, nm, nlen, "", 0);
+                   * existing user-variable store.
+                   *
+                   * CORRECTED: slot 127 records mega4, mega2 and an 8-DIGIT
+                   * field, so the fixed prefix is 14 characters and the name
+                   * starts there.  RIPlib read the name from offset 6, which
+                   * lands inside the reserved field and would have prefixed
+                   * every variable name with eight stray digits.  See D-16. */
+            if (len > RIP_REGVAR_RESERVED) {
+                const char *nm = p + RIP_REGVAR_RESERVED;
+                int nlen = len - RIP_REGVAR_RESERVED;
+                (void)rip_user_var_set(s, nm, nlen, "", 0);
             }
             break;
 
-        case 'e': /* RIP_BAUD_EMULATION — rate:4
+        case 'e': /* RIP_BAUD_EMULATION — rate:2
                    *
                    * CORRECTED 2026-08-12.  This was implemented as
                    * "style-slot protection" on the strength of diagnostics
@@ -2379,11 +2409,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * no artificial delay, so the requested rate is recorded
                    * for an embedder that wants to honour it.
                    *
-                   * Width: the reference documents rate:4 while the driver's
-                   * dispatch entry records a single 2-digit field.  Both are
-                   * accepted; see docs/spec §12.13. */
-            if (len >= 4)      s->baud_emulation = (uint32_t)mega4(p);
-            else if (len >= 2) s->baud_emulation = (uint32_t)mega2(p);
+                   * Width: RESOLVED 2026-08-13.  The reference documents
+                   * rate:4, from the 2.0 draft; slot 123 records a single
+                   * mega2 and the handler (RVA 0x038BE1) loads exactly ONE
+                   * argument -- mov edi,[eax] -- and stores it.  There is no
+                   * second field to read.  RIPlib previously preferred a
+                   * mega4 whenever four characters were available, which read
+                   * two of the driver's fields as one; it is now mega2, per
+                   * the arbiter.  A 2.0-era scene emitting four digits has
+                   * its trailing two ignored, which is what the 3.0 driver
+                   * does with them.  No corpus scene sends '|3e' at all. */
+            if (len >= 2) s->baud_emulation = (uint32_t)mega2(p);
             break;
 
         case 'D': /* RIP_DELAY — ticks:4, in sixtieths of a second.
@@ -2932,11 +2968,21 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
-        case 'i': /* RIP_ImageStyle — x0:XY y0:XY x1:XY y1:XY flags:4 res
+        case 'i': /* RIP_ImageStyle — x0:XY y0:XY x1:XY y1:XY flags:4 res:12
                    * Handler RVA 0x00C39A, "Invalid flags parameter".
                    * This is the command B8 established exists, against
-                   * RIPlib's previous (non-existent) '1S'. */
-            if (len >= 12) {
+                   * RIPlib's previous (non-existent) '1S'.
+                   *
+                   * Slot 98 records XY, XY, XY, XY, mega4 and a 12-DIGIT
+                   * reserved field -- 24 characters, which is exactly the
+                   * width of every payload in the corpus.  RIPlib reads the
+                   * meaningful 12-character prefix and ignores the reserved
+                   * tail, which is right; but it gated on 12 rather than 24,
+                   * so a truncated command was acted on where the driver
+                   * would reject it -- the same defect class as '|1g'.
+                   * The reserved field is now documented rather than left
+                   * implicit, so the field list matches the record.  D-16. */
+            if (len >= 24) {
                 /* Reuse the existing icon-style rect, which is exactly this
                  * concept: an image area plus a presentation mode. */
                 s->icon_style_active = true;

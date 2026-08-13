@@ -1093,6 +1093,70 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-16 STRING ARGUMENTS START AFTER THE RECORD'S FIXED PREFIX, AND FOUR
+     COMMANDS DID NOT.  Recorded 2026-08-13, on the iteration that took
+     the field-list comparison to zero disagreements.
+
+     Two facts, established in order:
+
+     (a) LITERAL TYPE CODES ARE DIGIT COUNTS, NEVER STRING MARKERS.
+     This was in doubt because RIP_GotoURL's record is a bare 0x08 while
+     its handler takes only a string, which invited reading 0x08 as "a
+     string follows".  Arithmetic settles it.  '|1e' records
+     XY,XY,XY,XY,mega1,mega1,mega4,mega2,0x08 -> 2+2+2+2+1+1+4+2+8 = 24,
+     and every '|1e' payload in the corpus is exactly 24 characters of
+     digits with no string at all.  '|1i' records XY,XY,XY,XY,mega4,0x0c
+     -> 2+2+2+2+4+12 = 24, and its corpus payloads are likewise exactly
+     24.  Two independent confirmations; the codes are digit counts.
+
+     (b) THE RECORD TYPES ONLY THE NUMERIC ARGUMENT ARRAY.  A trailing
+     string is passed out-of-band: RIP_Define (RVA 0x00BD39) fetches it
+     from a different stack slot than the args array and range-checks it
+     with  cmp byte ptr [ebx], 0 ; RIP_GotoURL (RVA 0x0251CB) does the
+     same and reports "No URL string present" when it is null.  So a
+     string never appears in the record -- and the record's fixed width
+     is therefore exactly the offset at which that string begins.
+
+     Checked against every command RIPlib documents with a string tail:
+
+          |1D  record 0x03 + mega2 =  5   RIPlib reads at  5   correct
+          |1F  record mega2+mega4  =  6   RIPlib reads at  6   correct
+          |3G  record 0x08         =  8   RIPlib reads at  0   WRONG
+          |3R  record 4 + 2 + 0x08 = 14   RIPlib reads at  6   WRONG
+
+     Both defects are off by exactly the width of the trailing literal
+     field they failed to skip.
+
+     '|3G' RIP_GotoURL folded eight reserved digits onto the front of
+     every URL.  RIPlib launches nothing (the neutering under SV-2/S2
+     stands), so this could not execute anything -- but it handed the
+     embedder a URL pointing somewhere other than the one sent, and an
+     embedder that displays or acts on s->goto_url under its own policy
+     is entitled to the real one.  Note the failure mode is not always
+     loud: a reserved field of digits keeps the string inside the
+     allowed character set, so validation passes and a WRONG url is
+     stored rather than none.
+
+     '|3R' prefixed every registered variable name with eight stray
+     digits, so no name a scene registered could ever be matched.
+
+     Both fixed in v2.0.3, with regression tests that fail against the
+     old offsets.  No corpus scene sends either command, so -- as with
+     D-14 -- the record and the handler are the whole of the evidence.
+
+     A THIRD defect fell out of the same arithmetic.  '|1i'
+     RIP_ImageStyle gated on 12 characters when its record is 24: the
+     12-character meaningful prefix plus a 12-digit reserved tail.
+     Ignoring the tail is correct and was never in question; acting on a
+     command that carries only the prefix is not, and is the same defect
+     class as '|1g' in D-14.  The reserved field is now documented
+     rather than left implicit, which is also what makes the field list
+     match the record exactly.
+
+     With these, the comparison of RIPlib's field lists against the
+     driver's record stands at 26 exact, 21 notation-only, 4 fixed-prefix
+     -plus-string, and ZERO disagreements, across 51 comparable commands.
+
 D-15 THE MOUSE-REGION AND BUTTON PATH: THREE DEFECTS FOUND WHILE
      RESOLVING D-14.  Recorded 2026-08-13.  Re-running the field-list
      comparison after the D-14 fixes surfaced these; the first is the

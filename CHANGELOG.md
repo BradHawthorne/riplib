@@ -44,6 +44,27 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   a non-empty host command, and all 39 buttons in the shipped corpus carry an
   empty one (`<>Clear<>`). The region is now registered regardless; dispatch
   already guards on `text_len` before sending.
+- **`|3G` `RIP_GotoURL` folded 8 reserved digits onto the front of every
+  URL.** The record's fixed prefix is the offset a trailing string starts at,
+  and this one is 8. RIPlib read from 0. It launches nothing — the `SV-2/S2`
+  neutering stands — but it handed the embedder a URL pointing somewhere
+  other than the one sent, and quietly: a reserved field of *digits* passes
+  the character validation, so a **wrong** URL was stored rather than none.
+- **`|3R` prefixed every registered variable name with 8 stray digits**
+  (record `mega4 + mega2 + 8` = 14; RIPlib read at 6), so no name a scene
+  registered could ever be matched.
+- **`|1i` `RIP_ImageStyle` gated on 12 characters against a 24-character
+  record.** Ignoring the 12-digit reserved tail is correct; acting on a
+  command carrying only the prefix is not — the same defect class as `|1g`.
+- **`|3e` `RIP_BAUD_EMULATION` preferred a `mega4`** where the record says
+  `mega2` and the handler loads exactly one argument. This was previously
+  documented as fixed when it was in fact an accept-both compromise; it now
+  matches the arbiter. No corpus scene sends `|3e`.
+
+With these, RIPlib's field lists stand at **zero disagreements** against the
+driver's dispatch record — 26 exact, 21 notation-only, and 4 that match the
+record exactly and add a documented string tail (which the record never
+expresses, since strings are passed out-of-band). See D-16.
 
 ### Added
 
