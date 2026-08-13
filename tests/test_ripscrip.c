@@ -4113,6 +4113,50 @@ static void test_l0_font_style_rejects_bad_font_number(void) {
         FAIL("|Y accepted a font number the driver rejects");
 }
 
+static void test_preproc_directive_inside_command_payload(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("<<IF>> inside a command payload is evaluated (D-26)");
+    init_fixture(&s, &ctx);
+    /* The scanner used to run only in RIP_ST_IDLE, so a directive inside a
+     * payload was never seen.  BUTTONS.RIP selects a font this way:
+     *     !|1R00000000<<IF $COLORS$<"256">>BLUEBACK.FN<<ELSE>>BLUEFADE.FN<<ENDIF>>
+     * and RIPlib requested a file literally named "<<IF $COLORS". */
+    feed_script(&s, &ctx, "!|1R00000000<<IF 1=1>>yes.txt<<ELSE>>no.txt<<ENDIF>>|");
+    if (s.icon_state.request_count != 1) {
+        FAIL("no file requested"); return;
+    }
+    if (strcmp(s.icon_state.request_queue[0], "YES") == 0)
+        PASS();
+    else
+        FAIL("conditional branch not resolved in the payload");
+}
+
+static void test_preproc_unknown_directive_passes_through(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("an unrecognised << >> run is emitted verbatim (D-26)");
+    init_fixture(&s, &ctx);
+    /* Directives are UPPERCASE.  '|1M' host-command text in the shipped
+     * corpus carries LOWERCASE <<if ...>>, which the HOST evaluates on click
+     * -- 19 of them.  The scanner has to hand those back byte for byte, or
+     * running it inside payloads would delete every one.
+     *
+     * num:2 x0 y0 x1 y1 clk clr res:5, then the host command. */
+    feed_script(&s, &ctx,
+                "!|1M010A0A1E0U1000000<<if $X$!=\"\">>A<<else>>B<<endif>>|");
+    if (s.num_mouse_regions != 1) {
+        FAIL("no region registered"); return;
+    }
+    {
+        const char *want = "<<if $X$!=\"\">>A<<else>>B<<endif>>";
+        int n = (int)strlen(want);
+        if (s.mouse_regions[0].text_len == n &&
+            memcmp(s.mouse_regions[0].text, want, (size_t)n) == 0)
+            PASS();
+        else
+            FAIL("host text was swallowed or altered");
+    }
+}
+
 static void test_l1_load_bitmap_filename_offset(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|1b takes the filename at offset 18 (D-25)");
@@ -5754,6 +5798,8 @@ int main(void) {
     test_level3_goto_url_rejects_control_chars();
     test_l0_one_palette_rejects_out_of_range();
     test_l0_font_style_rejects_bad_font_number();
+    test_preproc_directive_inside_command_payload();
+    test_preproc_unknown_directive_passes_through();
     test_l1_load_bitmap_filename_offset();
     test_l1_read_scene_skips_reserved_prefix();
     test_level3_goto_url_skips_reserved_prefix();

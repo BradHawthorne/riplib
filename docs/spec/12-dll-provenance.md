@@ -1183,17 +1183,49 @@ D-26 THE D-25 FIXES, CONFIRMED AGAINST SHIPPED CONTENT -- AND ONE
             output to whichever consumer is active (cmd_buf inside a
             command, VT100 or the text window at IDLE).
 
-     NOT APPLIED HERE.  Part 2 moves the preprocessor out of one FSM
-     state and into the byte path shared by every consumer, which is a
-     redesign of that path rather than a patch, and it changes emission
-     for every byte the parser sees.  The diagnosis is complete and the
-     evidence is recorded so the change can be made deliberately, with
-     the corpus comparison (rendering, requests, regions) as its check.
+     APPLIED 2026-08-13, both parts.
 
-     IMPACT WHILE UNFIXED: BUTTONS.RIP and CURVES.RIP request a font
-     named "<<IF $COLORS" instead of BLUEBACK.FN or BLUEFADE.FN.  Two
-     scenes, one asset each; every other request in the corpus is now
-     correct (D-26 above).
+     rip_process() is now a filter: it runs the << >> scanner for every
+     byte and hands whatever survives to rip_dispatch_byte(), which is
+     the old rip_process with the scanner lifted out of its IDLE case.
+     Splitting them is what lets a directive be recognised inside a
+     payload; nothing else about the state machine moved.
+
+     Three consequences, each of which had to be got right:
+
+       - preproc_finalize_directive() emits an unrecognised << ... >>
+         run VERBATIM, delimiters included.  Without this the rework
+         would have deleted all 19 lowercase <<if>> host commands.
+
+       - the lone-'<' false alarm now RE-DISPATCHES instead of writing
+         to the VT100 or text window directly.  The old emit was correct
+         only at IDLE; inside a command it would have dropped the
+         character rather than putting it in cmd_buf.
+
+       - the suppression check moved with the scanner, so a false branch
+         now suppresses command bytes too, not only idle text.
+
+     RESULT, against shipped content:
+
+          BUTTONS.RIP   "<<IF $COLORS"  ->  BLUEFADE
+          CURVES.RIP    "<<IF $COLORS"  ->  BLUEFADE
+          |1M host text  <<if $RETURN$!="">>$<<RETURN>>$<<else>>...
+                         preserved byte for byte, 20 regions unchanged
+
+     VERIFICATION.  All 35 corpus scenes: zero differences in foreground
+     pixels, colour counts, asset-request counts or region counts
+     against the commit before the rework -- the only thing that changed
+     is which file the two conditional scenes ask for.  300 unit tests,
+     5 suites, clean under UBSan+ASan, 400k fuzz iterations clean,
+     conformance clean.  execute_rip_command's stack is unchanged at 656
+     bytes; the byte path costs 24 bytes more for the extra frame.
+
+     Both halves carry a regression test, and both were checked for
+     teeth: the payload-directive test fails against the pre-rework
+     tree, and the verbatim test fails when part (b) alone is disabled.
+     The second is worth noting -- it passes against the OLD code too,
+     because the old scanner never saw those bytes at all, so it guards
+     the new path rather than a historical defect.
 
 D-25 THREE MORE STRING TAILS READ EARLY, FOUND BY AN ASSERTION ABOUT
      SILENCE.  Recorded 2026-08-13.

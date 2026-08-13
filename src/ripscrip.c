@@ -1651,7 +1651,29 @@ void rip_file_upload_end(void) {
  * parser entry point further down) and the directive-dispatch glue
  * that converts a recognised directive into a rip_preproc_*() call. */
 
-static void preproc_finalize_directive(rip_state_t *s) {
+static void rip_dispatch_byte(rip_state_t *s, void *ctx, uint8_t ch);
+
+/* Re-emit a << ... >> run that turned out not to be a directive.
+ *
+ * Everything the scanner swallowed has to come back, delimiters included,
+ * because the run was never a directive in the first place.  Shipped content
+ * relies on this: '|1M' host-command text carries lowercase
+ * "<<if $RETURN$!=\"\">>$<<RETURN>>$<<else>>$NULL$<<endif>>" -- 19 of them
+ * across the corpus -- which the HOST evaluates when the region is clicked.
+ * Directives are UPPERCASE; these are literal text and must reach cmd_buf
+ * intact.  See D-26. */
+static void preproc_emit_verbatim(rip_state_t *s, void *ctx) {
+    int i;
+
+    rip_dispatch_byte(s, ctx, '<');
+    rip_dispatch_byte(s, ctx, '<');
+    for (i = 0; i < s->preproc_len; i++)
+        rip_dispatch_byte(s, ctx, (uint8_t)s->preproc_buf[i]);
+    rip_dispatch_byte(s, ctx, '>');
+    rip_dispatch_byte(s, ctx, '>');
+}
+
+static void preproc_finalize_directive(rip_state_t *s, void *ctx) {
     const char *dir;
 
     if (s->preproc_len < (int)sizeof(s->preproc_buf))
@@ -1706,6 +1728,15 @@ static void preproc_finalize_directive(rip_state_t *s) {
                 riplib_host_tx(buf, n);
         }
 #endif
+    } else {
+        /* Not a directive.  Put it back verbatim rather than discarding it:
+         * the scanner cannot know a << ... >> run is a directive until it has
+         * already eaten the whole thing, and anything it does not recognise
+         * is ordinary text that some consumer was waiting for.  Discarding it
+         * -- which is what this did -- silently deleted every lowercase
+         * <<if>> in '|1M' host-command text and any <<foo>> a scene put in
+         * display text.  D-26. */
+        preproc_emit_verbatim(s, ctx);
     }
 
     s->preproc_len = 0;
@@ -5220,7 +5251,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
  * lastChar  saved at pContext+0x9F for '!' line-boundary detection.
  * ══════════════════════════════════════════════════════════════════ */
 
-void rip_process(rip_state_t *s, void *ctx, uint8_t ch) {
+/* One byte, past the pre-processor.  rip_process() below is the public entry
+ * point: it runs the << … >> filter first and calls this for whatever
+ * survives.  Splitting them is what lets a directive be recognised INSIDE a
+ * command payload as well as between commands -- see D-26. */
+static void rip_dispatch_byte(rip_state_t *s, void *ctx, uint8_t ch) {
     comp_context_t *c = (comp_context_t *)ctx;
     g_rip_state = s;
 
@@ -5242,82 +5277,6 @@ reprocess:
      * text-window routing, and ANSI passthrough.
      * ─────────────────────────────────────────────────────────── */
     case RIP_ST_IDLE:
-        /* E4: <<IF>>/<<ELSE>>/<<ENDIF>> stream-level pre-processor.
-         * Evaluated before all other IDLE-state logic so that suppressed
-         * content (preproc_suppress==true) is swallowed before it can
-         * reach the VT100 passthrough or the '!' detector.
-         *
-         * State machine for the << … >> wrapper:
-         *   preproc_state 0 = normal — watch for first '<'
-         *   preproc_state 1 = got one '<' — watch for second '<'
-         *   preproc_state 2 = inside <<…>> — collect directive bytes
-         *   preproc_state 3 = saw one '>' inside <<…>> — confirm closing >>
-         *
-         * Directive evaluation is intentionally minimal: the DLL supports
-         * only simple string comparisons of $VARIABLE$ values, so we do
-         * the same. Unknown directives are ignored. */
-        if (s->preproc_state == 0 && ch == '<') {
-            s->preproc_state = 1;
-            return; /* swallow first '<', wait for second */
-        }
-        if (s->preproc_state == 1) {
-            if (ch == '<') {
-                /* Got <<  — start collecting directive bytes */
-                s->preproc_state = 2;
-                s->preproc_len   = 0;
-                return;
-            }
-            /* False alarm — was a lone '<'; emit it and re-process ch */
-            s->preproc_state = 0;
-            if (!s->preproc_suppress) {
-                if (s->tw_active) rip_tw_putchar(s, '<');
-                else              comp_passthrough_vt100(c, '<');
-            }
-            /* Fall through to normal processing of ch below */
-        }
-        if (s->preproc_state == 2) {
-            if (ch == '\r' || ch == '\n') {
-                s->preproc_state = 0;
-                s->preproc_len = 0;
-            } else if (ch == '>') {
-                s->preproc_state = 3;
-                return;
-            } else {
-                /* Bail out on malformed oversized directives rather than
-                 * wedging the parser until a later literal >> appears. */
-                if (s->preproc_len >= (int)sizeof(s->preproc_buf) - 1) {
-                    s->preproc_state = 0;
-                    s->preproc_len = 0;
-                    return;
-                }
-                s->preproc_buf[s->preproc_len++] = (char)ch;
-                return;
-            }
-        }
-        if (s->preproc_state == 3) {
-            if (ch == '\r' || ch == '\n') {
-                s->preproc_state = 0;
-                s->preproc_len = 0;
-            } else if (ch == '>') {
-                s->preproc_state = 0;
-                preproc_finalize_directive(s);
-                return;
-            } else {
-                if (s->preproc_len >= (int)sizeof(s->preproc_buf) - 2) {
-                    s->preproc_state = 0;
-                    s->preproc_len = 0;
-                    return;
-                }
-                s->preproc_buf[s->preproc_len++] = '>';
-                s->preproc_buf[s->preproc_len++] = (char)ch;
-                s->preproc_state = 2;
-                return;
-            }
-        }
-
-        /* When suppressing, swallow all output bytes except '<' (which could
-         * start a new << sequence via preproc_state machinery above). */
-        if (s->preproc_suppress && ch != '<') return;
 
         /* Syntax rule 12: SOH (0x01) is an alternate command introducer,
          * accepted ANYWHERE in a line — deliberately host-only, since a BBS
@@ -5767,6 +5726,102 @@ reprocess:
  *   or 0x00 to commit the accumulated buffer to host_date.
  * The *_state form is reentrant across distinct rip_state_t instances;
  * rip_sync_date_byte() wraps the single active session (g_rip_state). */
+
+/* Public entry point: the << >> pre-processor filter, then dispatch.
+ *
+ * The scanner used to sit inside `case RIP_ST_IDLE`, which meant a
+ * directive was only recognised BETWEEN commands.  Shipped content puts
+ * them inside a payload -- BUTTONS.RIP selects a font with
+ *     !|1R00000000<<IF $COLORS$<"256">>BLUEBACK.FN<<ELSE>>BLUEFADE.FN<<ENDIF>>
+ * -- so the filter has to run for every byte, whatever state the FSM is
+ * in.  Directives are UPPERCASE; the lowercase <<if>> that appears in
+ * '|1M' host-command text is not a directive and passes through
+ * untouched, which is what preproc_finalize_directive() now guarantees
+ * by emitting anything it does not recognise verbatim.  See D-26. */
+void rip_process(rip_state_t *s, void *ctx, uint8_t ch) {
+    /* E4: <<IF>>/<<ELSE>>/<<ENDIF>> stream-level pre-processor.
+     * Evaluated before all other IDLE-state logic so that suppressed
+     * content (preproc_suppress==true) is swallowed before it can
+     * reach the VT100 passthrough or the '!' detector.
+     *
+     * State machine for the << … >> wrapper:
+     *   preproc_state 0 = normal — watch for first '<'
+     *   preproc_state 1 = got one '<' — watch for second '<'
+     *   preproc_state 2 = inside <<…>> — collect directive bytes
+     *   preproc_state 3 = saw one '>' inside <<…>> — confirm closing >>
+     *
+     * Directive evaluation is intentionally minimal: the DLL supports
+     * only simple string comparisons of $VARIABLE$ values, so we do
+     * the same. Unknown directives are ignored. */
+    if (s->preproc_state == 0 && ch == '<') {
+        s->preproc_state = 1;
+        return; /* swallow first '<', wait for second */
+    }
+    if (s->preproc_state == 1) {
+        if (ch == '<') {
+            /* Got <<  — start collecting directive bytes */
+            s->preproc_state = 2;
+            s->preproc_len   = 0;
+            return;
+        }
+        /* False alarm — was a lone '<'; emit it and re-process ch */
+        /* Re-dispatch, so the character reaches whichever consumer is
+         * active: the VT100 or text window at IDLE, cmd_buf inside a
+         * command.  Emitting straight to the terminal here -- which is
+         * what this did -- dropped a lone '<' whenever one appeared in a
+         * command payload. */
+        s->preproc_state = 0;
+        if (!s->preproc_suppress)
+            rip_dispatch_byte(s, ctx, '<');
+        /* Fall through to normal processing of ch below */
+    }
+    if (s->preproc_state == 2) {
+        if (ch == '\r' || ch == '\n') {
+            s->preproc_state = 0;
+            s->preproc_len = 0;
+        } else if (ch == '>') {
+            s->preproc_state = 3;
+            return;
+        } else {
+            /* Bail out on malformed oversized directives rather than
+             * wedging the parser until a later literal >> appears. */
+            if (s->preproc_len >= (int)sizeof(s->preproc_buf) - 1) {
+                s->preproc_state = 0;
+                s->preproc_len = 0;
+                return;
+            }
+            s->preproc_buf[s->preproc_len++] = (char)ch;
+            return;
+        }
+    }
+    if (s->preproc_state == 3) {
+        if (ch == '\r' || ch == '\n') {
+            s->preproc_state = 0;
+            s->preproc_len = 0;
+        } else if (ch == '>') {
+            s->preproc_state = 0;
+            preproc_finalize_directive(s, ctx);
+            return;
+        } else {
+            if (s->preproc_len >= (int)sizeof(s->preproc_buf) - 2) {
+                s->preproc_state = 0;
+                s->preproc_len = 0;
+                return;
+            }
+            s->preproc_buf[s->preproc_len++] = '>';
+            s->preproc_buf[s->preproc_len++] = (char)ch;
+            s->preproc_state = 2;
+            return;
+        }
+    }
+
+    /* When suppressing, swallow all output bytes except '<' (which could
+     * start a new << sequence via preproc_state machinery above). */
+    if (s->preproc_suppress && ch != '<') return;
+
+    rip_dispatch_byte(s, ctx, ch);
+}
+
 void rip_sync_date_byte_state(rip_state_t *s, uint8_t data_byte) {
     if (!s) return;
     if (data_byte == '\0') {

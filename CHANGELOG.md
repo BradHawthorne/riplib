@@ -141,10 +141,26 @@ never sees bytes inside a command; and an unrecognised directive is
 *swallowed* rather than emitted, so naively extending it would eat `|1M`'s
 lowercase host commands — a regression in the same two scenes.
 
-Not applied because part two moves the preprocessor out of one FSM state into
-the byte path shared by every consumer — a redesign of that path, not a patch.
-The diagnosis and fix design are recorded so it can be done deliberately. See
-D-26.
+**Both parts now applied.** `rip_process()` is a filter that runs the `<< >>`
+scanner for every byte and hands what survives to `rip_dispatch_byte()` — the
+old `rip_process` with the scanner lifted out of its IDLE case. Three things
+had to be right together: unrecognised runs are emitted **verbatim** (without
+which the rework would have deleted all 19 lowercase `<<if>>` host commands);
+the lone-`<` false alarm re-dispatches instead of writing to the terminal
+directly (correct only at IDLE, would have dropped the character inside a
+command); and suppression moved with the scanner, so a false branch now
+suppresses command bytes too.
+
+Against shipped content: BUTTONS.RIP and CURVES.RIP now request **`BLUEFADE`**
+instead of a file named `<<IF $COLORS`, while `|1M`'s host text
+(`<<if $RETURN$!="">>$<<RETURN>>$<<else>>…`) survives byte-for-byte with all 20
+regions intact.
+
+Across all 35 scenes: **zero** differences in pixels, colours, request counts
+or region counts against the pre-rework commit — the only change is which file
+the two conditional scenes ask for. Clean under UBSan+ASan and 400k fuzz
+iterations; `execute_rip_command`'s stack is unchanged at 656 bytes, the byte
+path costs 24 more for the extra frame. See D-26.
 
 ### Fixed (build)
 
