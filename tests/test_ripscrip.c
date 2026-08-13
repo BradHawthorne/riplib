@@ -1169,7 +1169,7 @@ static void test_l1_audio_pushes_marker(void) {
     init_fixture(&s, &ctx);
     tx_reset();
     /* 1A: mode:2 res:2 filename = 4 chars + filename. */
-    feed_script(&s, &ctx, "!|1A0000BEEP|");
+    feed_script(&s, &ctx, "!|1A000000BEEP|");
     if (tx_len >= 6 &&
         tx_capture[0] == 0x3D &&
         memcmp(tx_capture + 1, "BEEP", 4) == 0 &&
@@ -2779,7 +2779,7 @@ static void test_write_icon_caches_clipboard_for_load_icon(void) {
     draw_set_color(77);
     draw_rect(2, 2, 2, 2, true);
     feed_script(&s, &ctx, "!|1C02020202 |");
-    feed_script(&s, &ctx, "!|1WTESTICON|");
+    feed_script(&s, &ctx, "!|1W0TESTICON|");
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|1I0A0A00000TESTICON|");
     if (draw_get_pixel(10, 11) == 77)
@@ -2797,12 +2797,12 @@ static void test_write_icon_replaces_cached_name(void) {
     draw_set_color(77);
     draw_rect(2, 2, 2, 2, true);
     feed_script(&s, &ctx, "!|1C02020202 |");
-    feed_script(&s, &ctx, "!|1WTESTICON|");
+    feed_script(&s, &ctx, "!|1W0TESTICON|");
 
     draw_set_color(66);
     draw_rect(2, 2, 2, 2, true);
     feed_script(&s, &ctx, "!|1C02020202 |");
-    feed_script(&s, &ctx, "!|1WTESTICON|");
+    feed_script(&s, &ctx, "!|1W0TESTICON|");
 
     draw_fill_screen(0);
     feed_script(&s, &ctx, "!|1I0A0A00000TESTICON|");
@@ -4111,6 +4111,29 @@ static void test_l0_font_style_rejects_bad_font_number(void) {
         PASS();
     else
         FAIL("|Y accepted a font number the driver rejects");
+}
+
+static void test_l1_load_bitmap_filename_offset(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1b takes the filename at offset 18 (D-25)");
+    init_fixture(&s, &ctx);
+    /* Slot 88 records XY, XY, XY, XY, mega1, mega1, mega2, mega2, mega4 --
+     * an 18-character fixed prefix, with the filename following (D-16).
+     * The corpus confirms it exactly: BUTTONS.RIP sends
+     *     "VU0QYY1S0000000000back.bmp"
+     *      ^---- 18 fixed ----^^ name ^
+     * RIPlib read from offset 14 and asked the host for "0000back.bmp".
+     * 36 '|1b' commands ship in the corpus, every one of them requesting a
+     * name no host could match. */
+    feed_script(&s, &ctx, "!|1bVU0QYY1S0000000000back.bmp|");
+    if (s.icon_state.request_count != 1) {
+        FAIL("|1b queued no file request"); return;
+    }
+    /* Queued uppercased with the extension stripped. */
+    if (strcmp(s.icon_state.request_queue[0], "BACK") == 0)
+        PASS();
+    else
+        FAIL("|1b requested the wrong filename");
 }
 
 static void test_l1_read_scene_skips_reserved_prefix(void) {
@@ -5731,6 +5754,7 @@ int main(void) {
     test_level3_goto_url_rejects_control_chars();
     test_l0_one_palette_rejects_out_of_range();
     test_l0_font_style_rejects_bad_font_number();
+    test_l1_load_bitmap_filename_offset();
     test_l1_read_scene_skips_reserved_prefix();
     test_level3_goto_url_skips_reserved_prefix();
     test_level3_register_var_skips_reserved();

@@ -39,7 +39,17 @@ static int tests_passed = 0;
 
 void palette_write_rgb565(uint8_t i, uint16_t v) { palette[i] = v; }
 uint16_t palette_read_rgb565(uint8_t i) { return palette[i]; }
-void riplib_host_tx(const char *buf, int len) { (void)buf; (void)len; }
+/* Host traffic is COUNTED, not discarded.  The harness used to stub this to
+ * nothing, which put every byte a scene sends back to the host outside the
+ * measurement -- the same blind spot that hid the '|1U' and '|1M' interaction
+ * defects until mouse regions were counted (D-24).  A scene that stops
+ * answering a query, or starts answering one it should not, moves this. */
+static long tx_bytes;
+void riplib_host_tx(const char *buf, int len) {
+    (void)buf;
+    if (len > 0)
+        tx_bytes += len;
+}
 
 #define TEST(name) do { tests_run++; printf("  %-46s ", name); } while (0)
 #define PASS() do { tests_passed++; printf("PASS\n"); } while (0)
@@ -105,7 +115,8 @@ static int load_file(const char *path, unsigned char **out, size_t *n) {
  * shapes it was not actually measuring; the fix in both places is to
  * discount the background before believing the number. */
 static int replay(const char *path, const char **why,
-                  long *painted, int *colours, int *requests, int *regions) {
+                  long *painted, int *colours, int *requests, int *regions,
+                  long *tx) {
     rip_state_t s;
     comp_context_t ctx;
     unsigned char *data;
@@ -115,6 +126,8 @@ static int replay(const char *path, const char **why,
     *colours = 0;
     *requests = 0;
     *regions = 0;
+    *tx = 0;
+    tx_bytes = 0;
     if (!load_file(path, &data, &n)) {
         *why = "could not read file";
         return 0;
@@ -159,6 +172,7 @@ static int replay(const char *path, const char **why,
      * were read from a reserved column and were always zero.  A scene that
      * silently stops registering its interactive areas now shows up here. */
     *regions = s.num_mouse_regions;
+    *tx = tx_bytes;
 
     /* A well-formed scene must leave the FSM back at idle.  Anything else
      * means a command swallowed the rest of the stream. */
@@ -170,6 +184,23 @@ static int replay(const char *path, const char **why,
     if (!guards_intact()) {
         free(data);
         *why = "drawing escaped the framebuffer";
+        return 0;
+    }
+    /* Passively rendering a scene must not send anything to the host.
+     *
+     * This is an assertion, not a statistic.  RIPlib's security posture is
+     * that untrusted content cannot make the terminal act on its own -- it
+     * never launches a URL, never touches the filesystem, and must not open
+     * its mouth to the BBS either.  Host traffic is a RESPONSE: to a click,
+     * to a query the host itself initiated, to a file the host asked about.
+     * None of that happens during replay, so anything here means a command
+     * started talking unbidden.
+     *
+     * All 35 shipped scenes emit zero bytes today.  The 95 '|#' commands in
+     * the corpus are RIP_NO_MORE, a scene terminator, not a query. */
+    if (tx_bytes != 0) {
+        free(data);
+        *why = "scene sent data to the host during passive replay";
         return 0;
     }
 
@@ -195,11 +226,12 @@ int main(void) {
         const char *base = strrchr(riplib_corpus_scenes[i], '/');
         long painted = 0;
         int colours = 0, requests = 0, regions = 0;
+        long tx = 0;
 
         base = base ? base + 1 : riplib_corpus_scenes[i];
         TEST(base);
         if (!replay(riplib_corpus_scenes[i], &why, &painted, &colours,
-                    &requests, &regions)) {
+                    &requests, &regions, &tx)) {
             FAIL(why);
         } else {
             /* Zero output is not a failure: some shipped scenes are
@@ -210,7 +242,7 @@ int main(void) {
              * pixels catch a scene reduced to its background, and the
              * colour count catches one reduced to a single flat fill. */
             tests_passed++;
-            if (painted == 0 && requests == 0 && regions == 0)
+            if (painted == 0 && requests == 0 && regions == 0 && tx == 0)
                 printf("PASS        0 fg  (background only, nothing asked for)\n");
             else if (painted == 0)
                 printf("PASS        0 fg  (%d asset request(s), %d region(s))\n",

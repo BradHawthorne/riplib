@@ -175,6 +175,14 @@ READ = re.compile(
     r"\s*\(\s*p\s*(?:\+\s*(\d+)\s*)?\)"
     r"|\b(mega_digit)\s*\(\s*p\s*\[\s*(\d+)\s*\]\s*\)")
 GATE = re.compile(r"\bif\s*\(\s*len\s*(>=|>)\s*(\d+)")
+# A trailing string is a `p + N` pointer, not a decode, so the offset check
+# above cannot see it.  It needs its own check -- and did not have one until
+# '|1A' and '|1b' were found reading their filenames four characters early,
+# by which point '|1b' had been asking the host for "0000back.bmp" in all 36
+# of its corpus appearances.
+STR_BASE = re.compile(
+    r"(?:fname|filename|name|nm|path|text|url|u|fn)\w*\s*=\s*p\s*\+\s*(\d+)")
+STR_LEN = re.compile(r"=\s*len\s*-\s*(\d+)\s*;")
 MULTI = re.compile(r"else\s+if\s*\(\s*len\s*(==|>=)\s*\d+")
 B64 = re.compile(r"_64\s*\(")
 B36 = re.compile(r"\bmega(?:_digit|1|2|3|4)\s*\(")
@@ -225,7 +233,14 @@ def check_gates(sigs, lines, verbose):
             continue
         want = min(sum(w) for w in sigs[key])
         admits = int(g.group(2)) + (1 if g.group(1) == ">" else 0)
-        if admits == want:
+        # A command with a trailing string may legitimately require ONE more
+        # than the fixed prefix, where an empty string makes it meaningless --
+        # '|1W' cannot cache under no name, '|1R' cannot request no file.
+        # Where the string is optional (a mouse region with no host command,
+        # a button with no label) the gate is the prefix exactly.  Both are
+        # accepted; anything else is not.
+        has_tail = bool(STR_BASE.search(txt) or STR_LEN.search(txt))
+        if admits == want or (has_tail and admits == want + 1):
             ok += 1
         elif tag in TOLERATED_GATES:
             tol += 1
@@ -238,6 +253,36 @@ def check_gates(sigs, lines, verbose):
     if verbose:
         print("    %d match, %d multi-length, %d tolerated, %d without a "
               "numeric gate" % (ok, multi, tol, nogate))
+    return bad
+
+
+def check_string_tails(sigs, lines, verbose):
+    """A trailing string starts at the record's fixed width, exactly.
+
+    The record types only the numeric argument array; a string is passed
+    out-of-band and never appears in it, so the record's total IS the string's
+    offset.  Reading it early prefixes the value with reserved digits, which
+    is silent -- a filename that no host can match, a URL pointing elsewhere.
+    """
+    bad = checked = 0
+    for lvl, ch, _, txt in handler_bodies(lines, stop_at_break=False):
+        key = (lvl, ch)
+        if key not in sigs or not sigs[key]:
+            continue
+        offs = {int(x) for x in STR_BASE.findall(txt)}
+        offs |= {int(x) for x in STR_LEN.findall(txt)}
+        if not offs:
+            continue
+        want = min(sum(w) for w in sigs[key])
+        tag = "|%s%s" % (lvl or "", ch)
+        for o in sorted(offs):
+            checked += 1
+            if o != want:
+                bad += 1
+                print("  ! %-5s string read at %d, record's fixed width is %d"
+                      % (tag, o, want))
+    if verbose:
+        print("    %d string offsets checked" % checked)
     return bad
 
 
@@ -311,6 +356,7 @@ def main():
 
     defects = 0
     for name, fn in (("read offsets", lambda: check_offsets(sigs, lines, a.verbose)),
+                     ("string tails", lambda: check_string_tails(sigs, lines, a.verbose)),
                      ("length gates", lambda: check_gates(sigs, lines, a.verbose)),
                      ("radix selection", lambda: check_radix(sigs, meta, lines, a.verbose)),
                      ("coverage", lambda: check_coverage(sigs, meta, lines, a.verbose))):

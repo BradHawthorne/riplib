@@ -1093,6 +1093,69 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-25 THREE MORE STRING TAILS READ EARLY, FOUND BY AN ASSERTION ABOUT
+     SILENCE.  Recorded 2026-08-13.
+
+     D-24 counted mouse regions because pixel metrics could not see the
+     interaction fixes.  Applying the same reasoning to the other
+     non-rendering output -- host traffic, which the corpus harness
+     stubbed away entirely -- turned it into an assertion rather than a
+     statistic:
+
+          passively rendering a scene must send NOTHING to the host
+
+     That is a security property, not a style preference.  RIPlib's
+     posture is that untrusted content cannot make the terminal act on
+     its own; it never launches a URL and never touches the filesystem,
+     and it must not open its mouth to the BBS either.  Host traffic is
+     a RESPONSE -- to a click, to a query the host began, to a file the
+     host asked about -- and none of that happens during replay.
+
+     34 of 35 scenes passed.  NEWS.RIP did not.
+
+     '|1A' RIP_PLAY_AUDIO READ ITS FILENAME AT 4, NOT 6.  Slot 86
+     records mega2 + mega4; the comment said "mode:2 res:2" and the code
+     matched the comment.  NEWS.RIP sends "|1A010000" -- exactly the six
+     fixed characters and no filename at all -- so RIPlib took "00" as
+     the name and pushed a sound request for a file called "00".
+
+     Chasing the class then found two more, neither reachable by the
+     offset audit: that check looks at mega*() decodes, and a string
+     tail is a `p + N` pointer, not a decode.
+
+     '|1b' RIP_LoadBitmap READ ITS FILENAME AT 14, NOT 18.  This is the
+     one that matters.  Slot 88 records XY, XY, XY, XY, mega1, mega1,
+     mega2, mega2, mega4 = 18, and the corpus confirms it exactly:
+
+          BUTTONS.RIP  "VU0QYY1S0000000000back.bmp"
+                        ^---- 18 fixed ----^^ name ^
+
+     RIPlib asked the host for "0000back.bmp".  THIRTY-SIX '|1b'
+     commands ship in the corpus, every one of them requesting a name no
+     host could match -- in the command that loads the artwork.  Same
+     defect as '|1R' (D-19), and it survived that pass because D-19
+     enumerated string-tail commands by hand and this one was not on the
+     list.
+
+     '|1W' RIP_WRITE_ICON used a HEURISTIC instead of the record: it took
+     the whole payload as the name and stripped a leading "00" if it
+     happened to see one.  Slot 108 records one mega1, so the name
+     starts at offset 1 -- the heuristic strips two where the record
+     says one, and strips nothing when the reserved digit is not '0'.
+     No corpus scene sends '|1W'.
+
+     '|1Z', '|1N' and '|1O' have NO dispatch entry at all, so there is no
+     record to check them against; '|1t' and '|1F' were verified correct.
+
+     THE CHECK NOW EXISTS.  scripts/dll-conformance.py gained a
+     string-tail class, which is what should have caught all three.  It
+     encodes one nuance learned immediately after: a command whose
+     trailing string may be EMPTY gates at the fixed prefix exactly (a
+     mouse region with no host command, a button with no label), while
+     one where an empty string is meaningless gates at prefix+1 ('|1W'
+     cannot cache under no name, '|1R' cannot request no file).  Both
+     are accepted; anything else is not.
+
 D-24 THE CORPUS REPLAY COULD NOT SEE ANY OF THE INTERACTION FIXES.
      Recorded 2026-08-13.
 

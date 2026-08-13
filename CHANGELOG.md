@@ -104,6 +104,32 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**An assertion about silence found three more string-tail defects.** The
+corpus harness stubbed `riplib_host_tx` away entirely, so anything a scene
+sent to the host vanished unmeasured. Turning that into an assertion —
+*passively rendering a scene must send nothing to the host* — failed on 1 of
+35 scenes.
+
+That is a security property, not a style preference: RIPlib's posture is that
+untrusted content cannot make the terminal act on its own, and host traffic is
+always a *response* (to a click, to a query the host began), none of which
+happens during replay.
+
+- **`|1A` `RIP_PLAY_AUDIO` read its filename at 4, not 6.** NEWS.RIP sends
+  `|1A010000` — the six fixed characters and no filename — so RIPlib took
+  `"00"` as a name and pushed a sound request for it.
+- **`|1b` `RIP_LoadBitmap` read its filename at 14, not 18.** This is the one
+  that matters: slot 88's fixed prefix is 18 and the corpus confirms it
+  (`"VU0QYY1S0000000000back.bmp"`). RIPlib asked for `"0000back.bmp"` — **36
+  commands across the corpus, every one requesting a name no host could
+  match**, in the command that loads the artwork.
+- **`|1W` `RIP_WRITE_ICON` used a heuristic instead of the record**, stripping
+  a leading `"00"` where the record says one reserved character.
+
+None was reachable by the offset audit — that check looks at `mega*()`
+decodes, and a string tail is a `p + N` pointer. `dll-conformance.py` gained a
+string-tail class, which is what should have caught all three. See D-25.
+
 **The corpus replay now counts mouse regions.** It measured foreground
 pixels, colours, asset requests, FSM state and guard bands — so of the three
 interaction defects fixed above (`|1U` buttons never registering, `|1M` flags

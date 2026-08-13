@@ -3009,9 +3009,19 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * parameter".  Loading a file needs a filesystem RIPlib
                    * does not have; the name is validated and queued through
                    * the same host-request path as the other file commands. */
+            /* CORRECTED: slot 88 records XY, XY, XY, XY, mega1, mega1,
+             * mega2, mega2, mega4 -- an EIGHTEEN-character fixed prefix, and
+             * the filename starts there.  RIPlib read it from 14, so every
+             * bitmap request carried four stray leading zeros:
+             *     BUTTONS.RIP  "VU0QYY1S0000000000back.bmp"
+             *                   ^--- 18 fixed ---^^-- name --^
+             * asked the host for "0000back.bmp".  36 '|1b' commands across
+             * the shipped corpus, every one requesting a name no host could
+             * match -- the same defect as '|1R' (D-19), in the command that
+             * loads the actual artwork.  D-25. */
             if (len >= 18) {
-                const char *fn = p + 14;
-                int fnlen = len - 14;
+                const char *fn = p + 18;
+                int fnlen = len - 18;
                 if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
                     rip_icon_request_file(&s->icon_state, fn, fnlen);
                 /* rip_filename_is_safe rejects '..', path separators and
@@ -3119,14 +3129,22 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * noted here; bbs-land documents a single 4 instead. */
             break;
 
-        case 'W': /* RIP_WRITE_ICON — cache current clipboard under a filename */
-            if (len > 0 && s->clipboard.valid && s->clipboard.data) {
-                const char *name = p;
-                int name_len = len;
-                if (name_len > 2 && p[0] == '0' && p[1] == '0') {
-                    name = p + 2;
-                    name_len -= 2;
-                }
+        case 'W': /* RIP_WRITE_ICON — res:1 filename
+                   *
+                   * Cache the current clipboard under a filename.  Slot 108
+                   * records a single mega1, so the fixed prefix is ONE
+                   * character and the name starts at offset 1.
+                   *
+                   * CORRECTED: this used to take the whole payload as the
+                   * name and then strip a leading "00" if it happened to see
+                   * one -- a heuristic standing in for the record, which
+                   * strips two characters where the record says one and
+                   * strips nothing when the reserved digit is not '0'.  No
+                   * corpus scene sends '|1W', so nothing shipped depended on
+                   * either reading.  D-25. */
+            if (len > 1 && s->clipboard.valid && s->clipboard.data) {
+                const char *name = p + 1;
+                int name_len = len - 1;
                 (void)rip_cache_clipboard_as_icon(s, name, name_len, NULL);
             }
             break;
@@ -3134,12 +3152,23 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         /* ── Audio playback commands ───────────────────────────── */
         case 'A': /* RIP_PLAY_AUDIO — play audio file.
                    * DLL: calls ripAudioPlay() which invokes CB_PLAY_SOUND.
-                   * Format: mode:2 res:2 filename (free text, pipe-terminated).
+                   * Format: mode:2 res:4 filename (free text, pipe-terminated).
                    * RIPlib:push CMD_PLAY_SOUND marker (0x3D) + filename + NUL
-                   * via TX FIFO; host bridge dispatches to DOC sound chip. */
+                   * via TX FIFO; host bridge dispatches to DOC sound chip.
+                   *
+                   * CORRECTED: slot 86 records mega2 + mega4, so the fixed
+                   * prefix is SIX characters and the filename starts there;
+                   * the comment said "res:2" and the code read from 4.
+                   * NEWS.RIP sends "|1A010000" -- exactly the six fixed
+                   * characters and no filename -- so RIPlib took "00" as a
+                   * name and pushed a sound request for it.  That was the
+                   * only host traffic any of the 35 corpus scenes produced
+                   * during passive replay, and it is how this was found:
+                   * the corpus harness now asserts that rendering content
+                   * sends nothing to the host.  D-25. */
             if (len >= 6) {
-                const char *fname = p + 4;
-                int fname_len = len - 4;
+                const char *fname = p + 6;
+                int fname_len = len - 6;
                 if (fname_len > 0 && fname_len <= 64) {
                     char snd_buf[70];
                     snd_buf[0] = (char)0x3D; /* CMD_PLAY_SOUND marker */
