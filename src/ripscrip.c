@@ -2533,7 +2533,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    *   flags bit 1 → MF_RADIO(0x20)
                    *   flags bit 2 → MF_TOGGLE(0x40)
                    *   always set  → MF_ACTIVE(0x04)  — DLL: *pFlagByte |= MF_ACTIVE */
-            if (len >= 13 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
+            if (len >= 17 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
                 rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
                 r->x0 = mega2(p + 2);  r->y0 = scale_y(mega2(p + 4));
                 r->x1 = mega2(p + 6);  r->y1 = scale_y1(mega2(p + 8));
@@ -2578,7 +2578,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * wid:2 hgt:2 orient:2 flags:4 bevsize:2 dfore:2 dback:2
                    * bright:2 dark:2 surface:2 grp_no:2 flags2:2 uline:2 corner:2 res:6
                    * Total: 36 chars (30 meaningful + 6 reserved) */
-            if (len >= 30) {
+            if (len >= 36) {
                 rip_button_style_t *bs = &s->button_style;
                 bs->width      = mega2(p);
                 bs->height     = mega2(p + 2);
@@ -2780,7 +2780,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
         case 'P': /* RIP_PUT_IMAGE — paste clipboard to screen
                    * x:2 y:2 mode:2 res:1 */
-            if (len >= 5 && s->clipboard.valid && s->clipboard.data) {
+            if (len >= 7 && s->clipboard.valid && s->clipboard.data) {
                 int16_t px = mega2(p), py = scale_y(mega2(p + 2));
                 /* mode at p+4: 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT — the
                  * RIPscrip wire encoding, confirmed against RIPSCRIP.DLL
@@ -2999,7 +2999,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         case 'c': /* RIP_SetMouseCursor — cursor:2 res:4
                    * Handler RVA 0x00DC96.  RIPlib renders no pointer, so the
                    * selection is recorded for an embedder that does. */
-            if (len >= 2)
+            if (len >= 6)
                 s->mouse_cursor_id = (uint8_t)(mega2(p) & 0xFF);
             break;
 
@@ -3009,7 +3009,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * parameter".  Loading a file needs a filesystem RIPlib
                    * does not have; the name is validated and queued through
                    * the same host-request path as the other file commands. */
-            if (len >= 14) {
+            if (len >= 18) {
                 const char *fn = p + 14;
                 int fnlen = len - 14;
                 if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
@@ -3040,7 +3040,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * The search-word highlighting layer is not implemented;
                    * the text block itself reuses the existing '1T' path so
                    * the text still renders rather than vanishing. */
-            if (len >= 8) {
+            if (len >= 24) {
                 s->text_block.active = true;
                 s->text_block.x0 = mega2(p);
                 s->text_block.y0 = scale_y(mega2(p + 2));
@@ -3137,7 +3137,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * Format: mode:2 res:2 filename (free text, pipe-terminated).
                    * RIPlib:push CMD_PLAY_SOUND marker (0x3D) + filename + NUL
                    * via TX FIFO; host bridge dispatches to DOC sound chip. */
-            if (len >= 4) {
+            if (len >= 6) {
                 const char *fname = p + 4;
                 int fname_len = len - 4;
                 if (fname_len > 0 && fname_len <= 64) {
@@ -3420,7 +3420,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * flags:3 res:2 text (format: varname[,width]:?prompt?[default])
                    * For $APP0$-$APP9$: store default value in app_vars[].
                    * For other variables: display the prompt/default as text. */
-            if (len > 0) {
+            if (len >= 5) {
                 /* Skip flags:3 + res:2, process remaining text */
                 int tstart = (len >= 5) ? 5 : 0;
                 if (tstart < len) {
@@ -3682,8 +3682,20 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * BGI line-style range, confirming args[1] is the style and args[0] is
      * the separate off/draw selector.  bbs-land documents this correctly as
      * `off_draw:1 style:1 user_pat:4 thick:2`. */
-    case '=': /* RIP_LINE_STYLE -- off_draw:1 style:1 user_pat:4 thick:2 */
-        if (len >= 2) {
+    case '=': /* RIP_LINE_STYLE -- off_draw:1 style:1 user_pat:4 thick:2
+               *
+               * Slot 14 records eight characters, and this gate admits four.
+               * That is a DELIBERATE tolerance, matched to what shipped
+               * scenes actually send: of 116 '|=' commands in the corpus,
+               * 107 are the full eight, 2 are seven and 7 are four.  The
+               * short forms are real content, so the handler reads
+               * progressively -- off_draw and style at four, the user
+               * pattern at six, the thickness at eight -- rather than
+               * rejecting a record the driver would reject.
+               *
+               * Same class as '|k' (D-18): the record says what the driver
+               * accepts, not what content exists.  See 14.3.3. */
+        if (len >= 4) {
             s->line_off_draw = (uint8_t)mega_digit(p[0]);
             s->line_style    = (uint8_t)mega_digit(p[1]);
             if (len >= 8) {
@@ -3706,7 +3718,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
     case 'Y': /* RIP_FONT_STYLE — font:2 dir:2 size:2 flags:2 */
-        if (len >= 6) {
+        if (len >= 8) {
             uint8_t fid = (uint8_t)mega2(p);
             uint8_t fdir = (uint8_t)mega2(p + 2);
             uint8_t fsize = (uint8_t)mega2(p + 4);
@@ -4006,7 +4018,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * uses a fixed subdivision depth internally; we read steps here so
                * the parser correctly consumes the full 18-char parameter field.
                * If draw_bezier is later extended to accept a step count, pass it. */
-        if (len >= 16) {
+        if (len >= 18) {
             /* steps available at p+16 when len >= 18; reserved for future use */
             /* int steps = (len >= 18) ? mega2(p + 16) : 8; */
             draw_bezier(
@@ -4313,7 +4325,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* -- Copy region (v2.0+) --------------------------------------------- */
     /* DLL command table entry 8: ',' = RIP_COPY_REGION (10 args: XY*10) */
     case ',': /* RIP_COPY_REGION -- sx0:2 sy0:2 sx1:2 sy1:2 dx:2 dy:2 dx1:2 dy1:2 res:2 res:2 */
-        if (len >= 12) {
+        if (len >= 20) {
             int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
             int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
             int16_t dx0 = mega2(p + 8),  dy0 = scale_y(mega2(p + 10));
@@ -4780,7 +4792,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* ── Stamp icon from slot (v2.0+) ───────────────────────── */
     /* DLL command table entry 10: '.' = RIP_STAMP_ICON (6 args: XY×6). */
     case '.': /* RIP_STAMP_ICON — slot:2 x:2 y:2 w:2 h:2 flags:2 */
-        if (len >= 6) {
+        if (len >= 12) {
             uint16_t slot = (uint16_t)mega2(p);
             int16_t dx = mega2(p + 2);
             int16_t dy = scale_y(mega2(p + 4));
@@ -4913,7 +4925,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* DLL command table entry 20: 'b' = RIP_EXT_TEXT_WINDOW
      * (9 args: XY,XY,XY,XY,2,2,1,4,3). */
     case 'b': /* RIP_EXT_TEXT_WINDOW — x0:2 y0:2 x1:2 y1:2 fore:2 back:2 font:1 size:4 flags:3 */
-        if (len >= 18) {
+        if (len >= 20) {
             int16_t tw_x0 = mega2(p);
             int16_t tw_y0 = mega2(p + 2);
             int16_t tw_x1 = mega2(p + 4);
@@ -5013,7 +5025,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * Recording it is still better than the previous behaviour,
                * which dropped '|r' into error recovery and could desync the
                * rest of the frame. */
-        if (len >= 2) {
+        if (len >= 6) {
             uint8_t tm_mode   = (uint8_t)mega_digit(p[0]);
             uint8_t tm_domain = (uint8_t)mega_digit(p[1]);
             if (tm_mode < 4 && tm_domain < 2) {

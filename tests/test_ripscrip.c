@@ -3251,7 +3251,7 @@ static void test_l0_font_style_Y(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|Y sets font id, dir, size");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|Y010003|");  /* font=1 dir=0 size=3 */
+    feed_script(&s, &ctx, "!|Y01000300|");  /* font=1 dir=0 size=3 */
     if (s.font_id == 1 && s.font_dir == 0 && s.font_size == 3) PASS();
     else FAIL("|Y did not update font fields");
 }
@@ -4347,11 +4347,11 @@ static void test_vertical_direction_advance_signs(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|Y dir 1 accepted as bottom-to-top; dir 3 accepted as CW");
     init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|Y010101|\r\n");
+    feed_script(&s, &ctx, "!|Y01010100|\r\n");
     if (s.font_dir != 1) { FAIL("dir 1 rejected"); return; }
-    feed_script(&s, &ctx, "!|Y010301|\r\n");
+    feed_script(&s, &ctx, "!|Y01030100|\r\n");
     if (s.font_dir != 3) { FAIL("dir 3 (new in X3) rejected"); return; }
-    feed_script(&s, &ctx, "!|Y010401|\r\n");   /* out of range, must be ignored */
+    feed_script(&s, &ctx, "!|Y01040100|\r\n");   /* out of range, must be ignored */
     if (s.font_dir == 3) PASS();
     else FAIL("dir 4 was accepted");
 }
@@ -5308,11 +5308,11 @@ static void test_mouse_region_table_full_at_128(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("mouse region table caps at RIP_MAX_MOUSE_REGIONS (128)");
     init_fixture(&s, &ctx);
-    /* 1M wire: x0:2 y0:2 x1:2 y1:2 hotkey:1 flags:2 text...| */
+    /* 1M wire: num:2 x0:XY y0:XY x1:XY y1:XY clk:1 clr:1 res:5 text | */
     for (int i = 0; i < 130; i++) {
         char cmd[64];
         /* All regions at (0,0)-(1,1); only the host text differs. */
-        snprintf(cmd, sizeof(cmd), "!|1M00000101000000R%c|",
+        snprintf(cmd, sizeof(cmd), "!|1M01000001010000000R%c|",
                  (char)('A' + (i % 26)));
         feed_script(&s, &ctx, cmd);
     }

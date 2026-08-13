@@ -1093,6 +1093,71 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-20 LENGTH GATES AUDITED AS A CLASS.  Recorded 2026-08-13.
+
+     Six defects of one shape had been found one at a time -- '|1g'
+     gating 12 against a record of 14, '|1i' 12 against 24, the Switch*
+     family 1 against 3, '|2p' 1 against 4, '|2W' 9 against 13, '|1R'
+     >0 against a prefix of 8.  Each was caught by looking at that
+     command for another reason.  Checking the whole table at once found
+     fifteen more.
+
+     The rule: a handler's gate should admit exactly its record's fixed
+     total.  Looser, and a truncated command is acted on with fields
+     read past its end; tighter, and valid input is dropped.  A trailing
+     string may legitimately be EMPTY -- a mouse region with no host
+     command, a button with no label -- so the gate is measured against
+     the fixed prefix, not prefix+1.
+
+     Tightened, each first checked against shipped scenes:
+
+          |1M  13 -> 17     corpus min 28
+          |1B  30 -> 36     all 43 uses are exactly 36
+          |1P   5 -> 7      corpus 7
+          |1b  14 -> 18     corpus min 21
+          |1e   8 -> 24     all 14 uses are exactly 24
+          |1A   4 -> 6      corpus 6
+          |Y    6 -> 8      all 22 uses are exactly 8
+          |Z   16 -> 18     all 22 uses are exactly 18
+          |1c   2 -> 6      no corpus use
+          |1D  >0 -> 5      no corpus use
+          |,   12 -> 20     no corpus use
+          |.    6 -> 12     no corpus use
+          |b   18 -> 20     no corpus use
+          |r    2 -> 6      no corpus use
+          |=    2 -> 4      corpus min 4 (record is 8; see below)
+
+     NOT tightened, because shipped content contradicts the record --
+     the D-18 rule, now applied twice:
+
+          |k   record 2, gate 1.  133 uses: 132 two-character, one
+               single-character (N2_BUSI.RIP, "|k0").
+
+          |=   record 8, gate 4.  116 uses: 107 are eight characters,
+               2 are seven, 7 are four.  The handler reads progressively
+               -- off_draw and style at four, the user pattern at six,
+               thickness at eight -- because all three widths are real
+               content.  Raising the gate from 2 to 4 is still right: it
+               rejects truncation below anything the corpus sends.
+
+     Three test payloads had to be widened, all of them written against
+     the pre-audit gates: '|Y' carried three of its four mega2 fields,
+     and the mouse-region cap test used a pre-'num' '|1M' layout that
+     came out one character short of the record.  The '|D' lesson again
+     -- a payload authored to match the implementation tests only the
+     implementation.
+
+     NO UNBOUNDED READS.  Nine handlers have no numeric len gate; all
+     nine are bounded by other means -- '|3G', '|3R' and '|1R' gate on
+     named prefix constants, '|t', '|x' and '|z' dispatch on exact
+     lengths 4/5/13 inside rip_poly_bezier_family() matching their three
+     signatures, '|1t' checks len >= 1 and its text offset against len,
+     '|1w' reads nothing, and '|O' gates at 12.
+
+     Final state: 72 gates match their record, 1 dispatches on multiple
+     lengths, 2 are corpus-backed tolerances, 9 are bounded without a
+     numeric gate.  Zero admit truncation; zero drop valid input.
+
 D-19 THE STRING-OFFSET RULE APPLIED TO THE REST OF THE TABLE.
      Recorded 2026-08-13, while building the divergence register that
      RIPtel-is-the-measure requires (14-divergence-register.md).

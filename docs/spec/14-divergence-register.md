@@ -147,6 +147,16 @@ rather than a slogan.
      record is right by default and wrong where shipped scenes say
      otherwise, and the corpus is what tells the two apart.  See D-18.
 
+     The rule has been applied twice.  '|=' RIP_LINE_STYLE records eight
+     characters and RIPlib admits four, because all three widths the
+     corpus sends are real content: of 116 '|=' commands, 107 are eight
+     characters, 2 are seven and 7 are four.  The handler reads
+     progressively -- off_draw and style at four, the user pattern at
+     six, thickness at eight -- rather than rejecting records the driver
+     would reject but shipped scenes contain.  The gate was still raised
+     from two to four, which rejects truncation below anything real
+     content sends.  See D-20.
+
 14.3.4  MODES ACCEPTED BUT NOT PERFORMED
 
      '|1G' RIP_Scroll validates its mode field 0..6 as the driver does

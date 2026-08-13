@@ -104,6 +104,26 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**Length gates audited as a class.** Six defects of one shape had been found
+one at a time (`|1g`, `|1i`, the `Switch*` family, `|2p`, `|2W`, `|1R`), each
+caught by looking at that command for another reason. Checking the whole table
+at once found **fifteen more**: a gate looser than its record acts on a
+truncated command with fields read past its end.
+
+Tightened, each checked against shipped scenes first — `|1M` 13→17, `|1B`
+30→36, `|1P` 5→7, `|1b` 14→18, `|1e` 8→24, `|1A` 4→6, `|Y` 6→8, `|Z` 16→18,
+`|1c` 2→6, `|1D` >0→5, `|,` 12→20, `|.` 6→12, `|b` 18→20, `|r` 2→6, `|=` 2→4.
+
+**Not** tightened where content contradicts the record: `|k` (132 of 133 uses
+are 2 chars, one is 1) and `|=` (107 of 116 are 8 chars, 2 are 7, 7 are 4 —
+the handler reads progressively because all three widths are real content).
+
+No unbounded reads: nine handlers have no numeric gate and all nine are
+bounded by other means. Final state — 72 gates match their record, 1
+dispatches on multiple lengths, 2 are corpus-backed tolerances, 9 are bounded
+without a numeric gate; **zero admit truncation, zero drop valid input**.
+See D-20.
+
 Applying the string-offset rule to the *rest* of the table — while building
 the divergence register that "RIPtel is the measure" requires — found a fifth
 command, and the one with teeth:
