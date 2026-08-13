@@ -1093,6 +1093,42 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-14 THREE FIELD LISTS THAT DISAGREE WITH THE DISPATCH RECORD, LEFT
+     UNCHANGED.  Recorded 2026-08-12 from a field-by-field comparison of
+     every RIPlib handler against the driver's own argument types.  Of 47
+     comparable commands, 19 match exactly, 19 differ only in notation
+     (a literal 2 where the record says width-negotiated, identical at
+     the default), and 9 genuinely differ.  Six of those nine were
+     resolved -- '|k', '|=', '|D' in v2.0.1, '|3e' and '|1I' here, and
+     '|1i' proved to be a false alarm (its 24-character payloads carry a
+     12-character reserved tail RIPlib correctly ignores).  These three
+     are NOT resolved, and are recorded rather than guessed:
+
+     '|1G' RIP_COPY_REGION.  Slot 95 records argc 7,
+     FF FF FF FF 01 01 FF -- four coordinates, two single digits, then
+     ONE further coordinate, twelve characters in total.  RIPlib requires
+     fourteen and reads a destination PAIR at offsets 10 and 12, citing
+     the earlier reconstruction's "8 args".  Only one trailing coordinate
+     exists in the record, so a destination pair cannot be mapped onto it
+     without inventing a field.  The command has no corpus uses, so
+     neither reading can be validated against content.  Left as it is:
+     RIPlib's version at least performs a coherent copy, and replacing it
+     with a layout that cannot be interpreted would be worse.
+
+     '|:' RIP_MOUSE_REGION_EXT.  Slot 11 records argc 11, ten coordinates
+     and one single digit -- twenty-one characters.  RIPlib requires
+     twenty-two and reads six fields.  No corpus uses.
+
+     '|1g' COPY_BLIT.  Slot 96 records argc 8, six coordinates then two
+     single digits.  RIPlib reads seven fields and stops after the first
+     of the two trailing digits.  No corpus uses.
+
+     The common shape is worth naming: all three come from the original
+     reconstruction rather than from the dispatch record, all three
+     disagree with it, and none is exercised by shipped content -- which
+     is exactly why they survived.  A command no scene sends is a command
+     no test can check.
+
 D-13 STATE RECORDED "FOR THE HOST" THAT NO HOST CAN READ.  Recorded
      2026-08-12 by diffing every field of rip_state_s against its uses:
      of 111 fields, 24 are written and never read anywhere in the

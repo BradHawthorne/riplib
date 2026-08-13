@@ -2780,9 +2780,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         case 'I': /* RIP_LOAD_ICON — x:2 y:2 mode:2 clipboard:1 res:2 filename */
             if (len >= 9) {
                 int16_t ix = mega2(p), iy = scale_y(mega2(p + 2));
-                uint8_t mode = (uint8_t)(mega2(p + 4) & 0xFF);
+                /* Dispatch slot 97 records FF FF 01 01 01 01 01 -- after the
+                 * two coordinates come FIVE single-digit fields, not a 2-digit
+                 * mode.  RIPlib read mega2(p+4), which spans the driver's
+                 * args[2] and args[3] and agrees only while args[3] is 0.
+                 * The filename offset (9) was already correct. */
+                uint8_t mode = (uint8_t)mega_digit(p[4]);
                 bool copy_to_clipboard = (mega_digit(p[6]) != 0);
-                /* mode at p+4, clipboard at p+6, res at p+7:8 */
+                /* args[3] at p+5 and args[5..6] at p+7,p+8 are reserved;
+                 * their meaning is not recovered, so they are not read. */
                 int fname_start = 9;
                 int fname_len = len - fname_start;
                 if (fname_len > 0) {

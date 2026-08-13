@@ -5,6 +5,38 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] — 2026-08-12
+
+Patch release. Completes the syntax audit begun in 2.0.1 by comparing every
+handler against the driver's own dispatch record rather than against
+bbs-land's reference — see [design/syntax-audit.md](design/syntax-audit.md).
+
+### Fixed
+
+- **`|3e` RIP_BAUD_EMULATION read a `mega4` where the record says `mega2`.**
+  Slot 123 records one `mega2`; RIPlib preferred a `mega4` whenever four
+  characters were available, reading two fields as one. bbs-land documents
+  `rate:4` as well — that comes from the 2.0 draft, while the 3.0 driver
+  says 2, so **both projects were wrong against the binary**.
+- **`|1I` RIP_LOAD_ICON read a 2-digit mode over two 1-digit fields.**
+  Slot 97 records `FF FF 01 01 01 01 01` — two coordinates then five
+  single-digit fields. The old reading spanned the driver's `args[2]` and
+  `args[3]`, agreeing only while `args[3]` was 0. The filename offset was
+  already correct.
+
+### Notes
+
+- `|1i` RIP_ImageStyle was investigated and is **correct as written**: its
+  payloads are 24 characters, of which the trailing 12 are reserved, and
+  RIPlib reads the meaningful prefix.
+- New defect **D-14** records three field lists that disagree with the
+  dispatch record and are deliberately left unchanged — `|1G`, `|:`, `|1g`.
+  All three come from the original reconstruction, none is exercised by any
+  shipped scene, and for `|1G` the record's single trailing coordinate
+  cannot be mapped onto a destination pair without inventing a field.
+  Replacing a coherent implementation with an uninterpretable one would be
+  a downgrade.
+
 ## [2.0.1] — 2026-08-12
 
 Patch release. Three argument-layout bugs, all found by diffing RIPlib's
