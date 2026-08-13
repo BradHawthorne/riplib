@@ -2426,6 +2426,35 @@ static void test_l2_port_define_reads_full_flags(void) {
         FAIL("2P lost the flags field's low digits");
 }
 
+static void test_l2_port_define_ignores_unread_flag_bits(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("2P does not invent FULLSCREEN/PROTECTED from bits 2-3 (D-22)");
+    init_fixture(&s, &ctx);
+    /* '|2P' RIP_PortDefine (RVA 0x0466EC) reads only wire bits 0 and 1:
+     * bit 0 is passed into port initialisation, bit 1 selects whether the
+     * active port becomes this one.  Bits 2 and 3 are never read -- those
+     * are '|2s' RIP_SwitchPort's protect/unprotect bits, which had been
+     * applied to the wrong command.
+     *
+     * flags = "000C" sets bits 2 and 3 (12).  Neither may reach the port.
+     * A PROTECTED port cannot be redefined, so if bit 3 were still honoured
+     * the second define below would be refused and the rect would not
+     * change -- which is what makes this observable. */
+    feed_script(&s, &ctx, "!|2P1000A140U000C|");
+    if (!s.ports[1].allocated) { FAIL("2P did not allocate the port"); return; }
+    if (s.ports[1].flags != 0) { FAIL("2P set flags from unread bits"); return; }
+    /* First define put x1 at "14" = 40.  Redefine with x1 = "0A" = 10; a
+     * wrongly-protected port would refuse and leave it at 40. */
+    if (s.ports[1].vp_x1 != 40) { FAIL("setup: first define did not take"); return; }
+    feed_script(&s, &ctx, "!|2P100050A0U0000|");
+    if (s.ports[1].vp_x1 == 10)
+        PASS();
+    else
+        FAIL("2P refused to redefine -- bit 3 still protecting");
+}
+
 static void test_l2_port_zero_protected(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -5537,6 +5566,7 @@ int main(void) {
     test_l1_file_query_missing_returns_zero();
     test_l2_port_define();
     test_l2_port_define_reads_full_flags();
+    test_l2_port_define_ignores_unread_flag_bits();
     test_l2_port_zero_protected();
     test_l2_port_delete();
     test_l2_port_switch_changes_active();

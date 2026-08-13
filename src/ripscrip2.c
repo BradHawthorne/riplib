@@ -481,10 +481,31 @@ static bool rip_port_create(rip_state_t *rs, uint8_t idx,
     p->vp_x1 = x1;
     p->vp_y1 = scale_y1(y1);
 
-    if (port_flags & 0x04)
-        p->flags |= RIP_PORT_FLAG_FULLSCREEN;
-    if (port_flags & 0x08)
-        p->flags |= RIP_PORT_FLAG_PROTECTED;
+    /* CORRECTED.  This used to set FULLSCREEN from wire bit 2 and PROTECTED
+     * from wire bit 3, which are '|2s' RIP_SwitchPort's bit meanings applied
+     * to the wrong command.  '|2P' RIP_PortDefine is a different handler
+     * (RVA 0x0466EC) and tests only two bits:
+     *
+     *     and  eax, 1                 -> passed into port initialisation
+     *                                    (0x1003326F) as a boolean
+     *     test byte ptr [ebp-0x10], 2 -> selects whether the active port
+     *                                    becomes this one; that is the
+     *                                    "make active immediately" bit,
+     *                                    which '|2P' above handles
+     *
+     * Bits 2 and 3 are never read here, so inferring FULLSCREEN or
+     * PROTECTED from them invented behaviour the driver does not have.
+     * That was harmless only because the flags field was being decoded from
+     * the wrong half and always came out zero (D-17); with the field read
+     * correctly the invented bits would start firing.
+     *
+     * Wire bit 0 IS consumed -- it reaches port initialisation as a boolean
+     * -- but what it selects there is not recovered, so it is not acted on.
+     * Every '|2P' in the shipped corpus sets exactly this bit and nothing
+     * else, and those scenes render correctly without it.  D-22.
+     *
+     * '|2s' bits 2 and 3 remain protect/unprotect: that handler really does
+     * test bl,4 and test bl,8, and RIPlib matches it. */
 
     return true;
 }

@@ -104,6 +104,32 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**Non-numeric guards audited, and one bug found hiding behind another.**
+Classifying the driver's remaining guards — protection, zero-value, viewport,
+vertex-count, parameter-count, allocation — put most classes to rest at once.
+`|<` already matches (rejects contours under two vertices); the memory class
+does not apply. **Protection turns out to be unreachable from the stream**: 41
+commands read the protection word and *none* writes it, so it is host-side
+state no RIP stream can set, and RIPlib's lack of style/palette/environment
+protection is inert rather than divergent. Port protection is the exception
+and RIPlib does implement it, matching `|2s` bits 0–3.
+
+- **`|2P` carried `|2s`'s flag meanings.** RIPlib set `FULLSCREEN` from wire
+  bit 2 and `PROTECTED` from bit 3 in `RIP_PortDefine`, but that handler reads
+  only bits 0 (passed into port initialisation) and 1 (make active). Bits 2
+  and 3 are never read there.
+
+  Worth recording *why* it never surfaced: those bits could not fire, because
+  the flags field was being decoded from the wrong half of a `mega4` and
+  always came out zero. **One defect was masking another** — fixing the field
+  decode is what armed the invented bits. A latent defect behind a live one is
+  invisible to every test that exercises the live one.
+
+Wire bit 0 is consumed by the driver but what it selects is not recovered, so
+RIPlib does not act on it; every `|2P` in the corpus sets exactly that bit and
+those scenes render correctly without it. Recorded rather than guessed. See
+D-22.
+
 **Value ranges audited as a class.** The driver validates its fields
 explicitly and names each failure (`cmp edi,6` → `"Invalid mode parameter"`),
 and those bounds had been matched only where a handler happened to be read for

@@ -187,7 +187,24 @@ rather than a slogan.
      enforced as the driver enforces them (0..10 and 1..10); it is only
      the direction range that is wider on purpose.  See D-21.
 
-14.3.6  APPROXIMATED HIT AREAS
+14.3.6  PROTECTION IS IMPLEMENTED ONLY FOR PORTS
+
+     The driver guards 24 command sites with twelve "its protected!"
+     diagnostics covering graphics styles, colour palettes,
+     environments, text windows and button styles.  RIPlib implements
+     none of those.
+
+     That is inert rather than divergent: 41 commands READ the
+     protection word at <state>+0x104 and no dispatched command WRITES
+     it, so protection is host-side state that no RIP stream can set.
+     The guards cannot fire from content.
+
+     PORT protection is the exception and RIPlib does implement it --
+     port 0 permanently, '|2s' bits 0..3 to protect and unprotect the
+     destination and source ports, and create/delete refusing a
+     protected port.  See D-22.
+
+14.3.7  APPROXIMATED HIT AREAS
 
      '|:' RIP_MOUSE_REGION_EXT defines a five-vertex region.
      rip_mouse_region_t holds a rectangle, so RIPlib registers the
@@ -195,7 +212,7 @@ rather than a slogan.
      over-approximation for hit-testing rather than a rectangle invented
      from two of the coordinates.  See D-14.
 
-14.3.7  COMMANDS NOT IMPLEMENTED
+14.3.8  COMMANDS NOT IMPLEMENTED
 
      '|`' -- slot 83, argc 11 (XY x10 + mega1).  Its handler (RVA
      0x01D963) is structurally identical to '|:' RIP_MOUSE_REGION_EXT:
@@ -208,7 +225,7 @@ rather than a slogan.
      Level 2 '|2C' RIP_PortCopy, '|2R' and the Switch* family ARE
      implemented; see D-17.
 
-14.3.8  RIPlib-ORIGINAL COMMANDS
+14.3.9  RIPlib-ORIGINAL COMMANDS
 
      '|1V' SET_VIEWPORT_EXT and '|1X' CLIPBOARD_OP have no dispatch
      entry.  They are RIPlib extensions and are documented as such in

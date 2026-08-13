@@ -1093,6 +1093,64 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-22 NON-NUMERIC GUARDS, AND A FLAG MAPPING THAT WAS ONLY HARMLESS
+     BECAUSE ANOTHER BUG HID IT.  Recorded 2026-08-13.
+
+     D-21 covered the guards that are a number.  The same extraction also
+     surfaced guards that are not -- protection checks, zero-value
+     rejections, viewport preconditions, vertex minimums, parameter
+     counts, allocation failures -- and those were skipped.  Classifying
+     them puts each class to rest at once instead of chasing strings.
+
+     ALREADY MATCHING: '|<' rejects a contour with fewer than two
+     vertices (nv < 2), which is the driver's "Must have at least two
+     vertices to make a polygon".  The memory class does not apply --
+     RIPlib allocates from a fixed arena and has no failure path to
+     mirror.
+
+     PROTECTION IS UNREACHABLE FROM THE STREAM, and that is the finding.
+     Twelve diagnostics across 24 command sites guard on a protection
+     word at <state>+0x104.  Scanning every handler for a WRITE to it
+     returns nothing: 41 commands read it, none sets it.  Protection is
+     host-side state -- RIPtel's own UI or configuration -- so no RIP
+     stream can protect anything, and those guards cannot fire from
+     content.  RIPlib's lack of a style/palette/environment/text-window
+     protection concept is therefore inert rather than a defect.
+
+     PORT protection is the exception, and RIPlib implements it: port 0
+     is permanently protected, '|2s' bits 2 and 3 protect and unprotect
+     the source port and bits 0 and 1 the destination, and create and
+     delete both refuse a protected port.  The driver's '|2s' really
+     does test bl,4 and test bl,8; RIPlib matches it.
+
+     '|2P' HAD '|2s's BIT MEANINGS.  RIPlib set FULLSCREEN from wire bit
+     2 and PROTECTED from wire bit 3 in RIP_PortDefine.  That handler
+     (RVA 0x0466EC) is a different function and reads only two bits:
+
+          and  eax, 1                  -> passed into port initialisation
+                                          (0x1003326F) as a boolean
+          test byte ptr [ebp-0x10], 2  -> selects whether the active port
+                                          becomes this one
+
+     Bits 2 and 3 are never read there, so inferring FULLSCREEN or
+     PROTECTED from them invented behaviour the driver does not have.
+
+     The part worth recording is WHY it never showed up.  Those bits
+     could not fire, because the flags field was being decoded from the
+     wrong half of a mega4 and always came out zero (D-17).  One defect
+     was masking another: fixing the field decode is what armed the
+     invented bits, and only then did the mapping matter.  A latent
+     defect behind a live one is invisible to every test that exercises
+     the live one -- the corpus renders these scenes correctly either
+     way.  Fixed together; the regression test sets bits 2 and 3 and
+     checks that neither reaches the port.
+
+     Wire bit 0 IS consumed by the driver -- it reaches port
+     initialisation as a boolean -- but what it selects there is not
+     recovered, so RIPlib does not act on it.  Every '|2P' in the corpus
+     sets exactly this bit and nothing else, and those scenes render
+     correctly without it.  Recorded rather than guessed.
+
 D-21 VALUE RANGES AUDITED AS A CLASS.  Recorded 2026-08-13.
 
      The driver validates its fields explicitly and names each failure:
