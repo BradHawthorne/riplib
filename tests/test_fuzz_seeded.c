@@ -78,6 +78,46 @@ static const char *const seeds[] = {
     "!|y1000000000001Q00001a00000000|",
     "!|@1010some text with \\| and \\\\ escapes|",
     "!|p0A05050F0F1414191923232D2D3737414147474F4F|",
+
+    /* Commands with a TRAILING STRING, and the boundary that matters: a
+     * payload of exactly the record's fixed width, so the string is empty and
+     * the pointer sits one past the end.  Every string-offset defect found in
+     * D-19 and D-25 lived here, and not one of the seeds above reaches it --
+     * three million iterations of the set above never entered this space.
+     * The '|1A' case is the literal payload NEWS.RIP sends. */
+    "!|1A010000|", "!|1A010000chime.wav|",
+    "!|1bVU0QYY1S0000000000back.bmp|", "!|1bVU0QYY1S0000000000|",
+    "!|1R00000000dragon.txt|", "!|1R00000000|",
+    "!|1W0TESTICON|", "!|1W0|",
+    "!|1I0A0A00000icon.icn|",
+    "!|3G00000000http://example.com/x|", "!|3G00000000|",
+    "!|3R00010012345678MYVAR|", "!|3R0001001234567|",
+    "!|1D000000name,10:?prompt?default|",
+    "!|1F0000000file.bmp|",
+
+    /* Mouse regions and buttons.  '|1U' with an EMPTY host command is the
+     * shape every button in the shipped corpus has, and the shape that left
+     * memcpy reading from NULL once hostless buttons started registering. */
+    "!|1M010A0A1E0U1000000SELECT 1\\r|", "!|1M010A0A1E0U0000000|",
+    "!|1U0A0A1E0U2G10<>Label<>HOST|", "!|1U0A0A1E0U0000<>Clear<>|",
+    "!|1U0A0A1E0U0000<><>|", "!|1U0A0A1E0U0000bare|",
+    "!|1t0some region text|", "!|1T0A0A32320000|",
+
+    /* Level 2 -- invisible to every seed above, and the level whose offsets
+     * were only ever checked by hand until D-23. */
+    "!|2P1000A140U00020000|", "!|2P1000A140U0001|",
+    "!|2s100|", "!|2s000|", "!|2p1000|",
+    "!|2C0002WZKA810000ZK72000000|",
+    "!|2A100|", "!|2B100|", "!|2E100|", "!|2T100|", "!|2Y100|",
+    "!|2R0001|", "!|2W1000A140U00000000file.bmp|",
+
+    /* Multi-signature and radix-sensitive commands: '|h' dispatches on four
+     * distinct payload widths, and these four decode base 64 rather than 36. */
+    "!|h00000000|", "!|h000000|", "!|h0000|", "!|h000|",
+    "!|d0#8001u|", "!|y1a1a000000000000000000000000|",
+
+    /* The two corpus-backed tolerances, at both widths they really occur. */
+    "!|k04|", "!|k0|", "!|=00000000|", "!|=0000|",
 };
 
 /* Build a long command of `nargs` argument characters, optionally broken
