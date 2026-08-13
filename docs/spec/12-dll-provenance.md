@@ -1093,6 +1093,38 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-24 THE CORPUS REPLAY COULD NOT SEE ANY OF THE INTERACTION FIXES.
+     Recorded 2026-08-13.
+
+     The corpus harness measures foreground pixels, distinct colours,
+     asset requests, FSM state and the framebuffer guard bands.  Three
+     of the defects fixed in D-15 and D-19 change no pixel at all:
+
+          |1U  buttons never registered a clickable region
+          |1M  mouse-region flags came from a reserved column
+          |1R  every scene-file request asked for the wrong name
+
+     Only the third was visible, and only because asset requests were
+     already counted -- which is the same reasoning applied once and
+     then not extended.  Mouse regions are now counted alongside them.
+
+     THE NUMBER IS WORTH RECORDING.  Replaying all 35 scenes with and
+     without the '|1U' registration fix:
+
+          with the fix        101 regions
+          without it           55 regions
+
+     46 buttons across the shipped corpus became clickable, and not one
+     pixel moved.  A metric that cannot move is a metric that cannot
+     regress: before this, reverting that fix would have left every
+     corpus scene reporting PASS with identical numbers.
+
+     The general shape, which has now cost this project three separate
+     defects: a renderer's test harness measures what it renders, so
+     every behaviour that is NOT rendering -- interaction, host
+     requests, state a consumer reads -- is invisible by construction
+     unless it is deliberately counted.
+
 D-23 RADIX SELECTION AND LEVEL 2 OFFSETS, BOTH CHECKED MECHANICALLY.
      Recorded 2026-08-13.  No defects; recorded because "no defects" is
      only worth anything when it is reproducible.

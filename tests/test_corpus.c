@@ -105,7 +105,7 @@ static int load_file(const char *path, unsigned char **out, size_t *n) {
  * shapes it was not actually measuring; the fix in both places is to
  * discount the background before believing the number. */
 static int replay(const char *path, const char **why,
-                  long *painted, int *colours, int *requests) {
+                  long *painted, int *colours, int *requests, int *regions) {
     rip_state_t s;
     comp_context_t ctx;
     unsigned char *data;
@@ -114,6 +114,7 @@ static int replay(const char *path, const char **why,
     *painted = 0;
     *colours = 0;
     *requests = 0;
+    *regions = 0;
     if (!load_file(path, &data, &n)) {
         *why = "could not read file";
         return 0;
@@ -149,6 +150,16 @@ static int replay(const char *path, const char **why,
      * dropped its content rather than deferring it. */
     *requests = s.icon_state.request_count;
 
+    /* Mouse regions are counted for the same reason as asset requests: they
+     * are behaviour the pixel metrics cannot see.  Every '|1U' button in the
+     * corpus carries an EMPTY host command ("<>Clear<>"), and registration
+     * used to be gated on that command being non-empty -- so not one of the
+     * 39 buttons in shipped content became clickable, and no pixel count
+     * moved when that was fixed.  '|1M' has the same blind spot: its flags
+     * were read from a reserved column and were always zero.  A scene that
+     * silently stops registering its interactive areas now shows up here. */
+    *regions = s.num_mouse_regions;
+
     /* A well-formed scene must leave the FSM back at idle.  Anything else
      * means a command swallowed the rest of the stream. */
     if (s.state != RIP_ST_IDLE) {
@@ -183,12 +194,12 @@ int main(void) {
         const char *why = "";
         const char *base = strrchr(riplib_corpus_scenes[i], '/');
         long painted = 0;
-        int colours = 0, requests = 0;
+        int colours = 0, requests = 0, regions = 0;
 
         base = base ? base + 1 : riplib_corpus_scenes[i];
         TEST(base);
         if (!replay(riplib_corpus_scenes[i], &why, &painted, &colours,
-                    &requests)) {
+                    &requests, &regions)) {
             FAIL(why);
         } else {
             /* Zero output is not a failure: some shipped scenes are
@@ -199,10 +210,11 @@ int main(void) {
              * pixels catch a scene reduced to its background, and the
              * colour count catches one reduced to a single flat fill. */
             tests_passed++;
-            if (painted == 0 && requests == 0)
-                printf("PASS        0 fg  (background only, no assets asked for)\n");
+            if (painted == 0 && requests == 0 && regions == 0)
+                printf("PASS        0 fg  (background only, nothing asked for)\n");
             else if (painted == 0)
-                printf("PASS        0 fg  (%d asset request(s) pending)\n", requests);
+                printf("PASS        0 fg  (%d asset request(s), %d region(s))\n",
+                       requests, regions);
             else
                 /* "fg" is everything that is not the single most common
                  * colour, so it FLIPS once drawing covers more than half the
@@ -213,9 +225,10 @@ int main(void) {
                  * 98008 to 67814 while the scene got MORE complete.  The
                  * dominant share is printed so that flip is visible rather
                  * than looking like a regression. */
-                printf("PASS  %7ld fg  %2d colours  %2d%% dom  %d req\n",
+                printf("PASS  %7ld fg  %2d colours  %2d%% dom  %d req  %2d rgn\n",
                        painted, colours,
-                       (int)(100 - (painted * 100 / (long)(W * H))), requests);
+                       (int)(100 - (painted * 100 / (long)(W * H))),
+                       requests, regions);
         }
     }
 

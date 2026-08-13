@@ -104,6 +104,22 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**The corpus replay now counts mouse regions.** It measured foreground
+pixels, colours, asset requests, FSM state and guard bands — so of the three
+interaction defects fixed above (`|1U` buttons never registering, `|1M` flags
+from a reserved column, `|1R` requesting the wrong filename), only the last
+was visible, and only because asset requests happened to be counted already.
+
+Replaying all 35 scenes with and without the `|1U` fix: **101 regions vs 55**.
+46 buttons across the shipped corpus became clickable and not one pixel moved.
+A metric that cannot move cannot regress — before this, reverting that fix
+left every scene reporting PASS with identical numbers.
+
+The shape has now cost this project three separate defects: a renderer's test
+harness measures what it renders, so everything that is *not* rendering —
+interaction, host requests, state a consumer reads — is invisible by
+construction unless deliberately counted. See D-24.
+
 **The audit is now a script in the repo, not a one-off.**
 [`scripts/dll-conformance.py`](scripts/dll-conformance.py) checks RIPlib's
 parser against the driver's dispatch record across four classes — read
