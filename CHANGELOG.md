@@ -66,6 +66,28 @@ driver's dispatch record — 26 exact, 21 notation-only, and 4 that match the
 record exactly and add a documented string tail (which the record never
 expresses, since strings are passed out-of-band). See D-16.
 
+Measuring the *coverage* of that comparison then showed it had never included
+Level 2 at all — `ripscrip.c` delegates the whole level to `ripscrip2.c`,
+whose handlers are keyed on `RIP2_CMD_*` constants rather than character
+literals, so eleven commands were invisible to every pass. Auditing them:
+
+- **`|2P` `RIP_PortDefine` read the wrong half of its flags field.** Slot 115
+  types it `mega4` spanning offsets 9–12; RIPlib read `mega2l(raw + 9)`, the
+  **high** two digits. MegaNum is big-endian, so a flags word small enough to
+  be a bit-set lives entirely in the trailing digits. All three `|2P`
+  commands in the corpus carry `"0001"`, and RIPlib decoded every one as
+  **0** — no `|2P` could ever set a port flag, including "make active
+  immediately".
+- **Loose length gates on seven Level 2 commands**, the same class as `|1g`
+  and `|1i`: the whole `Switch*` family plus `|2s` record 3 characters and
+  gated on 1; `|2p` records 4 and gated on 1.
+- Verified correct and recorded as checked: `|2C` `RIP_PortCopy` matches slot
+  113 field for field, and `|2R` reads its `mega4` at the right width.
+
+Three of the tests that had to change were carrying payloads authored against
+the defective readings — `|2P...0200` encodes 2 only if the flags field is
+two digits at offset 9. See D-17.
+
 ### Added
 
 - `RIP_MF_INVERT` and `RIP_MF_RESET` for `|1M`'s `clk` and `clr` flags.

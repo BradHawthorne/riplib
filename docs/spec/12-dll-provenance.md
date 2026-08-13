@@ -1093,6 +1093,67 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-17 LEVEL 2 WAS NEVER AUDITED AT ALL.  Recorded 2026-08-13.
+
+     D-16 closed the field-list comparison at zero disagreements across
+     51 commands.  Measuring the COVERAGE of that comparison showed what
+     the 51 left out, and the largest omission was structural: the
+     extractor reads case labels out of src/ripscrip.c, and Level 2 has
+     none there.  ripscrip.c delegates the whole level to
+     ripscrip2_execute() in src/ripscrip2.c, whose handlers are keyed on
+     RIP2_CMD_* constants rather than character literals.  So eleven
+     commands -- the entire Drawing Ports family -- were invisible to
+     every pass of the audit, and "zero disagreements" had never been a
+     statement about them.
+
+     That matters more than a plain coverage gap, because Level 2 is
+     where bbs-land's reference diverges most from the driver, and where
+     a wrong total desynchronises the rest of the frame.
+
+     '|2P' RIP_PortDefine READ THE WRONG HALF OF ITS FLAGS FIELD.  Slot
+     115 records mega1, XY, XY, XY, XY, mega4, mega4: the flags field
+     spans offsets 9..12.  RIPlib read mega2l(raw + 9), which is not the
+     low two digits of that field but the HIGH two.  MegaNum is
+     big-endian, so a flags word small enough to be a bit-set lives
+     entirely in the trailing digits and that read returns zero.
+
+     The corpus is unanimous.  All three '|2P' commands carry "0001":
+
+          FONTS.RIP     '10000ZK7200010000'   (17, the full record)
+          SPECLEFX.RIP  '10000Q04K0001'       (13, reserved tail absent)
+          SPECLEFX.RIP  '20000Q0QO0001'       (13)
+
+     RIPlib decoded every one of them as 0, so no '|2P' could ever set a
+     port flag -- including bit 1, "make active immediately".  Fixed by
+     reading the full mega4 and masking to the defined low bits; mega4l()
+     added to ripscrip2.c, which had only 1- and 2-digit readers.
+
+     LOOSE LENGTH GATES, the same class as '|1g' (D-14) and '|1i'
+     (D-16).  Every Switch* command records mega1 + mega2 -- three
+     characters -- and gated on one:
+
+          |2A |2B |2E |2T |2Y   record 3, gated 1  -> now 3
+          |2p                   record 4, gated 1  -> now 4
+          |2s                   record 3, gated 1  -> now 3
+
+     The corpus agrees with the records: every '|2s' in it is three
+     characters ("!|2s000", "!|2s100"), which is also the evidence sent
+     upstream against bbs-land's six-character reading.  The single
+     2-character '|2p' in the corpus targets port 0, which is protected
+     and refused either way, so rejecting it costs nothing.
+
+     VERIFIED CORRECT, and worth recording as checked rather than
+     assumed: '|2C' RIP_PortCopy matches slot 113 field for field
+     (mega1, XY x4, mega1, XY x4, mega1, 0x05 -- offsets 0,1,3,5,7,9,10,
+     12,14,16,18), and '|2R' reads its mega4 at the right width.
+
+     Three of the four tests that had to change were carrying payloads
+     authored against the defective readings -- '|2P...0200' encodes 2
+     only if the flags field is two digits at offset 9; as the record's
+     four-digit field it is 2592.  That is the '|D' lesson from v2.0.1
+     for the third time: a payload written to match the implementation
+     tests nothing but the implementation.
+
 D-16 STRING ARGUMENTS START AFTER THE RECORD'S FIXED PREFIX, AND FOUR
      COMMANDS DID NOT.  Recorded 2026-08-13, on the iteration that took
      the field-list comparison to zero disagreements.

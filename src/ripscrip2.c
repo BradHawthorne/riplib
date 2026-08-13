@@ -220,6 +220,14 @@ static inline int mega2l(const char *p) {
     return mega_dig(p[0]) * 36 + mega_dig(p[1]);
 }
 
+/* Four-digit MegaNum.  Needed because several Level 2 records type a field
+ * as mega4, and reading only its first two digits takes the HIGH half --
+ * the opposite of the low-order bits a flags word actually carries. */
+static inline long mega4l(const char *p) {
+    return ((long)mega_dig(p[0]) * 46656L) + ((long)mega_dig(p[1]) * 1296L)
+         + ((long)mega_dig(p[2]) * 36L)    + (long)mega_dig(p[3]);
+}
+
 /* Scale RIPscrip EGA Y-coordinate (0-349) to card display Y (0-399).
  * MUST match ripscrip.c::scale_y so the same EGA coord lands on the
  * same card pixel whether reached via Level 0 or Level 2 commands. */
@@ -683,7 +691,17 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         int16_t y0         = (int16_t)mega2l(raw + 3);
         int16_t x1         = (int16_t)mega2l(raw + 5);
         int16_t y1         = (int16_t)mega2l(raw + 7);
-        uint8_t port_flags = (raw_len >= 11) ? (uint8_t)mega2l(raw + 9) : 0;
+        /* CORRECTED.  Slot 115 types this field mega4, so its four digits
+         * span offsets 9..12 and the low-order bits sit at the END.  Reading
+         * mega2l(raw + 9) took the HIGH two digits: every |2P in the corpus
+         * carries flags "0001", which that reading decoded as 0.  Port flags
+         * were therefore always zero, and no |2P could ever set a flag bit.
+         *   FONTS.RIP     '10000ZK7200010000'  flags "0001"
+         *   SPECLEFX.RIP  '10000Q04K0001'      flags "0001"
+         * Masked to a byte: the record permits values a flag byte cannot
+         * hold, and only the low bits are defined.  See D-17. */
+        uint8_t port_flags = (raw_len >= 13)
+                             ? (uint8_t)(mega4l(raw + 9) & 0xFF) : 0;
 
         if (port_num == 0 || port_num >= RIP_MAX_PORTS)
             break;
@@ -706,7 +724,11 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      * dest_port: ignored (DLL ignores it too)
      */
     case RIP2_CMD_PORT_DELETE: {
-        if (raw_len < 1)
+        /* Slot 116 records mega1, mega1, mega2 -- four characters.  The one
+         * 2-character '|2p' in the corpus (SPECLEFX.RIP, "!|2p00") targets
+         * port 0, which is protected and refused either way, so rejecting a
+         * truncated record costs nothing and matches the driver.  D-17. */
+        if (raw_len < 4)
             break;
         uint8_t port_num = (uint8_t)mega1(raw + 0);
 
@@ -737,7 +759,13 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     case RIP2_CMD_SWITCH_ENVIRONMENT:
     case RIP2_CMD_SWITCH_TEXT_WINDOW:
     case RIP2_CMD_SWITCH_STYLE: {
-        if (raw_len < 1)
+        /* Slots 111, 112, 114, 119 and 121 all record  mega1, mega2  -- three
+         * characters, of which RIPlib uses the leading slot digit and ignores
+         * the reserved pair.  The gate was one character, so a truncated
+         * command was acted on where the driver rejects it; the corpus sends
+         * three ("!|2s000", "!|2s100").  Same defect class as '|1g' and
+         * '|1i' in D-14/D-16.  See D-17. */
+        if (raw_len < 3)
             break;
         uint8_t slot = (uint8_t)mega1(raw + 0);
         if (slot >= RIP_MAX_PORTS)      /* same 36-slot table size as ports */
@@ -777,10 +805,12 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     }
 
     case RIP2_CMD_PORT_SWITCH: {
-        if (raw_len < 1)
+        /* Slot 118 records mega1, mega2 -- three characters, which is what
+         * every '|2s' in the corpus sends ("!|2s000", "!|2s100").  D-17. */
+        if (raw_len < 3)
             break;
         uint8_t port_num     = (uint8_t)mega1(raw + 0);
-        uint8_t switch_flags = (raw_len >= 3) ? (uint8_t)mega2l(raw + 1) : 0;
+        uint8_t switch_flags = (uint8_t)mega2l(raw + 1);
         rip_port_switch(rs, port_num, switch_flags);
         break;
     }

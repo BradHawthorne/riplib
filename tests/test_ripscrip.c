@@ -160,15 +160,15 @@ static void test_port_text_justification_roundtrip(void) {
     TEST("port switch preserves text justification");
     init_fixture(&s, &ctx);
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
-                      "1", 1, NULL, 0);
+                      "100", 3, NULL, 0);
     s.font_hjust = 2;
     s.font_vjust = 3;
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
-                      "0", 1, NULL, 0);
+                      "000", 3, NULL, 0);
     s.font_hjust = 0;
     s.font_vjust = 0;
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
-                      "1", 1, NULL, 0);
+                      "100", 3, NULL, 0);
     if (s.font_hjust == 2 && s.font_vjust == 3)
         PASS();
     else
@@ -1786,7 +1786,7 @@ static void test_viewport_persists_across_port_switch(void) {
     int16_t after_v_y0 = s.vp_y0;
     int16_t after_v_y1 = s.vp_y1;
     /* Define & switch to port 1, then back to port 0. */
-    feed_script(&s, &ctx, "!|2P1000005050200|");
+    feed_script(&s, &ctx, "!|2P1000005050002|");
     feed_script(&s, &ctx, "!|2s100|");
     feed_script(&s, &ctx, "!|2s000|");
     /* Viewport must still match what 'v' set, not pre-'v' defaults. */
@@ -1809,7 +1809,7 @@ static void test_port_switch_preserves_color_and_pos(void) {
     s.draw_y = 80;
     s.line_thick = 3;
     /* Define and switch to port 1.  '2P' creates port; '2s' switches. */
-    feed_script(&s, &ctx, "!|2P1000005050200|");  /* port 1, viewport */
+    feed_script(&s, &ctx, "!|2P1000005050002|");  /* port 1, viewport */
     feed_script(&s, &ctx, "!|2s100|");             /* switch to port 1 */
     /* Mutate state inside port 1. */
     s.draw_color = 2;
@@ -2403,6 +2403,29 @@ static void test_l2_port_define(void) {
     }
 }
 
+static void test_l2_port_define_reads_full_flags(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("2P reads the 4-digit flags field, not its high half (D-17)");
+    init_fixture(&s, &ctx);
+    /* Slot 115 records mega1, XY, XY, XY, XY, mega4, mega4 -- the flags
+     * field spans offsets 9..12, so its low-order bits sit at the END.
+     * RIPlib read mega2l(raw + 9), taking the HIGH two digits, which decoded
+     * every corpus payload's "0001" as 0.  Port flags were always zero.
+     *
+     * Payload mirrors FONTS.RIP's shape: port=1, rect, flags="0002",
+     * reserved="0000".  Bit 1 (value 2) is "make active immediately", so a
+     * correct read switches the active port to 1. */
+    feed_script(&s, &ctx, "!|2P1000A140U00020000|");
+    if (!s.ports[1].allocated)
+        FAIL("2P did not allocate the port");
+    else if (s.active_port == 1)
+        PASS();
+    else
+        FAIL("2P lost the flags field's low digits");
+}
+
 static void test_l2_port_zero_protected(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2426,7 +2449,7 @@ static void test_l2_port_delete(void) {
     init_fixture(&s, &ctx);
     feed_script(&s, &ctx, "!|2P1000A140U00|");
     if (!s.ports[1].allocated) { FAIL("setup: 2P did not allocate"); return; }
-    feed_script(&s, &ctx, "!|2p1|");
+    feed_script(&s, &ctx, "!|2p1000|");
     if (!s.ports[1].allocated)
         PASS();
     else
@@ -5456,6 +5479,7 @@ int main(void) {
     test_l1_generic_query_round_trip();
     test_l1_file_query_missing_returns_zero();
     test_l2_port_define();
+    test_l2_port_define_reads_full_flags();
     test_l2_port_zero_protected();
     test_l2_port_delete();
     test_l2_port_switch_changes_active();
