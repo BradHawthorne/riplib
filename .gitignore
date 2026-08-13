@@ -22,3 +22,7 @@ consumer-handoff/
 # dispatch record, regenerated on demand from an image that is deliberately
 # not vendored, so there is nothing to gain by tracking it.
 dispatch-table.json
+
+# Claude Code local settings — machine-specific permissions and paths.
+# The shared project commands in .claude/commands/ ARE tracked.
+.claude/settings.local.json
