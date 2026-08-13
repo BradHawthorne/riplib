@@ -5,7 +5,7 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.3] — 2026-08-13
+## [2.0.3] — unreleased
 
 Patch release. Resolves the three argument layouts 2.0.2 recorded as
 unresolved, by disassembling their handlers rather than reasoning from the
@@ -58,7 +58,7 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   command table; `|1g` added to the appendix, where it had been missing
   despite being implemented. Stale field lists on `|1I` and `|1w` corrected.
 
-## [2.0.2] — 2026-08-12
+## [2.0.2] — unreleased
 
 Patch release. Completes the syntax audit begun in 2.0.1 by comparing every
 handler against the driver's own dispatch record rather than against
