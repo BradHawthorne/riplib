@@ -104,6 +104,35 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+The `|1R`/`|1b` fixes confirmed against shipped content rather than authored
+payloads. Replaying DRAGON.RIP through v2.0.2 and through the current tree and
+printing the asset names it asks the host for:
+
+| v2.0.2 | now |
+| --- | --- |
+| `0000STRIP6` | `STRIP6` |
+| `0000GODRAG3` | `GODRAG3` |
+| `0000TORCH` | `TORCH` |
+| `00000000DRAG` | `DRAGON` |
+| `0000BACK` | `BACK` |
+
+Five requests, every one wrong before and right after — `00000000DRAG` is what
+`dragon.txt` became once eight reserved digits were prepended and the result
+hit the name limit, losing the real name entirely.
+
+Across all 35 scenes, v2.0.2 vs now: **zero** differences in foreground pixels
+or colour counts, and the same 61 asset requests. Everything landed in
+non-rendering paths, exactly where the pixel metrics could not see it.
+
+One question left open and recorded rather than guessed: BUTTONS.RIP sends a
+`|1R` whose filename is a `<<IF $COLORS$…>>` conditional. RIPlib's
+preprocessor is a stream-level state machine and does not evaluate a
+conditional inside a command payload, so that request still goes out as
+literal text. The offset fix is orthogonal and correct; this is a different
+defect, and fixing it needs the driver to settle which commands expand and
+when — `|1M`'s host-command text also carries `<<IF>>` and is meant to be
+evaluated by the *host* on click, not at parse time. See D-26.
+
 ### Fixed (build)
 
 - **`|1U` passed a NULL source to `memcpy`.** Removing the `host_len > 0`

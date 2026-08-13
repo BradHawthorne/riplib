@@ -1093,6 +1093,55 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-26 THE D-25 FIXES, CONFIRMED AGAINST SHIPPED CONTENT -- AND ONE
+     QUESTION THEY EXPOSED.  Recorded 2026-08-13.
+
+     A unit test proves a fix against a payload someone wrote.  The
+     corpus proves it against payloads TeleGrafix wrote.  Replaying
+     DRAGON.RIP through v2.0.2 and through the current tree and printing
+     the asset names each asks the host for:
+
+          v2.0.2            now
+          0000STRIP6        STRIP6
+          0000GODRAG3       GODRAG3
+          0000TORCH         TORCH
+          00000000DRAG      DRAGON
+          0000BACK          BACK
+
+     Five requests, every one of them wrong before and right after.  The
+     fourth is '|1R' and the rest are '|1b'; note that "00000000DRAG" is
+     what "dragon.txt" became once eight reserved digits were prepended
+     and the result truncated to the name limit -- the corruption was
+     bad enough to lose the real name entirely.
+
+     NO RENDERING CHANGED.  Comparing all 35 scenes between v2.0.2 and
+     the current tree: zero differences in foreground pixels or colour
+     counts, and the same 61 asset requests.  Everything landed in the
+     non-rendering paths -- filenames, regions, flags -- which is exactly
+     where the pixel metrics could not see it (D-24).
+
+     ONE QUESTION LEFT OPEN, recorded rather than guessed.  BUTTONS.RIP
+     sends a '|1R' whose filename is a CONDITIONAL:
+
+          !|1R00000000<<IF $COLORS$<"256">>BLUEBACK.FN
+              <<ELSE>>BLUEFADE.FN<<ENDIF>>
+
+     RIPlib's <<IF>> preprocessor is a stream-level state machine that
+     suppresses output between directives; it does not evaluate a
+     conditional sitting INSIDE a command payload.  So the request goes
+     out as the literal text "<<IF $COLORS", where the driver would
+     presumably resolve it to BLUEBACK.FN or BLUEFADE.FN by colour
+     depth.  The offset fix is orthogonal and correct -- DRAGON.RIP
+     above has no conditional and is now exact -- but this scene's font
+     request is still wrong, for a different reason.
+
+     Not fixed here because the scope of the preprocessor inside command
+     payloads is not established: '|1M' host-command text also carries
+     <<IF>> in the corpus, and that text is meant to be evaluated by the
+     HOST when the region is clicked, not at parse time.  Applying
+     expansion to every payload would break it.  Which commands expand
+     and when needs the driver, not a guess.
+
 D-25 THREE MORE STRING TAILS READ EARLY, FOUND BY AN ASSERTION ABOUT
      SILENCE.  Recorded 2026-08-13.
 
