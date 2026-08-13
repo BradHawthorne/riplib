@@ -4157,6 +4157,99 @@ static void test_preproc_unknown_directive_passes_through(void) {
     }
 }
 
+/* ── Forward compatibility ───────────────────────────────────────────
+ *
+ * RIPscrip framing is DELIMITER-based, not length-based: a payload runs
+ * until '|', CR or LF, and nothing in the stream states its length.  That
+ * is the single property that lets independent implementations add
+ * commands without breaking each other -- a parser that does not know a
+ * letter still knows where the command ends.
+ *
+ * It is load-bearing in both directions.  RIPlib defines twenty commands
+ * the shipping driver has no entry for, and other implementations extend
+ * the protocol too.  If an unknown command desynchronised the parser,
+ * every extension anywhere would corrupt the rest of the frame for
+ * everyone else, and the shared syntax would stop being shared.
+ *
+ * These tests pin that behaviour so it cannot be optimised away by, say,
+ * consuming a fixed argument count from a dispatch record.
+ * ──────────────────────────────────────────────────────────────────── */
+
+static void test_fwdcompat_unknown_command_does_not_desync(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("an unknown command letter is skipped, not desynchronised past");
+    init_fixture(&s, &ctx);
+    /* A pixel, then a command letter no level defines and that carries a
+     * payload of a length no real command uses, then a second pixel.  If
+     * the parser consumed by argument count instead of scanning to '|',
+     * the trailing pixel would be eaten as arguments and never drawn. */
+    feed_script(&s, &ctx, "!|X0000|");                 /* baseline: |X = pixel */
+    feed_script(&s, &ctx, "!|\xB5" "0123456789ABCDEF|");
+    feed_script(&s, &ctx, "!|X0A00|");
+    if (draw_get_pixel(0, 0) != 0 && draw_get_pixel(10, 0) != 0)
+        PASS();
+    else
+        FAIL("a command after an unknown one was lost");
+}
+
+static void test_fwdcompat_extensions_are_skippable(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("every RIPlib-original command leaves the stream in sync");
+    init_fixture(&s, &ctx);
+    /* The twenty commands with no dispatch entry (14-divergence-register
+     * 14.3.9).  Each is fed with a plausible payload and followed by a
+     * standard pixel; the pixel must still land.  This is the guarantee
+     * RIPlib asks of other terminals for its own extensions, so it has to
+     * hold for the reciprocal case too. */
+    static const char *ext[] = {
+        "!|^|", "!|~|",
+        "!|1N00icons|", "!|1OMYFONT.CHR|", "!|1Q00000VAR|", "!|1S00|",
+        "!|1V0000000000|", "!|1X00|", "!|1ZSONG.MID|",
+        "!|20|", "!|22|", "!|23|", "!|24|", "!|25|", "!|26|", "!|28|",
+        "!|2c00000000|", "!|2F0000|",
+        "!|3&0000000000|", "!|3-0000000000|",
+    };
+    size_t i;
+    int lost = 0;
+    const char *first_lost = NULL;
+    for (i = 0; i < sizeof(ext) / sizeof(ext[0]); i++) {
+        init_fixture(&s, &ctx);
+        feed_script(&s, &ctx, ext[i]);
+        /* Measure SYNC, not rendering.  Some of these legitimately change
+         * clipping or viewport state -- '|1V' with a zero rectangle clips
+         * everything away -- so a missing pixel would prove nothing about
+         * the parser.  Setting the draw colour is observable, cheap, and
+         * unaffected by any of them. */
+        feed_script(&s, &ctx, "!|c05|");
+        if (s.draw_color != 5) {
+            lost++;
+            if (!first_lost) first_lost = ext[i];
+        }
+    }
+    if (lost == 0)
+        PASS();
+    else {
+        printf("      first desync after: %s\n", first_lost ? first_lost : "?");
+        FAIL("an extension command swallowed the command after it");
+    }
+}
+
+static void test_fwdcompat_overlong_payload_does_not_desync(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("a known command with a longer payload than its record still ends at '|'");
+    init_fixture(&s, &ctx);
+    /* A future revision may widen a field.  A parser keyed to the current
+     * width must still find the end of the command, or old clients would
+     * break on new content -- the exact failure this project is guarding
+     * against.  '|k' takes a colour; give it a long tail. */
+    feed_script(&s, &ctx, "!|k0F00000000000000|");
+    feed_script(&s, &ctx, "!|X0A00|");
+    if (draw_get_pixel(10, 0) != 0)
+        PASS();
+    else
+        FAIL("an over-long payload consumed the following command");
+}
+
 static void test_l1_load_bitmap_filename_offset(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|1b takes the filename at offset 18 (D-25)");
@@ -5471,7 +5564,13 @@ static void test_arena_exhaustion_returns_false_no_crash(void) {
     bmp[0] = 'B'; bmp[1] = 'M';
     bmp[2] = sizeof(bmp) & 0xFF;
     bmp[3] = (sizeof(bmp) >> 8) & 0xFF;
-    bmp[10] = 14 + 40 + 1024;     /* pixel-data offset */
+    /* Pixel-data offset is a 32-bit little-endian field.  Assigning 1078
+     * to bmp[10] alone truncates it to 54, which still passes validation
+     * (54 is inside the buffer) so this test's assertion never noticed --
+     * but it pointed the decoder at the palette instead of the row, and
+     * would have silently broken any success-path test reusing it. */
+    bmp[10] = (uint8_t)((14 + 40 + 1024) & 0xFF);
+    bmp[11] = (uint8_t)(((14 + 40 + 1024) >> 8) & 0xFF);
     bmp[14] = 40;                  /* info header size */
     bmp[18] = 2;                   /* width = 2 */
     bmp[22] = 1;                   /* height = 1 */
@@ -5850,6 +5949,9 @@ int main(void) {
     test_l0_font_style_rejects_bad_font_number();
     test_preproc_directive_inside_command_payload();
     test_preproc_unknown_directive_passes_through();
+    test_fwdcompat_unknown_command_does_not_desync();
+    test_fwdcompat_extensions_are_skippable();
+    test_fwdcompat_overlong_payload_does_not_desync();
     test_l1_load_bitmap_filename_offset();
     test_level3_goto_url_expands_then_validates();
     test_l1_read_scene_expands_variables();

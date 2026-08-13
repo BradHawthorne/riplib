@@ -61,6 +61,13 @@ produced them.
   corrected §5.2 example.
 - **§1.10 carried an unfinished editorial aside** in its output —
   "set draw color to 15 (white... wait, this sets color, not fill)".
+- A test fixture wrote a 32-bit little-endian BMP pixel-data offset into
+  a single `uint8_t`, truncating 1078 to 54. The affected test asserts a
+  failure path so its result never changed, and 54 is still inside the
+  buffer so validation still passed — but it pointed the decoder at the
+  palette instead of the pixel row, and would have silently broken any
+  success-path test that reused the fixture. Also clears a live
+  `-Woverflow`.
 - **`|1B` stated a 30-character payload**; the record totals 36 and
   RIPlib gates on 36.
 - **`|k` was documented as `color:1`.** The record types it as a colour
@@ -80,6 +87,33 @@ produced them.
   open rather than resolving them by preference — new register §14.5.
 
 ### Added
+
+- **The wire compatibility contract is now written down and tested** —
+  new §14.6 of the divergence register. Everything in §14.3 is a place
+  RIPlib deliberately differs from the driver, which is only defensible
+  under a rule: the syntax is shared, so an extension must never cost a
+  client that does not implement it anything but the extension itself. A
+  BBS does not know which terminal is connected; content whose extension
+  corrupts the frame for a stock RIPterm has forked the protocol rather
+  than enhanced it.
+
+  The load-bearing fact is that **RIPscrip framing is delimiter-based,
+  not length-based** — a payload runs until `|`, CR or LF and nothing in
+  the stream states its length, so a parser that does not know a letter
+  still knows where the command ends. Consuming a fixed argument count
+  from the dispatch record would be a natural-looking optimisation that
+  silently desynchronises on every extension anyone ever adds, RIPlib's
+  or another implementation's. Three tests now pin it, including one
+  that feeds all twenty RIPlib-original commands and checks the *next*
+  command still takes effect. That one measures a state change rather
+  than a drawn pixel on purpose: `|1V` legitimately sets a viewport that
+  clips everything away, so a missing pixel would prove nothing about
+  sync.
+
+  §14.6 also states the honest limit — skipping a *state-changing*
+  extension leaves a stock client in a state RIPlib would have restored,
+  so content relying on `|^`/`|~` to bracket a colour change should
+  restore explicitly when targeting mixed audiences.
 
 - `scripts/check-dll-table.py` — verifies every row of segment 13
   against the dispatch record (slot, letter, handler, argc, types) and

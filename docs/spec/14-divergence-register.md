@@ -420,3 +420,80 @@ Regenerate this comparison by extracting the NAME column of
 13-dll-command-table.md and the leading identifier of each 'case'
 comment in src/ripscrip.c, then normalising both to lower case with
 'rip_' and underscores stripped.
+
+
+14.6  THE COMPATIBILITY CONTRACT
+---------------------------------------------------------------------
+
+Everything in 14.3 is a place where RIPlib deliberately differs from
+the driver.  That is only defensible under a rule, and the rule is
+this: THE SYNTAX IS SHARED, SO AN EXTENSION MUST NEVER COST A CLIENT
+THAT DOES NOT IMPLEMENT IT ANYTHING BUT THE EXTENSION ITSELF.
+
+A BBS does not know which terminal is connected.  If content carrying
+a RIPlib extension corrupts the frame for a stock RIPterm, the
+extension has not enhanced the protocol -- it has forked it.  So:
+
+  1. ADDITIVE ONLY.  An extension may add a command, widen an accepted
+     range, or implement something the driver stubs.  It may not
+     change the meaning of any byte sequence the driver already
+     defines.  A stream that renders correctly under the driver must
+     render the same way under RIPlib.
+
+  2. UNUSED LETTERS ONLY.  Every RIPlib-original command uses a letter
+     absent from the driver's set AT ITS LEVEL (14.3.9 lists both sets
+     for comparison).  Nothing is displaced, so a driver-targeted
+     stream cannot collide with an extension.
+
+  3. SKIPPABLE.  An unknown command must cost the frame nothing.  This
+     is a property of the framing rather than of any command: a
+     payload runs until '|', CR or LF, and NOTHING IN THE STREAM
+     STATES ITS LENGTH.  A parser that does not know a letter still
+     knows where the command ends.
+
+     This is load-bearing in both directions and is easy to break by
+     accident -- consuming a fixed argument count from the dispatch
+     record instead of scanning to the delimiter would be a natural
+     "optimisation" and would desynchronise on every extension anyone
+     ever adds, RIPlib's or another implementation's.  Three tests in
+     tests/test_ripscrip.c pin it:
+
+          an unknown command letter is skipped, not desynchronised past
+          every RIPlib-original command leaves the stream in sync
+          a known command with a longer payload than its record still
+              ends at '|'
+
+     The second feeds all twenty originals and checks the NEXT command
+     still takes effect.  It deliberately measures a state change and
+     not a drawn pixel: '|1V' legitimately sets a viewport that clips
+     everything, so a missing pixel would prove nothing about sync.
+     The third covers a future revision widening a field, so that new
+     content degrades on an old client instead of breaking it.
+
+  4. DEGRADES, DOES NOT BREAK.  A client that skips an extension
+     should lose only that effect.  '|Y' directions 2 and 3 give
+     rotated glyphs where the driver reports "Illegal direction";
+     '|F' fills where the driver does nothing (14.3.10); '|^' and '|~'
+     push and pop state a stock client simply never restores.  In each
+     case the omission is visible as plainer output, not as a wrong
+     frame or a lost stream.
+
+     The honest limit: skipping a STATE-CHANGING extension leaves the
+     stock client in a state RIPlib would have restored.  Content that
+     relies on '|^'/'|~' to bracket a colour change will leave that
+     colour set on a client that ignores them.  Authors targeting
+     mixed audiences should restore state explicitly rather than
+     depend on the stack.
+
+  5. RIPlib EMITS NO RIPscrip.  The library renders and parses; it
+     does not generate protocol.  Its only outbound traffic is host
+     callbacks -- file and asset requests, sound markers -- on a
+     private queue, never on the wire as RIPscrip.  So RIPlib cannot
+     put an extension in front of a terminal that did not ask for one;
+     that is a content-authoring decision, and this section is the
+     guidance for whoever makes it.
+
+The bbs-land divergences in 14.2 are a different matter and this rule
+does not license them: those are places a reference and the driver
+disagree about EXISTING syntax, where following the driver is
+conformance rather than extension.
