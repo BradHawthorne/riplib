@@ -104,6 +104,25 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+### Fixed (build)
+
+- **`|1U` passed a NULL source to `memcpy`.** Removing the `host_len > 0`
+  registration gate so hostless buttons become clickable made the copy below
+  reachable with `host_text` still NULL, and memcpy's source must be valid
+  even at zero length (C11 7.24.1p2). CI's sanitizer job caught it; nothing
+  local could. ASan sees nothing (no memory is touched) and UBSan on Windows
+  sees nothing either — the check is `nonnull-attribute` and fires only
+  because *glibc* annotates `memcpy` that way. Verified by running CI's exact
+  sanitizer flags under clang 22 locally: the suites pass with **and** without
+  the guard. Only the Linux job can catch this class.
+- **libm was linked on the wrong condition.** `if(NOT MSVC)` asks about the
+  compiler; whether libm is a separate library is a property of the C library.
+  clang targeting the MSVC ABI on Windows is not `MSVC` to CMake, so it took
+  the `-lm` branch and failed with "cannot open m.lib" — there is no libm on
+  Windows under any toolchain. Replaced with a `check_library_exists(m sinf)`
+  probe. Verified on MSVC, clang-on-Windows (previously broken) and the ARM
+  cross-build; CI covers Linux and macOS.
+
 **An assertion about silence found three more string-tail defects.** The
 corpus harness stubbed `riplib_host_tx` away entirely, so anything a scene
 sent to the host vanished unmeasured. Turning that into an assertion —

@@ -92,14 +92,26 @@ target_include_directories(riplib PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 
-if(NOT MSVC)
+# Does this platform keep the math functions in a SEPARATE library?
+#
+# Probe for it rather than infer it from the compiler.  The condition was
+# `if(NOT MSVC)`, which asks the wrong question: whether libm is separate is a
+# property of the C library, not of the compiler driving it.  clang targeting
+# the MSVC ABI on Windows is not MSVC by CMake's reckoning, so it took the
+# `-lm` branch and failed to link with "cannot open m.lib" — there is no libm
+# on Windows under any toolchain.  CI never saw it because its Windows job
+# uses MSVC; it surfaced building the sanitizer configuration locally.
+include(CheckLibraryExists)
+check_library_exists(m sinf "" RIPLIB_HAVE_LIBM)
+
+if(RIPLIB_HAVE_LIBM)
     # PUBLIC, not PRIVATE: riplib is a STATIC library that calls libm
     # (sinf/cosf/atan2f/sqrtf in drawing.c + ripscrip2.c).  A static archive
     # does not resolve its own external symbols — they stay undefined (nm shows
     # `U sinf` etc.) until the final executable link.  With PRIVATE the `m`
     # dependency would not propagate to consumers (tests, examples, downstream
     # apps), so their link fails with "undefined reference to sinf" under
-    # gcc/clang.  MSVC gets math from its CRT and needs no -lm.
+    # gcc/clang.  Windows gets math from its CRT and needs no -lm.
     target_link_libraries(riplib PUBLIC m)
 endif()
 
