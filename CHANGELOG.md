@@ -104,6 +104,35 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**The corpus counted its requests and never read them.** D-24 added region
+counting because the harness measured only what it rendered; the same reasoning
+one level down exposes a blind spot in the metric D-24 produced. The harness
+counts asset requests and has never looked at what they *ask for* — and that is
+exactly the defect this corpus carried: `|1b` asked for `0000back.bmp` in all 36
+of its appearances and `|1R` for `00000000dragon.txt` in all 25, while the
+harness reported 35/35 clean. Demonstrated, not argued: with the old `|1b`
+offset re-injected today, every scene still passes with identical counts.
+
+Names are now reported beside the counts, which makes that regression
+unmissable (`STRIP6,GODRAG3,TORCH` → `0000STRIP6,0000GODRAG3,0000TORCH`).
+Reported rather than asserted — a name change is a metric moving, not an
+invariant breaking. An assertion was drafted and rejected: "no requested name
+begins with a run of digits" false-positives on `256COLOR`, a real asset here.
+
+Two anomalies the values surfaced immediately, neither visible to any count:
+
+- **`N2_BUSI.RIP` requests `BMP`** — its `|1b` payload is 21 characters where
+  the record's prefix alone is 18, so the filename lands on the extension tail.
+  RIPlib parsing malformed shipped content faithfully; recorded as content, not
+  a defect.
+- **`NEWSPAPR.RIP` requests `$&MAIN_STORY`** — the prefix is correct and the
+  filename is a *variable reference*. `rip_expand_variables()` is applied to
+  rendered text and `<<IF>>` expressions, and to no filename argument anywhere.
+  Same shape as D-26, one command over. **Not fixed**: the scope question D-26
+  had to answer is unanswered here — which arguments expand, and whether `$&` is
+  a distinct sigil. The handler is the arbiter and hasn't been read for it. See
+  D-28.
+
 **A comment that was wrong twice over — and the check that should have caught
 it.** A note above the Level 0 Line case claimed `'@' = RIP_PIXEL` and that
 `'X'` "is not in the DLL command table". Both are false: slot 16's handler

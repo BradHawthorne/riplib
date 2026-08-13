@@ -116,7 +116,7 @@ static int load_file(const char *path, unsigned char **out, size_t *n) {
  * discount the background before believing the number. */
 static int replay(const char *path, const char **why,
                   long *painted, int *colours, int *requests, int *regions,
-                  long *tx) {
+                  long *tx, char *names, size_t names_cap) {
     rip_state_t s;
     comp_context_t ctx;
     unsigned char *data;
@@ -174,6 +174,39 @@ static int replay(const char *path, const char **why,
     *regions = s.num_mouse_regions;
     *tx = tx_bytes;
 
+    /* The NAMES, not just how many.  Counting requests catches a scene that
+     * stops asking for its assets; it cannot catch one that asks for the wrong
+     * thing, and that is the defect this corpus actually had -- '|1b' read its
+     * filename four characters early and asked the host for "0000back.bmp" in
+     * all 36 of its appearances, while this harness reported 35/35 clean with
+     * identical counts.  Re-injecting that offset today still passes every
+     * count; only the printed names move.
+     *
+     * Reported rather than asserted, which is the same register as the pixel
+     * and colour metrics: a name change is a metric moving, not an invariant
+     * breaking, so it belongs in the diff.  An assertion was considered and
+     * rejected -- the obvious one, "no requested name begins with a run of
+     * digits", false-positives on 256COLOR, which is a real asset in this
+     * corpus. */
+    {
+        int k;
+        size_t used = 0;
+
+        names[0] = '\0';
+        for (k = 0; k < s.icon_state.request_count && k < 8; k++) {
+            const char *nm = s.icon_state.request_queue[k];
+            size_t need = strlen(nm) + 1;
+
+            if (used + need + 1 >= names_cap)
+                break;
+            if (used)
+                names[used++] = ',';
+            memcpy(names + used, nm, need - 1);
+            used += need - 1;
+            names[used] = '\0';
+        }
+    }
+
     /* A well-formed scene must leave the FSM back at idle.  Anything else
      * means a command swallowed the rest of the stream. */
     if (s.state != RIP_ST_IDLE) {
@@ -227,11 +260,13 @@ int main(void) {
         long painted = 0;
         int colours = 0, requests = 0, regions = 0;
         long tx = 0;
+        char names[160];
 
         base = base ? base + 1 : riplib_corpus_scenes[i];
         TEST(base);
         if (!replay(riplib_corpus_scenes[i], &why, &painted, &colours,
-                    &requests, &regions, &tx)) {
+                    &requests, &regions, &tx,
+                    names, sizeof(names))) {
             FAIL(why);
         } else {
             /* Zero output is not a failure: some shipped scenes are
@@ -257,10 +292,11 @@ int main(void) {
                  * 98008 to 67814 while the scene got MORE complete.  The
                  * dominant share is printed so that flip is visible rather
                  * than looking like a regression. */
-                printf("PASS  %7ld fg  %2d colours  %2d%% dom  %d req  %2d rgn\n",
+                printf("PASS  %7ld fg  %2d colours  %2d%% dom  %d req  %2d rgn%s%s\n",
                        painted, colours,
                        (int)(100 - (painted * 100 / (long)(W * H))),
-                       requests, regions);
+                       requests, regions,
+                       names[0] ? "  " : "", names);
         }
     }
 

@@ -1093,6 +1093,62 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
 
+D-28 THE CORPUS COUNTED ITS REQUESTS AND NEVER READ THEM.  Recorded
+     2026-08-13.
+
+     D-24 added region counting because the harness measured only what it
+     rendered.  The same reasoning, applied one level down, exposes a
+     second blind spot in the metric that D-24 produced: the harness
+     counts asset requests and has never looked at what they ASK FOR.
+
+     That is not hypothetical.  It is exactly the defect this corpus
+     carried.  '|1b' read its filename four characters early and asked
+     the host for "0000back.bmp" in all 36 of its appearances, and '|1R'
+     for "00000000dragon.txt" in all 25 of its own -- while this harness
+     reported 35/35 scenes clean.  Demonstrated rather than argued: with
+     the old '|1b' offset re-injected today, every scene still passes and
+     every count is identical.  A metric that cannot move cannot regress,
+     and a count is blind to a value by construction.
+
+     The names are now reported alongside the counts.  With the same
+     regression injected, the difference is unmissable:
+
+          DRAGON.RIP   STRIP6,GODRAG3,TORCH,DRAGON,BACK
+          DRAGON.RIP   0000STRIP6,0000GODRAG3,0000TORCH,DRAGON,0000BACK
+
+     REPORTED, NOT ASSERTED, which is deliberate.  A name change is a
+     metric moving, not an invariant breaking, so it belongs in the diff
+     beside the pixel and colour counts -- the same register those use.
+     An assertion was drafted and rejected: the obvious one, "no
+     requested name begins with a run of digits", false-positives on
+     256COLOR, a real asset in this corpus.  A check that fires on
+     correct content is worse than no check.
+
+     TWO ANOMALIES THE VALUES IMMEDIATELY SURFACED, neither visible to
+     any count:
+
+     '|1b' IN N2_BUSI.RIP REQUESTS "BMP".  Its payload is
+     "VU14YY260001.back.bmp" -- 21 characters, where slot 88's fixed
+     prefix alone is 18.  The other '|1b' in the same file is well formed
+     at 26.  Taking the filename at 18 therefore yields "bmp", the tail
+     of the extension.  This is RIPlib parsing a MALFORMED command in
+     shipped content faithfully; the driver, reading the same record,
+     would do the same.  Recorded as content, not as a defect.
+
+     '|1R' IN NEWSPAPR.RIP REQUESTS "$&MAIN_STORY".  Its payload is
+     "00000000$&MAIN_STORY$" -- the eight-zero prefix is correct and the
+     filename is a VARIABLE REFERENCE.  rip_expand_variables() is applied
+     to rendered text and to <<IF>> expressions, and to no filename
+     argument anywhere.  So the request goes out as the literal text.
+
+     This is the same shape as D-26, one command over: an argument that
+     needs a preprocessing pass the parser applies elsewhere and not
+     here.  It is NOT fixed here, and the reason is that the scope
+     question D-26 had to answer is unanswered for this one -- which
+     arguments expand, and whether '$&' is a distinct sigil from '$'.
+     The driver's handler is the arbiter and has not been read for it.
+     Two scenes, two requests.  Recorded for /arbitrate.
+
 D-27 A COMMENT THAT WAS WRONG TWICE OVER, AND THE CHECK THAT SHOULD
      HAVE CAUGHT IT.  Recorded 2026-08-13.
 
