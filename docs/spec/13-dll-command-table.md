@@ -5,9 +5,14 @@
 
 Extracted from RIPSCRIP.DLL (MD5 bade8b1f4e467ac7ad4edb2639738d4c; the
 binary self-reports version 3.00.04 — see segment 12, "Version labelling")
-at RVA 0x080820 - 129 entries, 40 bytes each.  Regenerate with:
+at RVA 0x080820 - 129 entries, 40 bytes each.  Read the raw record with:
 
-     python scripts/dll-dispatch-table.py <path>/Ripscrip.dll
+     python scripts/dll-dispatch-table.py <path>/RIPSCRIP.DLL
+
+That script prints the record in its own compact layout; it does not
+emit this file's formatting, so it is a cross-check rather than a
+generator.  To check THIS file against the binary field by field, use
+scripts/check-dll-table.py (see "Verify" below).
 
 This is a RECORD OF THE BINARY, not an interpretation of it.  Command
 NAMES come from a separate evidence class: each handler that can
@@ -32,20 +37,77 @@ Argument types:  XY     coordinate pair, width per SET_COORDINATE_SIZE
                  color  colour value, width per SET_COLOR_MODE
                  megaN  N-digit MegaNum
 
+An ARGC of 0 with no argument types does NOT mean the command takes no
+payload.  The record types only what passes through the numeric
+argument array; a handler is free to read the raw payload itself, and
+'|T' (slot 60) does exactly that - argc 0, no types, and a body that
+parses a string.  Thirteen slots are argc-0-with-no-types.
+
+Three of those thirteen have a handler that is a BARE RET, one byte,
+so the driver accepts the command and does nothing at all:
+
+     slot   0   '|!'    0x01ad36
+     slot   4   '|('    0x01ca84
+     slot  27   '|F'    0x01b2fd     <- flood fill
+
+The rest have real bodies.  '|F' is the consequential one: FLOOD FILL
+IS A NO-OP IN THIS DRIVER.  RIPlib implements it from the v1.54 spec
+instead, taking x, y and border as three two-digit fields; see
+14-divergence-register.md 14.3.10.
+
 Validation: all 129 handler pointers resolve inside .text, and the
 independently recorded anchor RIP_BOUNDED_TEXT ('"' -> RVA 0x01A0DA)
 matches slot 1 exactly.
 
-Levels below are assigned by HANDLER ADDRESS BAND, which is an
+Levels below are assigned by CONTIGUOUS SLOT RUN, which is an
 inference, not a field in the record - the entry format carries no
-level byte.  The resulting split (83/26/12/8) is close to but not
-identical with the 80/25/19/5 reported by the original
+level byte.  The resulting split is 85/25/12/7:
+
+     level 0    slots   0 ..  84     85 records
+     level 1    slots  85 .. 109     25 records
+     level 2    slots 110 .. 121     12 records
+     level 3    slots 122 .. 128      7 records
+
+It is not identical with the 80/25/19/5 reported by the original
 reconstruction, so treat the level column as provisional and the
 letter/handler/arity columns as the actual evidence.
 
+Record counts exceed distinct-letter counts because of the
+continuation rows described in 12.11 - level 0 carries eleven, and
+levels 1 to 3 one apiece for their ESC form.
+
+A HANDLER ADDRESS BAND was tried first and rejected.  It agrees with
+the slot runs on 128 of 129 records and disagrees on exactly one:
+slot 48, whose handler at 0x00dcf1 lies among the level-1 handlers
+(0x00a529..0x00dd67) while every other level-0 handler lies in
+0x019b50..0x02102c.  Three independent things place that record at
+level 0 regardless of where its code sits:
+
+  * its slot number falls inside level 0's run, and levels are
+    otherwise perfectly contiguous;
+  * the handler names ITSELF RIP_SetBorder, and RIP_SET_BORDER is a
+    level-0 command; and
+  * it types one mega2, which is exactly the 'borders:2' that
+    level-0 '|N' takes.
+
+So slot 48 is level 0 '|N', and the address band is what misfires -
+the handler simply lives in a different code region from its
+neighbours.  Earlier revisions of this file assigned it to level 1 as
+'|1N' and reported the split as 83/26/12/8 and then 84/26/12/7; both
+were wrong, and both were arrived at by grouping the rows by this
+file's own level column and then measuring the groups, which cannot
+discover a misplaced row.
+
+RIPlib's own '|1N' RIP_SET_ICON_DIR is a separate, RIPlib-original
+command with no dispatch entry - see 14-divergence-register.md 14.3.9.
+
+Verify this file against the binary with:
+
+     python scripts/check-dll-table.py <path>/RIPSCRIP.DLL
+
 
 ---------------------------------------------------------------------
-13.1  LEVEL 0   (84 commands)
+13.1  LEVEL 0   (85 commands)
 ---------------------------------------------------------------------
 
    SLOT  CMD    HANDLER    ARGC  NAME                     ARGUMENT TYPES
@@ -97,6 +159,7 @@ letter/handler/arity columns as the actual evidence.
      45  |l    0x01ed28   var  -                        mega2, XY
      46  |M    0x01f3fd     2  RIP_SetColorMode         mega1, mega1
      47  |m    0x01cef0     2  -                        XY, XY
+     48  |N    0x00dcf1     1  RIP_SetBorder            mega2
      49  |n    0x01f39f     2  RIP_SetCoordinateSize    mega1, 0x03
      50  |O    0x01d297     6  -                        XY, XY, mega2, mega2, XY, XY
      51  |o    0x01b542     4  -                        XY, XY, XY, XY
@@ -136,11 +199,10 @@ letter/handler/arity columns as the actual evidence.
 
 
 ---------------------------------------------------------------------
-13.2  LEVEL 1 (prefix '1')   (26 commands)
+13.2  LEVEL 1 (prefix '1')   (25 commands)
 ---------------------------------------------------------------------
 
    SLOT  CMD    HANDLER    ARGC  NAME                     ARGUMENT TYPES
-     48  |1N    0x00dcf1     1  RIP_SetBorder            mega2
      85  |1ESC  0x00d3da     3  rip_query                mega1, mega1, mega2
      86  |1A    0x00dc58     2  RIP_SelectArticle        mega2, mega4
      87  |1B    0x00b325    16  RIP_ButtonStyle          XY, XY, mega2, mega4, mega2, mega2, mega2, mega2, mega2, mega2, mega2, mega2, mega2, mega2, mega1, 0x05

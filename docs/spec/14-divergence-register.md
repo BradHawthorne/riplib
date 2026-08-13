@@ -262,11 +262,88 @@ rather than a slogan.
 
 14.3.9  RIPlib-ORIGINAL COMMANDS
 
-     '|1V' SET_VIEWPORT_EXT and '|1X' CLIPBOARD_OP have no dispatch
-     entry.  They are RIPlib extensions and are documented as such in
-     11-dll-deviations.md DEV.4.  Level 3 '|3&' and '|3-' likewise --
-     neither letter appears among the driver's Level 3 commands
-     (D, e, ESC, G, R, U), so nothing in the protocol is displaced.
+     TWENTY commands RIPlib documents have no dispatch entry at all.
+     This section previously named four of them, which understated the
+     extension surface fivefold; the full set is below, obtained by
+     subtracting the driver's letter set per level from the letters the
+     spec chapters document.
+
+          level 0    '|^'  '|~'
+          level 1    '|1N' '|1O' '|1Q' '|1S' '|1V' '|1X' '|1Z'
+          level 2    '|20' '|22' '|23' '|24' '|25' '|26' '|28'
+                     '|2c' '|2F'
+          level 3    '|3&' '|3-'
+
+     The driver's own letters, for comparison:
+
+          level 0    ! " # & ( ) * + , - . : ; < = > @
+                     A-Z [ ] _ ` a-z {
+                     (74 letters + 11 continuation rows = 85 records)
+          level 1    A B C D E F G I K M P R T U W b c e g i k p t w
+                     and ESC          (24 letters + ESC = 25 records)
+          level 2    A B C E P R T W Y p s
+                     and ESC          (11 letters + ESC = 12 records)
+          level 3    D G R U e
+                     and ESC           (5 letters + ESC =  7 records)
+
+     Record counts exceed letter counts because of the continuation
+     rows described in 12.11 -- extra argument signatures sharing a
+     handler -- and because level 3 records '|3D' twice, under two
+     different handlers.
+
+     Note that level 0 DOES carry '|N' RIP_SetBorder, at slot 48, and
+     that RIPlib implements it there.  RIPlib's '|1N' RIP_SET_ICON_DIR
+     is a different command that happens to share the letter, and it
+     is the LEVEL 1 one that is RIPlib-original.  Revisions of
+     13-dll-command-table.md before 2026-08-13 filed slot 48 under
+     Level 1 as '|1N', which made level 0 look as though it were
+     missing an 'N' and made '|1N' look driver-backed; both readings
+     were wrong.
+
+     D-23 in 12-dll-provenance.md had already recorded that "'|1Z',
+     '|1N' and '|1O' have NO dispatch entry at all".  That was correct
+     and the dispatch table contradicted it for months without either
+     being reconciled, because no check compared the two.  Two
+     documents in the same repository disagreeing is exactly the class
+     of defect that survives review by prose alone.
+
+     None of the twenty displaces a driver command: every one of those
+     letters is absent from its level's set, so a stream written for
+     the driver cannot collide with a RIPlib extension.  They are
+     documented as extensions in 11-dll-deviations.md DEV.4.
+
+     Verify this list with scripts/check-spec-examples.py, which
+     reports every documented command whose letter has no dispatch
+     entry rather than passing it silently.
+
+
+14.3.10  COMMANDS THE DRIVER ACCEPTS AND IGNORES
+
+     Three dispatch entries point at a handler that is a single RET
+     instruction.  The driver parses the command, dispatches it, and
+     does nothing:
+
+          slot   0   '|!'   0x01ad36
+          slot   4   '|('   0x01ca84
+          slot  27   '|F'   0x01b2fd
+
+     '|F' RIP_FILL is the one that matters.  Flood fill is a NO-OP in
+     RIPSCRIP.DLL 3.00.04.  RIPlib implements it fully - x, y and
+     border as three two-digit fields, per the v1.54 specification and
+     corroborated by IcyTerm's parser, which reads six base-36 digits
+     for '|F'.
+
+     This is a deliberate divergence in the direction of DOING MORE
+     than the driver, and it is safe in the way the '|Y' direction
+     extension is safe: content written for the driver expects nothing
+     to happen, and content written for a conforming client gets the
+     fill.  Nothing that renders correctly under the driver renders
+     incorrectly under RIPlib because of it.
+
+     Note also that an argc of 0 with no argument types does not imply
+     a command takes no payload -- '|T' has argc 0 and parses a string
+     itself.  Ten of the thirteen argc-0 entries have real bodies.
+     Only a bare-RET body proves a command is inert.
 
 
 14.4  WHAT THIS REGISTER IS FOR
@@ -292,3 +369,54 @@ rather than the code:
 Each of those would have overstated or understated this register.  The
 counts here are 13 divergences from bbs-land, 7 of them affecting the
 total width -- reproduced twice by independent paths.
+
+A fourth was found on 2026-08-13 and is worth recording because it is
+a different SHAPE of instrument fault.  The level split quoted in
+13-dll-command-table.md was checked by grouping that file's rows by
+its own level column and counting the groups.  That can verify a
+count but never a MISFILED ROW: slot 48 sat under Level 1 as '|1N',
+and two successive corrections of the split (83/26/12/8, then
+84/26/12/7) both preserved the misfiling because both measured the
+same wrong grouping.  The true split is 85/25/12/7.  A check that
+takes its partition from the artefact under test cannot find an error
+in that partition; scripts/check-dll-table.py now verifies that each
+level is a contiguous slot run and that every row is spelled with its
+section's prefix, which is independent of the grouping.
+
+
+14.5  RECOVERED NAMES THAT CONTRADICT RIPlib'S
+---------------------------------------------------------------------
+
+Handlers that can report an error push their own name string before
+calling the error reporter, so a name recovered that way is strong
+evidence -- stronger than any secondary reference.  Thirty-nine
+commands are named on both sides.  Thirty-seven agree once naming
+style is normalised ('RIP_ExtendedTextWindow' against
+'RIP_EXT_TEXT_WINDOW', 'RIP_FilledPolygon' against
+'RIP_FILL_POLYGON', and so on).
+
+TWO do not, and both are recorded rather than resolved:
+
+     command   handler self-name      RIPlib's name
+     -------   ------------------     -------------
+     '|1A'     RIP_SelectArticle      RIP_PLAY_AUDIO
+     '|1N'*    RIP_SetBorder          RIP_SET_ICON_DIR
+
+     * slot 48 is LEVEL 0 '|N'; see 14.3.9.  RIPlib's level-1 '|1N'
+       has no dispatch entry, so this row is a collision of letters
+       rather than a contradiction, and only '|1A' is a genuine
+       disagreement about one record.
+
+For '|1A' the FIELD LAYOUT is settled and the SEMANTICS are not.  The
+handler at RVA 0x00DC58 pushes both "Invalid article number" and
+"RIP_SelectArticle()", and its entry records mega2 + mega4 -- six
+fixed characters then a string.  RIPlib reads exactly those six and
+treats the remainder as a filename.  Any consumer relying on the
+audio reading should know that the driver's own diagnostics call it
+something else; the wire format is the same either way, which is why
+this has never affected a shipped scene.
+
+Regenerate this comparison by extracting the NAME column of
+13-dll-command-table.md and the leading identifier of each 'case'
+comment in src/ripscrip.c, then normalising both to lower case with
+'rip_' and underscores stripped.

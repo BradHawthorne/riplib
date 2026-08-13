@@ -211,6 +211,20 @@ jobs:
     - name: Parser and appendix agree on command names
       run: python3 scripts/check-command-docs.py
 
+    # The spec chapters document each command as a Command:/Arguments:/
+    # Format:/Example: block whose four lines can disagree with each other.
+    # They did: '|=' and '|L' carried examples too long for their own field
+    # lists, and '|1B' stated a 30-character payload for a 36-character
+    # command. Nothing compared them until 2026-08-13.
+    #
+    # RIPSCRIP.DLL is third-party and deliberately not vendored, so the
+    # field-split check against the dispatch record cannot run here; the
+    # width, decode and stated-total checks do not need it. Run
+    #     python3 scripts/check-spec-examples.py <path>/RIPSCRIP.DLL
+    # locally for the full set.
+    - name: Spec command blocks are internally consistent
+      run: python3 scripts/check-spec-examples.py
+
   static-analysis:
     runs-on: ubuntu-latest
     steps:

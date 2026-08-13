@@ -80,9 +80,9 @@ Special port index values:
 
      Function:     Define Drawing Port
      Command:      |2P
-     Arguments:    port:1 x0:2 y0:2 x1:2 y1:2 [flags:2]
-     Format:       !|2P<port><x0><y0><x1><y1>[<flags>]|
-     Example:      !|2P10A0014001E00|  port 1, (10,0)-(20,30)
+     Arguments:    port:1 x0:XY y0:XY x1:XY y1:XY [flags:4] [res:4]
+     Format:       !|2P<port><x0><y0><x1><y1>[<flags>][<res>]|
+     Example:      !|2P10A000K0U|   port 1, (10,0)-(20,30)
 
 Creates a new port or redefines an existing one. Port 0 cannot
 be redefined. Protected ports reject redefinition.
@@ -90,9 +90,16 @@ be redefined. Protected ports reject redefinition.
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
      port        1       1-35      Port slot number
-     x0,y0       2,2     coords    Viewport top-left (EGA)
-     x1,y1       2,2     coords    Viewport bottom-right (EGA)
-     flags       2       0-15      Optional creation flags
+     x0,y0       XY,XY   coords    Viewport top-left (EGA)
+     x1,y1       XY,XY   coords    Viewport bottom-right (EGA)
+     flags       4       0-15      Optional creation flags
+
+     Note: the flags field is a full mega4 read at offset 9, not a
+     mega2 - dispatch slot 111 records mega1, XY, XY, XY, XY, mega4,
+     mega4.  RIPlib reads the first of those two mega4s and ignores
+     the second, so it consumes 13 of the record's 17 characters.
+     Only bits 1..3 exist; bits 2 and 3 of an earlier RIPlib reading
+     were invented and have been removed.
 
 Creation flags:
 
@@ -116,8 +123,8 @@ On creation, all drawing state is initialized to defaults
 
      Function:     Delete Drawing Port
      Command:      |2p     (lowercase)
-     Arguments:    port:1
-     Format:       !|2p<port>|
+     Arguments:    port:1 res:1 res:2
+     Format:       !|2p<port><res><res>|
 
 Deletes a port and frees its slot. Port 0 cannot be deleted.
 Protected ports reject deletion unless force-deleted.
@@ -125,6 +132,13 @@ Protected ports reject deletion unless force-deleted.
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
      port        1       0-35      Port slot (or special index)
+     res         1       0         Reserved
+     res         2       0         Reserved
+
+     Note: dispatch slot 116 records mega1 + mega1 + mega2, so the
+     payload is FOUR characters, not one.  RIPlib gates on that
+     length; it reads the port index and ignores both reserved
+     fields.
 
 Special values:
 
@@ -180,19 +194,26 @@ is reloaded (useful for re-applying viewport after changes).
 
      Function:     Copy Pixels Between Port Viewports
      Command:      |2C
-     Arguments:    src:1 sx0:2 sy0:2 sx1:2 sy1:2
-                   dst:1 dx0:2 dy0:2 dx1:2 dy1:2 [wmode:1]
-     Format:       !|2C<src><sx0><sy0><sx1><sy1><dst><dx0><dy0><dx1><dy1>[<wm>]|
+     Arguments:    src:1 sx0:XY sy0:XY sx1:XY sy1:XY
+                   dst:1 dx0:XY dy0:XY dx1:XY dy1:XY [wmode:1] [res:5]
+     Format:       !|2C<src><sx0><sy0><sx1><sy1><dst><dx0><dy0><dx1><dy1>[<wm>][<res>]|
 
 Copies a rectangular region from one port's viewport to another.
 
      Parameter   Width   Range   Description
      ---------   -----   -----   -----------
      src         1       0-35    Source port
-     sx0-sy1     2×4     coords  Source rectangle (EGA)
+     sx0-sy1     XY×4    coords  Source rectangle (EGA)
      dst         1       0-35    Destination port
-     dx0-dy1     2×4     coords  Destination rectangle (EGA)
+     dx0-dy1     XY×4    coords  Destination rectangle (EGA)
      wmode       1       0-4     Write mode (optional, default 0)
+     res         5       0       Reserved (optional)
+
+     Note: dispatch slot 113 records TWELVE fields totalling 24
+     characters - the eleven above plus a five-character reserved
+     tail this table previously omitted.  RIPlib gates on 18, reads
+     the nineteenth as the write mode when present, and ignores the
+     reserved tail.
 
 Special cases:
      - All-zero source rect: use entire source viewport
@@ -371,11 +392,21 @@ Draws a dialog box with shadow, title bar, and background fill.
 
      Function:     Trigger Screen Refresh
      Command:      |2R
-     Arguments:    (none)
-     Format:       !|2R|
+     Arguments:    res:4
+     Format:       !|2R<res>|
 
 Forces the client to refresh the entire screen. Marks all
 scanlines dirty for the DMA engine to re-transfer.
+
+     Parameter   Width   Range     Description
+     ---------   -----   -------   -----------
+     res         4       0         Reserved
+
+     Note: dispatch slot 117 records one mega4, so this is NOT a
+     zero-argument command - RIPlib used to treat it as one, which
+     left four characters in the stream.  The field is consumed so
+     the frame stays in sync and recorded for capability queries;
+     the driver does not otherwise act on it.
 
 
 ---------------------------------------------------------------------

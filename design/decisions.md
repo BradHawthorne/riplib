@@ -24,9 +24,13 @@ the chronological decisions log, and the theme index — lives in this single fi
   permitted throughout the specification. It is never to be expanded to the
   consumer name it derives from. Enforced by `scripts/check-branding.sh`, which
   matches the consumer names themselves rather than the tag. Branding-leak
-  findings from the audit are escalated accordingly. See
-  [`memory/feedback_riplib_platform_independence.md`](../../../C:/Users/X99/.claude/projects/D--projects-riplib/memory/feedback_riplib_platform_independence.md)
-  for the durable form of this guidance.
+  findings from the audit are escalated accordingly. The durable form of this
+  guidance is held outside the repository as an assistant memory
+  (`feedback_riplib_platform_independence`); this bullet and
+  [ADR-0007](adr/0007-a2g-section-prefix-opaque-tag.md) are the in-repo record,
+  and are authoritative for anyone reading the project. (A machine-local
+  absolute path stood here until 2026-08-13, which was a dead link for every
+  reader but one.)
 - **Extract, don't delete** (added 2026-05-25 mid-audit): the content being
   removed from RIPlib's public surface is often *valuable to A2GSPU* (DLL field
   offsets, ProDOS time-sync rationale, compositor stub semantics, etc.). The

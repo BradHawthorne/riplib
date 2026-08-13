@@ -549,6 +549,15 @@ draw color after filling. `00` disables borders; nonzero enables
 them. Borders are drawn with write mode COPY, matching the v2.A3
 spec. RIP_BAR remains borderless.
 
+     Note: this is dispatch slot 48, which records one mega2 and
+     whose handler names itself RIP_SetBorder.  Its handler address
+     (0x00dcf1) sits among the LEVEL 1 handlers rather than with the
+     other level-0 ones, which is a quirk of code placement, not of
+     the protocol - the slot number, the recovered name and the
+     argument type all place it at level 0.  Do not confuse it with
+     RIPlib's level-1 '|1N' RIP_SET_ICON_DIR, which shares the letter
+     but has no dispatch entry at all.
+
 
 ---------------------------------------------------------------------
 4.23  RIP_SKEWED_OVAL — Rotated Ellipse Outline

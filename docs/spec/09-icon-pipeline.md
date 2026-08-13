@@ -123,11 +123,30 @@ RIPlib supports a subset of the Windows BMP format for icon data:
           - Dimensions: 1-640 width, 1-400 height
           - Top-down and bottom-up row ordering
 
-     Not supported:
-          - RLE4 or RLE8 compression
-          - 16bpp, 24bpp, or 32bpp pixel formats
-          - OS/2 BMP variants
-          - BITMAPV4/V5 headers
+     Rejected:
+          - RLE4 or RLE8 compression      (compression field != 0)
+          - 16bpp, 24bpp, or 32bpp        (bit-count field not 4 or 8)
+          - width outside 1-640, height outside 1-400
+          - a pixel offset at or past the end of the buffer, or a
+            pixel array that would run past it
+
+     The decoder reads the bit count and compression fields at their
+     BITMAPINFOHEADER offsets and does NOT inspect the DIB header
+     size, which has two consequences worth stating plainly:
+
+          - BITMAPV4/V5 headers are not rejected.  Those layouts keep
+            the bit count and compression fields at the same offsets,
+            so a V4 or V5 file carrying 4bpp or 8bpp BI_RGB data
+            decodes normally.  The extra colour-space fields are
+            ignored, which for indexed data changes nothing.
+
+          - OS/2 BITMAPCOREHEADER files are rejected, but as a
+            side-effect rather than by a check.  That layout puts
+            16-bit width and height at offsets 18 and 20 and the bit
+            count at 24, so the fields read at 28 and 30 are not the
+            ones intended and effectively always fail the bit-count
+            or range tests.  Do not rely on this as a validated
+            refusal.
 
 BMP header fields used:
 

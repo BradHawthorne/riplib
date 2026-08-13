@@ -72,16 +72,23 @@ EGA default palette:
 
      Function:     Set Background Color
      Command:      |k
-     Arguments:    color:1
+     Arguments:    color:CM
      Format:       !|k<color>|
-     Example:      !|k0|           color=0 (black)
+     Example:      !|k00|          color=0 (black)
 
 Sets the background color used by erase commands (|e, |E, |*)
-and text background fill. Single MegaNum digit (0-15).
+and text background fill.
+
+The field is a COLOUR, so its width follows SET_COLOR_MODE and is two
+digits at the default mode - dispatch slot 60 types it 0xFE, not a
+literal 1.  RIPlib nonetheless accepts a single digit as well: of 133
+'|k' commands in the corpus 132 send two, and N2_BUSI.RIP sends one.
+That tolerance is deliberate and is registered in
+14-divergence-register.md; two digits is the format to emit.
 
      Parameter   Width   Range   Description
      ---------   -----   -----   -----------
-     color       1       0-15    EGA color index
+     color       CM      0-15    EGA color index (2 digits by default)
 
 
 ---------------------------------------------------------------------
@@ -195,15 +202,25 @@ The fill style is automatically set to USER_FILL (12).
 
      Function:     Set Line Style
      Command:      |=
-     Arguments:    style:2 user_pattern:4 thickness:2
-     Format:       !|=<style><user_pat><thick>|
-     Example:      !|=0000000001|   solid, no user pat, thickness=1
+     Arguments:    off_draw:1 style:1 user_pattern:4 thickness:2
+     Format:       !|=<off_draw><style><user_pat><thick>|
+     Example:      !|=00000001|    solid, no user pat, thickness=1
 
      Parameter   Width   Range    Description
      ---------   -----   ------   -----------
-     style       2       0-4      Predefined line style
+     off_draw    1       0-1      Reserved leading digit
+     style       1       0-4      Predefined line style
      user_pat    4       0-65535  16-bit user dash pattern
      thickness   2       1-10     Line thickness in pixels
+
+     Note: dispatch slot 14 types this as FOUR fields - mega1, mega1,
+     mega4, mega2 - not the three that the 1.54 spec's "style:2"
+     implies.  The total is eight characters either way, so the wire
+     bytes are identical and only the split differs; the four-field
+     reading is the one the driver and RIPlib both use.  RIPlib also
+     accepts short forms, reading progressively: of 116 '|=' commands
+     in the corpus 107 send eight characters, two send seven and seven
+     send four.
 
      Note: thickness is Y-scaled (EGA 350→400) when used via
      RIPscrip protocol. The DLL applies ripScaleCoordY(thick).
@@ -313,7 +330,7 @@ card's framebuffer height.
      Command:      |L
      Arguments:    x0:2 y0:2 x1:2 y1:2
      Format:       !|L<x0><y0><x1><y1>|
-     Example:      !|L002S1E5K4Q|   (0,100)→(200,150)
+     Example:      !|L002S5K46|    (0,100)→(200,150)
 
 Draws a line from (x0,y0) to (x1,y1) using the Bresenham
 algorithm with the current draw color, line pattern, and

@@ -31,7 +31,7 @@ RIPlib is a portable rendering/parser core, not a complete terminal application.
 | Stroke Fonts | 10 CHR (buggy parsers) | Partial | No | **10 CHR (correct parser)** |
 | Font Scaling | 1-10 integer | 1-10 | N/A | **1-10 + attributes** |
 | Font Attributes | No | No | No | **Bold/Italic/Underline/Shadow** |
-| Vertical Text | Bottom-to-top only | Same | N/A | **3 directions, spec-correct** |
+| Vertical Text | Bottom-to-top only | Same | N/A | **Spec-correct bottom-to-top + 2 extensions** |
 | Alpha/Transparency | No | Yes (SDL) | No | **Per-port (v3.1)** |
 | Multiple Windows | No | Yes (SDL) | No | **36 Drawing Ports** |
 | Mouse Regions | No | Yes (SDL) | Yes | **Yes + hit testing** |
@@ -47,7 +47,7 @@ RIPlib is a portable rendering/parser core, not a complete terminal application.
 | **v1.54** | 1993 | Portable core implemented | Level 0 drawing plus Level 1 interactive commands, icon cache lookup, clipboard capture/paste, file query, variables, and host callback fallbacks |
 | **v2.0** | 1995 | Portable core implemented with embedded fallbacks | Extended drawing commands, header/mode metadata, filled-object border control, icon slots/style, scaled region copy, and Level 2 Drawing Ports with state save/restore |
 | **v3.0** | 1997 | Portable core implemented with approximations | Font justification, extended text windows, gradient fill, scalable text state, menu/dialog/scrollbar widgets, palette query, and indexed-color alpha approximation |
-| **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | vertical text CW+CCW, font attributes (bold/italic/underline/shadow), spec-correct vertical text directions, 11 native fill patterns, FPU curves |
+| **v3.1** | 2026 | Implemented extensions (§A2G.1-7) | vertical text CW+CCW (directions 2 and 3, RIPlib extensions the driver rejects — see [§14.3.5](docs/spec/14-divergence-register.md)), font attributes (bold/italic/underline/shadow), 11 native fill patterns, FPU curves |
 | **v3.2** | 2026 | Implemented extensions (§A2G.8-13) | State push/pop stack, layout/introspection variables, time component variables, EGA color-name aliases, `<<DEBUG>>` directive, radial gradient |
 
 Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, OS clipboard integration, URL launch/delete callbacks, true direct-RGB framebuffers, and monitor overscan remain outside the portable core. The parser accepts those protocol surfaces where possible and exposes embedded-friendly fallbacks instead of claiming host behavior the library cannot provide by itself.

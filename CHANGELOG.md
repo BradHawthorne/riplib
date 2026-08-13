@@ -5,6 +5,14 @@ All notable changes to RIPlib are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Released version: 2.0.1.** `include/riplib_version.h` and
+> `CMakeLists.txt` both say `2.0.1`, and `v2.0.1` is the newest tag. The
+> `2.0.2` and `2.0.3` headings below are provisional groupings of
+> unreleased iteration churn, not versions that exist — nothing has been
+> tagged or published under either number, and the version macros are
+> deliberately held at 2.0.1 while this work continues. Where an entry
+> refers to "2.0.2" it means the group of changes under that heading.
+
 ## [2.0.3] — unreleased
 
 Patch release. Resolves the three argument layouts 2.0.2 recorded as
@@ -13,6 +21,67 @@ dispatch record alone — and, in doing so, finds three further defects in the
 mouse-region and button path. All nine of the audit's genuine disagreements
 are now settled; see [design/syntax-audit.md](design/syntax-audit.md) and
 D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
+
+### Documentation
+
+A separate pass audited the prose itself rather than the code, on the
+principle that a corrected handler and a stale paragraph describing it
+are the same defect to a reader. **Sixteen documentation defects, none
+affecting behaviour.** Two new checkers now gate the classes that
+produced them.
+
+- **The dispatch table filed slot 48 under the wrong level.** It appeared
+  as Level 1 `|1N`; it is Level 0 `|N` `RIP_SetBorder`, which its slot
+  number, its recovered name and its single `mega2` all agree on. The
+  level split is **85/25/12/7**, not the 83/26/12/8 the file quoted or
+  the 84/26/12/7 an intermediate correction produced. Both earlier
+  figures were reached by grouping the file's rows by its own level
+  column and counting the groups, which can verify a count but never
+  find a misfiled row. `12-dll-provenance.md` had recorded that `|1N`
+  has no dispatch entry all along; the two documents contradicted each
+  other because nothing compared them.
+- **Nine Level 1 command blocks in `03-level1-interactive.md` still
+  carried pre-audit field lists.** `|1M`, `|1B`, `|1P`, `|1T`, `|1I`,
+  `|1A`, `|1N`, `|1W` and `|1D` were all corrected in the source during
+  the 2.0.2/2.0.3 work and left stale in the chapter — including `|1I`,
+  whose stale list had already been noticed once and fixed only in the
+  code.
+- **Two worked examples were arithmetically wrong.** `|=` showed a
+  ten-character payload for an eight-character command, and `|L` showed
+  ten characters with a spurious field and a `4Q` that decodes to 170
+  where its own comment claimed 150.
+- **`|1B` stated a 30-character payload**; the record totals 36 and
+  RIPlib gates on 36.
+- **`|k` was documented as `color:1`.** The record types it as a colour
+  (two digits at the default mode) and RIPlib reads it that way — the
+  `2.0.1` entry below records fixing exactly this in the code.
+- **`|2P`, `|2p`, `|2C` and `|2R` understated their records** by 4, 3, 5
+  and 4 characters. `|2R` was documented as taking no arguments at all,
+  which the source had already corrected.
+- **The register listed 4 RIPlib-original commands; there are 20.**
+  Obtained by subtracting the driver's letter set from the documented
+  set, per level.
+- **The dispatch table's "Regenerate with" line named a script that
+  emits a different format**, so the stated reproduction step did not
+  reproduce the file.
+- Recorded the two handler self-names that contradict RIPlib's own
+  (`|1A` `RIP_SelectArticle`, and the `|N`/`|1N` letter collision) as
+  open rather than resolving them by preference — new register §14.5.
+
+### Added
+
+- `scripts/check-dll-table.py` — verifies every row of segment 13
+  against the dispatch record (slot, letter, handler, argc, types) and
+  checks that each level is a contiguous slot run whose rows are
+  spelled with that level's prefix. The contiguity check is what the
+  earlier count-based checking could not do.
+- `scripts/check-spec-examples.py` — checks each spec command block for
+  four things: the `Example:` payload matches the `Arguments:` widths,
+  every MegaNum in it decodes to the value its own comment claims, the
+  field split matches the dispatch record, and any stated character
+  total is right. Blocks it cannot check mechanically are reported as
+  skipped with a reason rather than silently passed. Wired into CI in
+  its no-DLL mode.
 
 ### Fixed
 

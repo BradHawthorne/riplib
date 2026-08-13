@@ -30,8 +30,8 @@ before drawing a new screen with fresh interactive elements.
 
      Function:     Define Mouse Region
      Command:      |1M
-     Arguments:    num:2 x0:XY y0:XY x1:XY y1:XY clk:1 clr:1 res:5 text
-     Format:       !|1M<num><x0><y0><x1><y1><clk><clr><res><text>|
+     Arguments:    num:2 x0:XY y0:XY x1:XY y1:XY clk:1 clr:1 res:2 res:3 text
+     Format:       !|1M<num><x0><y0><x1><y1><clk><clr><res><res><text>|
      Example:      !|1M010A0A1E0U1000000SELECT 1\r|
 
 Defines a rectangular mouse-clickable region on screen.
@@ -104,12 +104,18 @@ record byte, whose VALUES are unrelated to those bit positions.
 
      Function:     Define Button Style
      Command:      |1B
-     Arguments:    wid:2 hgt:2 orient:2 flags:4 bevsize:2
+     Arguments:    wid:XY hgt:XY orient:2 flags:4 bevsize:2
                    dfore:2 dback:2 bright:2 dark:2 surface:2
-                   grp_no:2 flags2:2 uline:2 corner:2 res:6
-     Format:       !|1B<30 chars of params>|
+                   grp_no:2 flags2:2 uline:2 corner:2 res:1 res:5
+     Format:       !|1B<36 chars of params>|
 
 Defines the visual style for subsequent RIP_BUTTON commands.
+
+The payload is THIRTY-SIX characters, not thirty: thirty carry
+meaning and a further six are reserved.  Dispatch slot 87 records
+sixteen fields totalling 36, and RIPlib gates on `len >= 36`.  The
+reserved tail is two fields in the record - mega1 then mega5 - which
+this table previously merged into a single res:6.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
@@ -127,7 +133,8 @@ Defines the visual style for subsequent RIP_BUTTON commands.
      flags2      2       0-1295    Extended flags
      uline       2       0-15      Underline color
      corner      2       0-15      Corner color
-     res         6       0         Reserved (6 chars, ignored)
+     res         1       0         Reserved (record field 15)
+     res         5       0         Reserved (record field 16)
 
 Style flags (in flags parameter):
 
@@ -218,15 +225,21 @@ buffer. The clipboard stores raw 8bpp pixel data in PSRAM.
 
      Function:     Paste Clipboard to Screen
      Command:      |1P
-     Arguments:    x:2 y:2 mode:2
-     Format:       !|1P<x><y><mode>|
+     Arguments:    x:XY y:XY mode:2 res:1
+     Format:       !|1P<x><y><mode><res>|
 
 Pastes the clipboard buffer to screen position (x,y).
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x,y         2,2     coords    Destination position
+     x,y         XY,XY   coords    Destination position
      mode        2       0-4       Write mode for paste
+     res         1       0         Reserved
+
+     Note: dispatch slot 102 records a fourth field, a single reserved
+     digit, which this table previously omitted.  RIPlib gates on
+     `len >= 7` accordingly.  (Slot 103 is the LOWERCASE '|1p', a
+     different command taking one mega4.)
 
 
 ---------------------------------------------------------------------
@@ -235,8 +248,8 @@ Pastes the clipboard buffer to screen position (x,y).
 
      Function:     Begin Text Block
      Command:      |1T
-     Arguments:    x0:2 y0:2 x1:2 y1:2 res:2
-     Format:       !|1T<x0><y0><x1><y1><res>|
+     Arguments:    x0:XY y0:XY x1:XY y1:XY res:1 res:1
+     Format:       !|1T<x0><y0><x1><y1><res><res>|
 
 Defines a rectangular region for flowing text. Subsequent
 RIP_REGION_TEXT commands ('t') render text lines within this
@@ -244,9 +257,15 @@ region, advancing the cursor downward after each line.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x0,y0       2,2     coords    Top-left of text region
-     x1,y1       2,2     coords    Bottom-right
-     res         2       0         Reserved
+     x0,y0       XY,XY   coords    Top-left of text region
+     x1,y1       XY,XY   coords    Bottom-right
+     res         1       0         Reserved (record field 5)
+     res         1       0         Reserved (record field 6)
+
+     Note: dispatch slot 105 splits the reserved tail into two single
+     digits.  The total is unchanged at ten characters by default, so
+     the wire bytes are the same and only the split differs; RIPlib
+     reads the four coordinates and ignores both digits.
 
 
 ---------------------------------------------------------------------
@@ -329,19 +348,28 @@ accepted but not performed; see D-14.
 
      Function:     Load Icon from Cache/Flash
      Command:      |1I
-     Arguments:    x:2 y:2 mode:2 clipboard:1 res:2 filename
-     Format:       !|1I<x><y><mode><clip><res><filename>|
+     Arguments:    x:XY y:XY mode:1 res:1 clipboard:1 res:1 res:1 filename
+     Format:       !|1I<x><y><mode><res><clip><res><res><filename>|
      Example:      !|1I0A0F000000MYICON|
 
 Looks up an icon by filename and displays it at (x,y).
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x,y         2,2     coords    Display position
-     mode        2       0-4       Write mode for blit
+     x,y         XY,XY   coords    Display position
+     mode        1       0-4       Write mode for blit
+     res         1       0         Reserved (record field 4)
      clipboard   1       0-1       Copy to clipboard first
-     res         2       0         Reserved
+     res         1       0         Reserved (record field 6)
+     res         1       0         Reserved (record field 7)
      filename    var     ASCII     Icon name (no extension)
+
+     Note: dispatch slot 97 records FF FF 01 01 01 01 01 - after the
+     two coordinates come FIVE single digits, not a 2-digit mode
+     followed by a 1 and a 2.  The mode is one digit; reading it as
+     mega2 spans the record's fields 3 and 4 and agrees only while
+     field 4 is zero.  The filename offset is nine either way, which
+     is why no shipped scene exposed the difference.
 
 Lookup order:
      1. Flash-embedded BMP table (95 icons)
@@ -356,14 +384,22 @@ Lookup order:
 
      Function:     Write Icon to Runtime Cache
      Command:      |1W
-     Arguments:    [res:2] filename
-     Format:       !|1W[res]<filename>|
+     Arguments:    res:1 filename
+     Format:       !|1W<res><filename>|
 
 Stores the current image clipboard in RIPlib's runtime icon
 cache under the given filename. Subsequent RIP_LOAD_ICON (|1I)
 commands resolve the cached icon before requesting a host-side
 file transfer. On embedded targets this is an in-memory cache,
 not a persistent filesystem write.
+
+     Note: dispatch slot 108 records a single mega1, so the fixed
+     prefix is ONE character and the name starts at offset 1 - it is
+     not an optional two-digit field.  RIPlib used to take the whole
+     payload as the name and strip a leading "00" if it saw one, a
+     heuristic that strips two where the record says one and strips
+     nothing when the reserved digit is not '0'.  No corpus scene
+     sends '|1W'.  See D-25.
 
 
 ---------------------------------------------------------------------
@@ -372,13 +408,28 @@ not a persistent filesystem write.
 
      Function:     Play Audio
      Command:      |1A
-     Arguments:    filename (free-form text)
-     Format:       !|1A<filename>|
+     Arguments:    mode:2 res:4 filename
+     Format:       !|1A<mode><res><filename>|
 
 Requests playback of an audio file.  RIPlib has no built-in
 audio path; consumers receive the filename via the TX FIFO
 (prefixed with the CMD_PLAY_SOUND marker) and dispatch it to
 their own sound subsystem.
+
+     Note: dispatch slot 86 records mega2 + mega4, so the fixed prefix
+     is SIX characters and the filename starts there.  This mattered:
+     NEWS.RIP sends "|1A010000" - exactly the six fixed characters and
+     no filename at all - so reading the name from offset 2 took "00"
+     as a filename and emitted a sound request for it.  That was the
+     only host traffic any of the 35 corpus scenes produced during
+     passive replay.  See D-25.
+
+     The handler at slot 86 names itself RIP_SelectArticle in its own
+     diagnostics, which does not match the RIP_PLAY_AUDIO reading this
+     section documents.  The FIELD LAYOUT above is settled - both
+     readings agree on mega2 + mega4 + string - but the SEMANTICS are
+     not, and the name is recorded here rather than resolved.  See
+     13-dll-command-table.md and 14-divergence-register.md 14.5.
 
 
 ---------------------------------------------------------------------
@@ -413,15 +464,28 @@ stretched, tiled, etc.).
 
      Function:     Set Icon Directory
      Command:      |1N
-     Arguments:    path (free-form text)
-     Format:       !|1N<path>|
+     Arguments:    res:2 path
+     Format:       !|1N<res><path>|
 
 Sets the search directory for icon file lookups. Stored as a
 prefix for filename resolution.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
+     res         2       0         Reserved
      path        var     ASCII     Directory path (max 63 chars)
+
+     Note: '|1N' has NO dispatch entry - it is RIPlib-original.  The
+     driver's only 'N' is at slot 48, which is LEVEL 0 '|N'
+     RIP_SetBorder (see 04-extended-commands.md 4.22); it takes one
+     mega2 and has nothing to do with icon paths.  The res:2 prefix
+     documented above is RIPlib's own convention, not a record being
+     conformed to.  See 14-divergence-register.md 14.3.9.
+
+     RIPlib filters the wire-supplied path before storing it -
+     directories are allowed, but '..', control characters, '\' and
+     ':' are rejected.  A consumer that opens the path must still
+     treat it as untrusted.  See C-013 / ADR-0003.
 
 
 ---------------------------------------------------------------------
@@ -455,13 +519,25 @@ Mode values:
 
      Function:     Define Application Variable
      Command:      |1D
-     Arguments:    name (format: name=value)
-     Format:       !|1D<name>=<value>|
-     Example:      !|1DMYVAR=Hello World|
+     Arguments:    flags:3 res:2 text
+     Format:       !|1D<flags><res><name>=<value>|
+     Example:      !|1D00000MYVAR=Hello World|
 
 Defines a text variable that can be expanded in subsequent
 text commands via $MYVAR$ syntax. Stored in the application
 variable table (APP0-APP9 for indexed access).
+
+     Parameter   Width   Range     Description
+     ---------   -----   -------   -----------
+     flags       3       0-46655   Definition flags
+     res         2       0         Reserved
+     text        var     ASCII     name[,width]:?prompt?[default]
+
+     Note: dispatch slot 96 records mega3 + mega2, so FIVE fixed
+     characters precede the text and the variable name starts at
+     offset 5.  The record types only the numeric array; the trailing
+     string is passed out of band, which is why the record's fixed
+     total is exactly the string's offset.
 
 
 ---------------------------------------------------------------------
@@ -478,6 +554,12 @@ Requests loading of a BGI CHR or RFF font file. If the filename
 matches one of RIPlib's built-in BGI fonts, that font becomes the
 current font. Otherwise the filename is queued as a host-side file
 request so an embedding application can provide a custom font.
+
+     Note: '|1O' has NO dispatch entry in RIPSCRIP.DLL - the driver's
+     26 Level 1 slots do not include the letter 'O'.  There is
+     therefore no record to conform to and no reserved prefix; RIPlib
+     reads the whole payload as the filename, tolerating a leading
+     "00" if one is present.  See 14-divergence-register.md 14.3.9.
 
 
 ---------------------------------------------------------------------
