@@ -104,6 +104,23 @@ where the comment-based comparison could only reach 51. It found:
   now a documented tolerance the audit names rather than an unexamined
   fallback.
 
+**The audit is now a script in the repo, not a one-off.**
+[`scripts/dll-conformance.py`](scripts/dll-conformance.py) checks RIPlib's
+parser against the driver's dispatch record across four classes — read
+offsets, length gates, radix selection and coverage. Every one of those was
+first hit as a single bug and only afterwards turned into a check, at which
+point each found more of the same; making them re-runnable is what stops that
+happening a third time. It exits non-zero on a defect so it can gate a build,
+and it names the deliberate tolerances rather than passing them silently.
+
+Verified it can actually fail: re-injecting three real historical defects —
+`|1i`'s 12-character gate, `|h` decoded with the base-36 helper, and a
+one-character shift in `|1G`'s field offsets — is caught as three distinct
+findings with exit 1. A check that cannot fail is worth nothing.
+
+Not run in CI: `RIPSCRIP.DLL` is not vendored and will not be. Run it by hand
+against a RIPtel install when the parser changes.
+
 **Radix selection and Level 2 offsets, both now checked mechanically.** No
 defects — recorded because "no defects" only means something when it is
 reproducible.

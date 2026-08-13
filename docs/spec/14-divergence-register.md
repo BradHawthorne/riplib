@@ -33,6 +33,20 @@ Reproduce every table below with:
      python scripts/dll-argtypes.py       <path>/RIPSCRIP.DLL
      python scripts/dll-disasm.py         <path>/RIPSCRIP.DLL <rva>
 
+and check the parser against the record with:
+
+     python scripts/dll-conformance.py    <path>/RIPSCRIP.DLL -v
+
+That last one is the standing check.  It covers four classes -- read
+offsets, length gates, radix selection and coverage -- each of which was
+first hit as a single bug and only afterwards turned into a check, at
+which point every one of them found more of the same.  It exits non-zero
+on a defect, so it can gate a build, and it lists the deliberate
+tolerances in 14.3.3 by name rather than passing them silently.
+
+It is not run in CI: RIPSCRIP.DLL is not vendored, and will not be.
+Run it by hand against a RIPtel install when the parser changes.
+
 
 14.2  DIVERGENCES FROM bbs-land/remote-imaging-protocol
 ---------------------------------------------------------------------
