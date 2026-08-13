@@ -4180,6 +4180,28 @@ static void test_l1_load_bitmap_filename_offset(void) {
         FAIL("|1b requested the wrong filename");
 }
 
+static void test_l1_read_scene_expands_variables(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1R expands $VAR$ in the filename (D-28)");
+    init_fixture(&s, &ctx);
+    /* The driver interpolates before it uses the name: its scanner (RVA
+     * 0x04B0E4) is reached by RIP_ReadScene among eleven other entries, and
+     * RIPlib ran that path only for text.  NEWSPAPR.RIP sends
+     * "!|1R00000000$&MAIN_STORY$" and the request went out literally.
+     *
+     * Define the variable, then reference it.  '|1D' is flags:3 res:2 then
+     * "name=value". */
+    feed_script(&s, &ctx, "!|1D00000SCENEFILE=dragon|");
+    feed_script(&s, &ctx, "!|1R00000000$SCENEFILE$|");
+    if (s.icon_state.request_count != 1) {
+        FAIL("|1R queued no request"); return;
+    }
+    if (strcmp(s.icon_state.request_queue[0], "DRAGON") == 0)
+        PASS();
+    else
+        FAIL("|1R did not expand the variable in its filename");
+}
+
 static void test_l1_read_scene_skips_reserved_prefix(void) {
     rip_state_t s; comp_context_t ctx;
     TEST("|1R takes the filename at offset 8 (D-19)");
@@ -5801,6 +5823,7 @@ int main(void) {
     test_preproc_directive_inside_command_payload();
     test_preproc_unknown_directive_passes_through();
     test_l1_load_bitmap_filename_offset();
+    test_l1_read_scene_expands_variables();
     test_l1_read_scene_skips_reserved_prefix();
     test_level3_goto_url_skips_reserved_prefix();
     test_level3_register_var_skips_reserved();

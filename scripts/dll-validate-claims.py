@@ -64,6 +64,30 @@ def mk_rva2off(secs):
     return f
 
 
+
+def _blocks(src_text):
+    """(L3, L1, L0) line ranges, derived from structural markers.
+
+    Hardcoding these is a trap: any edit above a block shifts every case label
+    inside it, and the stale range then brackets the wrong code silently.  A
+    variable-expansion helper added ~40 lines above Level 3 and pushed '|3e'
+    out of its own window.
+    """
+    lines = src_text.split("\n")
+    mark = {}
+    for i, l in enumerate(lines, 1):
+        for key, pat in (("l3", r"if \(s->is_level3\)"),
+                         ("l2", r"if \(s->is_level2\)"),
+                         ("l1", r"if \(s->is_level1\)"),
+                         ("l0", r"/\* Level 0 commands \*/")):
+            if key not in mark and re.search(pat, l):
+                mark[key] = i
+    if len(mark) != 4:
+        raise SystemExit("cannot locate switch blocks: found %s" % sorted(mark))
+    return ((mark["l3"], mark["l2"]),
+            (mark["l1"], mark["l0"]),
+            (mark["l0"], 10 ** 9))
+
 def level_of(slot):
     return 0 if slot <= 84 else 1 if slot <= 109 else 2 if slot <= 121 else 3
 
@@ -182,7 +206,7 @@ def case_body(text, letter, lo, hi):
     return None
 
 
-L3, L1, L0 = (2299, 2468), (2517, 3485), (3485, 10 ** 9)
+L3, L1, L0 = _blocks(open(SRC, encoding="latin-1").read())
 BLOCK = {0: L0, 1: L1, 3: L3}
 
 

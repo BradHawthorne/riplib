@@ -1311,6 +1311,48 @@ static uint16_t rip_line_style_to_pattern(uint8_t style, uint16_t user_pat) {
  * design.  Widening cmd_buf to hold the corpus's longest command turned
  * that into an immediate stack-smash.  Bounding the function removes the
  * whole class instead of adding two more hand clamps. */
+/* Request an asset whose name may contain $VARIABLE$ references.
+ *
+ * The driver interpolates before it uses the name.  Its scanner at RVA
+ * 0x04B0E4 -- identified by the two `cmp ..., 0x24` it turns on -- is reached
+ * by twelve dispatch entries, RIP_ReadScene and RIP_LoadBitmap among them, and
+ * RIPlib was running that path only for TEXT.  NEWSPAPR.RIP sends
+ *
+ *     !|1R00000000$&MAIN_STORY$
+ *
+ * so the request went out as the literal string.  '&' is NOT a sigil, on
+ * either side: the driver's scanner compares against '$' alone, so the
+ * variable is simply named "&MAIN_STORY".
+ *
+ * Expansion happens BEFORE the safety check, never after, so a name assembled
+ * from a variable is still subject to it.  A name with no '$' expands to
+ * itself, which is why applying this to commands no shipped scene currently
+ * parameterises costs nothing.  D-28.
+ *
+ * Lives in its own frame deliberately: a buffer declared inside the command
+ * switch inflates execute_rip_command, which has a 656-byte budget and has
+ * been pushed over it three times by exactly that.
+ */
+static void rip_request_asset_expanded(rip_state_t *s, const char *name,
+                                       int name_len) {
+    char raw[RIP_USER_VAR_VALUE_MAX * 2 + 2];
+    char expanded[RIP_USER_VAR_VALUE_MAX * 2 + 2];
+    int n;
+
+    if (name_len <= 0)
+        return;
+    if (name_len > (int)sizeof(raw) - 1)
+        name_len = (int)sizeof(raw) - 1;
+    memcpy(raw, name, (size_t)name_len);
+    raw[name_len] = '\0';
+
+    n = rip_expand_variables(s, raw, name_len, expanded, (int)sizeof(expanded));
+    if (n <= 0)
+        return;
+    if (rip_filename_is_safe(expanded, n))
+        (void)rip_icon_request_file(&s->icon_state, expanded, n);
+}
+
 static int unescape_text(const char *src, int len, char *dst, int dst_max) {
     int j = 0;
     if (dst_max <= 0) return 0;
@@ -3065,10 +3107,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
              * match -- the same defect as '|1R' (D-19), in the command that
              * loads the actual artwork.  D-25. */
             if (len >= 18) {
-                const char *fn = p + 18;
-                int fnlen = len - 18;
-                if (fnlen > 0 && rip_filename_is_safe(fn, fnlen))
-                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+                rip_request_asset_expanded(s, p + 18, len - 18);
                 /* rip_filename_is_safe rejects '..', path separators and
                  * control characters at ingest, so the name that reaches the
                  * host queue is already constrained to a bare filename.  The
@@ -3438,10 +3477,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * "00000000dragon.txt" -- every scene-file request it made
                    * was for a name no host could match.  D-19. */
             if (len > RIP_READSCENE_RESERVED) {
-                const char *fn = p + RIP_READSCENE_RESERVED;
-                int fnlen = len - RIP_READSCENE_RESERVED;
-                if (rip_filename_is_safe(fn, fnlen))
-                    rip_icon_request_file(&s->icon_state, fn, fnlen);
+                rip_request_asset_expanded(s, p + RIP_READSCENE_RESERVED,
+                                           len - RIP_READSCENE_RESERVED);
             }
             break;
         case 'F': /* RIP_FILE_QUERY — mode:2 res:4 filename

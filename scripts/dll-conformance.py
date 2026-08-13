@@ -53,13 +53,6 @@ SRC = os.path.join(ROOT, "src", "ripscrip.c")
 SRC2 = os.path.join(ROOT, "src", "ripscrip2.c")
 HDR2 = os.path.join(ROOT, "include", "ripscrip2.h")
 
-# Switch-block line ranges in ripscrip.c.  Levels 1, 2 and 3 all sit at the
-# same indentation, so a handler's level is decided by which block it is in,
-# not by how far it is indented.
-BLOCK_L3 = (2299, 2468)
-BLOCK_L1 = (2517, 3485)
-BLOCK_L0 = (3485, 10 ** 9)
-
 # Tolerances justified against shipped scenes rather than against the record.
 # See 14-divergence-register.md 14.3.3.
 TOLERATED_GATES = {
@@ -88,6 +81,36 @@ def load(path):
         vs, va, rs, rp = struct.unpack_from("<IIII", d, o + 8)
         secs.append((va, vs, rp, rs))
     return d, secs
+
+
+
+def _blocks(src_text):
+    """(L3, L1, L0) line ranges, derived from structural markers.
+
+    Hardcoding these is a trap: any edit above a block shifts every case label
+    inside it, and the stale range then brackets the wrong code silently.  A
+    variable-expansion helper added ~40 lines above Level 3 and pushed '|3e'
+    out of its own window.
+    """
+    lines = src_text.split("\n")
+    mark = {}
+    for i, l in enumerate(lines, 1):
+        for key, pat in (("l3", r"if \(s->is_level3\)"),
+                         ("l2", r"if \(s->is_level2\)"),
+                         ("l1", r"if \(s->is_level1\)"),
+                         ("l0", r"/\* Level 0 commands \*/")):
+            if key not in mark and re.search(pat, l):
+                mark[key] = i
+    if len(mark) != 4:
+        raise SystemExit("cannot locate switch blocks: found %s" % sorted(mark))
+    return ((mark["l3"], mark["l2"]),
+            (mark["l1"], mark["l0"]),
+            (mark["l0"], 10 ** 9))
+
+# Switch-block line ranges in ripscrip.c.  Levels 1, 2 and 3 all sit at the
+# same indentation, so a handler's level is decided by which block it is in,
+# not by how far it is indented.
+BLOCK_L3, BLOCK_L1, BLOCK_L0 = _blocks(open(SRC, encoding="latin-1").read())
 
 
 def level_of(slot):
