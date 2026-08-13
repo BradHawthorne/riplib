@@ -115,6 +115,20 @@ produced them.
   so content relying on `|^`/`|~` to bracket a colour change should
   restore explicitly when targeting mixed audiences.
 
+- `scripts/ref-compare.py` — reproduces §14.2's comparison of RIPlib and
+  bbs-land against the dispatch record. **§14.2 was the one part of the
+  divergence register not reproducible from the repository**: its counts
+  came from a script in a scratch directory, while §14.4 claimed "every
+  count in this file is reproducible from the scripts in 14.1". That
+  script had also rotted unnoticed — hardcoded switch-block line numbers
+  went stale as `src/ripscrip.c` grew, so it bracketed the wrong code and
+  reported three RIPlib divergences that did not exist (`|R` showing
+  `|1R`'s record). The repo version derives its boundaries structurally
+  and names the ten elided-field-list commands it cannot compare, rather
+  than dropping them silently — a skipped comparison that is not reported
+  reads exactly like an agreement. Takes both the DLL and the reference
+  as arguments since neither is vendored.
+
 - `scripts/check-dll-table.py` — verifies every row of segment 13
   against the dispatch record (slot, letter, handler, argc, types) and
   checks that each level is a contiguous slot run whose rows are

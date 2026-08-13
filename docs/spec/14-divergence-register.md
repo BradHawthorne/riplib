@@ -44,6 +44,26 @@ which point every one of them found more of the same.  It exits non-zero
 on a defect, so it can gate a build, and it lists the deliberate
 tolerances in 14.3.3 by name rather than passing them silently.
 
+and reproduce section 14.2's comparison -- both projects against the
+driver, command by command -- with:
+
+     python scripts/ref-compare.py <path>/RIPSCRIP.DLL <path>/reference.md
+
+Neither the driver nor the reference is vendored, so both are
+arguments; with no reference only RIPlib is compared, which is the
+useful half day to day.  It exits non-zero if RIPlib disagrees with the
+record anywhere, and never fails on the reference disagreeing, because
+the reference is evidence and not the measure.
+
+That script was itself a finding.  Until 2026-08-13 the 14.2 counts came
+from a copy living in a scratch directory, which meant this section was
+the one part of the register NOT reproducible from the repository, and
+which rotted unnoticed: it carried hardcoded switch-block line numbers
+that went stale as src/ripscrip.c grew, so it bracketed the wrong code
+and reported three RIPlib divergences that did not exist -- '|R' showing
+'|1R's record, because the ranges had drifted past it.  The version in
+scripts/ derives its boundaries from structural markers.
+
 and re-derive the findings themselves with:
 
      python scripts/dll-validate-claims.py <path>/RIPSCRIP.DLL
@@ -350,9 +370,14 @@ rather than a slogan.
 ---------------------------------------------------------------------
 
 A claim of conformance is only as good as the set it was measured over,
-and every count in this file is reproducible from the scripts in 14.1.
-Three findings in this project came from measuring the MEASUREMENT
-rather than the code:
+and every count in this file is reproducible from the scripts in 14.1 --
+which became true of section 14.2 only on 2026-08-13, when the tool that
+produced those counts was moved into the repository.  Before that this
+sentence was an overclaim about the very section most likely to be
+challenged.
+
+FIVE findings in this project came from measuring the MEASUREMENT rather
+than the code:
 
   * The field-list comparison read only the first line of each handler
     comment, silently truncating any signature that wrapped.
@@ -364,14 +389,22 @@ rather than the code:
 
   * An elided field list in a reference ("c1:2 c2:2 ... c16:2") yields
     only the pairs literally written, which reported '|Q' as a 32-vs-6
-    divergence where the reference in fact agrees.
+    divergence where the reference in fact agrees.  Ten commands are
+    elided this way; scripts/ref-compare.py now names them on every run
+    rather than dropping them silently, because a skipped comparison
+    that is not reported reads exactly like an agreement.
+
+  * The same comparison carried hardcoded switch-block line numbers.
+    They went stale as src/ripscrip.c grew, so it bracketed the wrong
+    code and reported three RIPlib divergences that did not exist --
+    '|R' showing '|1R's record.  Boundaries are derived now.
 
 Each of those would have overstated or understated this register.  The
 counts here are 13 divergences from bbs-land, 7 of them affecting the
 total width -- reproduced twice by independent paths.
 
-A fourth was found on 2026-08-13 and is worth recording because it is
-a different SHAPE of instrument fault.  The level split quoted in
+The fifth is worth recording separately because it is a different SHAPE
+of instrument fault.  The level split quoted in
 13-dll-command-table.md was checked by grouping that file's rows by
 its own level column and counting the groups.  That can verify a
 count but never a MISFILED ROW: slot 48 sat under Level 1 as '|1N',
