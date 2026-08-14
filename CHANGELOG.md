@@ -51,6 +51,27 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   against the handler's instructions. A recovered name tells you what a
   handler calls *itself*; it does not tell you what it *does*.
 
+- **Protection is now verified at both ends, and §14.7 overstated its own
+  coverage.** Having found the *write* side (`|2A`'s flag bits calling
+  `paletteSlotProtect`), the *read* side was read too: `|Q` RIP_SetPalette
+  calls the query at `0x10044508` and refuses with "Can't modify current
+  color palette - its protected!", drawing nothing. The state is
+  `<inst>+0x1A → +5`, stride `0x302` per slot, protected flag at `+0x300`
+  bit 0, slots 1..36. So a stream can lock a palette with `|2A` and every
+  later `|Q` is refused. RIPlib does neither half, so it applies the write
+  the driver rejects. Every link is now a disassembled instruction rather
+  than an inference.
+
+  The same pass corrected a claim I had written into §14.7 one commit
+  earlier: that the handlers outside the audit queue are "validated by the
+  corpus replay every time a scene renders". That holds only for handlers
+  the corpus **exercises**. Thirteen draw and appear in no shipped scene
+  at all — `|Q` `|,` `|b` `|.` `|{` `|A` `|I` `|C` `|g` `|m` `|>` `|H`
+  `|T` — so nothing checks them from either direction. Milder than the
+  `|1A` profile, since a misread primitive produces wrong pixels rather
+  than wrong host behaviour and cannot silently emit traffic — but milder
+  is not covered. Twelve remain as the next queue.
+
 - **`|1I`'s second "reserved" column is a stretch flag.** Slot 97 bounds
   `args[5]` — payload offset 7 — with `cmp dword [ebp-0x10],1 / jbe` and
   reports "Invalid stretch parameter" above one, drawing nothing. RIPlib

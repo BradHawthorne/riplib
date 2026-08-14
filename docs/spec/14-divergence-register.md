@@ -442,6 +442,28 @@ rather than a slogan.
      driver guards.  That is a feature, not a patch.  Recorded here so
      the decision is visible rather than implied by silence.
 
+     THE LOOP IS NOW VERIFIED AT BOTH ENDS, by disassembly rather than
+     inference.  On 2026-08-14 the write side was found ('|2A's flag
+     bits calling paletteSlotProtect); the read side was then read too.
+     '|Q' RIP_SetPalette calls the query at 0x10044508 and, when it
+     returns true, refuses with "Can't modify current color palette -
+     its protected!" and draws nothing.
+
+     The state itself, for anyone implementing this:
+
+          <inst>+0x1A  ->  +5   base of the slot array
+          stride            0x302 bytes per slot
+          +0x300 bit 0      the protected flag
+          slots scanned     1 .. 0x24 (36)
+
+     paletteSlotProtect writes that byte; the query at 0x10044508 reads
+     it; '|Q' honours it.  So a stream can protect a palette slot with
+     '|2A' and every later '|Q' is refused by the driver.  RIPlib does
+     neither half, so it applies the write the driver rejects.
+
+     This is what the original claim -- "the guards cannot fire from
+     content" -- got exactly backwards.  Every link in that chain is
+     now a disassembled instruction rather than an inference.
      PORT protection RIPlib does implement -- port 0 permanently,
      '|2s' bits 0..3 to protect and unprotect the destination and
      source ports, and create/delete refusing a protected port.  The
@@ -777,17 +799,28 @@ address cited somewhere that REASONS about it -- src/ comments, segment
 lists every address mechanically; a coverage metric that reads its own
 index as evidence measures nothing.)
 
-Sixty-three is not sixty-three risks.  A drawing primitive is validated
-by the corpus replay every time a scene renders: '|L' does not need
-disassembly, because 35 scenes would go wrong if it were misread.  The
-'|1A' profile is narrower and much more dangerous:
+Sixty-three is not sixty-three risks, but it is not thirteen either,
+and an earlier draft of this section overstated the comfort.  It said
+the rest are "validated by the corpus replay every time a scene
+renders".  That is true only of handlers the corpus actually
+EXERCISES.  Thirteen draw and appear in no shipped scene at all, so
+nothing checks them from either direction:
+
+     |Q  |,  |b  |.  |{  |A  |I  |C  |g  |m  |>  |H  |T
+
+They are a milder risk than the nine below -- a misread drawing
+primitive produces wrong pixels, not wrong host behaviour, and it
+cannot silently emit traffic the way '|1A' did -- but "milder" is not
+"covered".  '|Q' was read on 2026-08-14 and immediately supplied the
+missing half of 14.3.6.
+
+The '|1A' profile is narrower and much more dangerous:
 
      NOT a drawing primitive  -- nothing renders, so pixel replay is
                                  blind to it
      ZERO corpus uses         -- no shipped content exercises it either
      RIPlib does something    -- host traffic, session state, an asset
                                  request: a behaviour that can be wrong
-
 Nine handlers match it exactly, and they are the audit queue:
 
      cmd    slot   handler     what RIPlib currently claims
@@ -858,6 +891,13 @@ AUDIT LOG -- QUEUE COMPLETE.  All nine audited, four findings.
 
 Nine handlers, four findings, two of them fixed with tests and two
 recorded as unimplemented features.  The hit rate justified the sweep.
+
+NEXT QUEUE -- the thirteen that draw and are unexercised, listed
+above.  '|Q' is done and produced the missing half of 14.3.6.  Twelve
+remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
+They are ordered by argument count in the queue, on the reasoning that
+a sixteen-field command has more room for a field-layout error than a
+zero-field one.
 
 
 14.7.1  A CAVEAT ON HANDLER SELF-NAMING
