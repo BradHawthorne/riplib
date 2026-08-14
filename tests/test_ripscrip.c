@@ -1165,18 +1165,87 @@ static void test_l1_audio_pushes_marker(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("1A audio command pushes 0x3D + filename to TX");
+    TEST("1w RIP_PlayAudio pushes 0x3D + filename to TX");
     init_fixture(&s, &ctx);
     tx_reset();
-    /* 1A: mode:2 res:2 filename = 4 chars + filename. */
-    feed_script(&s, &ctx, "!|1A000000BEEP|");
+    /* '|1w' is the driver's audio command, not '|1A'.  Slot 109 (RVA
+     * 0x00D24E) pushes the name string "RIP_PlayAudio", takes the string
+     * tail, and imports sndPlaySoundA/PlaySoundA from WINMM.  Record is
+     * mode:1 res:3, so the filename starts at offset 4.
+     *
+     * This test asserted the same thing about '|1A' until 2026-08-14,
+     * which is how a wrong reading stayed green: the test was written
+     * from the same mistaken premise as the code. */
+    feed_script(&s, &ctx, "!|1w0000BEEP|");
     if (tx_len >= 6 &&
         tx_capture[0] == 0x3D &&
         memcmp(tx_capture + 1, "BEEP", 4) == 0 &&
         tx_capture[5] == '\0')
         PASS();
     else
-        FAIL("1A did not push CMD_PLAY_SOUND marker");
+        FAIL("1w did not push CMD_PLAY_SOUND marker");
+}
+
+static void test_l1_audio_off_sentinel(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1w '$OFF$' stops playback rather than naming a file");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    /* The handler compares the string tail against "$OFF$" before doing
+     * anything else with it; that spelling means stop, not a filename.
+     * RIPlib forwards it as an empty name. */
+    feed_script(&s, &ctx, "!|1w0000$OFF$|");
+    if (tx_len == 2 && tx_capture[0] == 0x3D && tx_capture[1] == '\0')
+        PASS();
+    else
+        FAIL("1w treated $OFF$ as a filename");
+}
+
+static void test_l1_file_query_mode_bound(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1F refuses a mode above 4, as the driver does");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    /* Slot 94 (RVA 0x00BDE4): cmp ebx,4 / jbe ok / push "Invalid mode
+     * parameter".  Above four the driver answers nothing at all.  RIPlib
+     * decoded the mode and discarded it, so it replied where the driver
+     * stays silent -- and a query reply is host-visible traffic. */
+    feed_script(&s, &ctx, "!|1F050000NOSUCHFILE|");   /* mode 5 */
+    if (tx_len != 0) {
+        FAIL("1F answered a query the driver refuses"); return;
+    }
+    feed_script(&s, &ctx, "!|1F000000NOSUCHFILE|");   /* mode 0 -- valid */
+    if (tx_len > 0) PASS();
+    else FAIL("1F did not answer a valid query");
+}
+
+static void test_l1_select_article(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1A RIP_SelectArticle records an index and sends nothing");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    /* Slot 86 loads ONE argument, bounds it to 0x24 (36) and names itself
+     * RIP_SelectArticle.  It never touches args[1] or any string.
+     * NEWS.RIP -- the only '|1A' in the shipped corpus -- sends "010000",
+     * selecting article 1, which is what a news reader would do. */
+    feed_script(&s, &ctx, "!|1A010000|");
+    if (s.selected_article != 1) {
+        FAIL("1A did not record article 1"); return;
+    }
+    if (tx_len != 0) {
+        FAIL("1A sent host traffic; selecting an article renders nothing");
+        return;
+    }
+    /* 36 is out of range -- "Invalid article number" -- and must not stick. */
+    feed_script(&s, &ctx, "!|1A100000|");   /* mega2("10") = 36 */
+    if (s.selected_article == 1) PASS();
+    else FAIL("1A accepted an out-of-range article number");
 }
 
 static void test_text_window_passthrough_renders(void) {
@@ -6044,6 +6113,9 @@ int main(void) {
     test_scene_terminator_closes_text_block();
     test_text_xy_expands_variables();
     test_l1_audio_pushes_marker();
+    test_l1_audio_off_sentinel();
+    test_l1_file_query_mode_bound();
+    test_l1_select_article();
     test_iso_week_var_expansion();
     test_iso_week_year_wrap();
     test_font_load_resolves_bgi_name();

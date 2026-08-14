@@ -22,6 +22,47 @@ mouse-region and button path. All nine of the audit's genuine disagreements
 are now settled; see [design/syntax-audit.md](design/syntax-audit.md) and
 D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
 
+### Fixed
+
+- **`|1A` is `RIP_SelectArticle`, not audio — and `|1w` is the audio
+  command. The two were swapped.** Slot 86 (RVA `0x00DC58`) loads *one*
+  argument, bounds it to `0x24` (36 — an index into a 36-entry table, the
+  same size as the port and style tables), names itself
+  `RIP_SelectArticle()` in its own diagnostic, and never touches `args[1]`
+  or any string. RIPlib had been reading text after the fixed prefix as a
+  filename and pushing a sound request for it.
+
+  Three independent lines agree: the driver's real audio command is `|1w`
+  (slot 109, RVA `0x00D24E`), whose handler pushes the name string
+  `RIP_PlayAudio`, takes the string tail, and compares it against `$OFF$`
+  to stop playback — in an image that imports `sndPlaySoundA` and
+  `PlaySoundA` from WINMM; "article" is a document-navigation term
+  throughout the driver (`tvarProcOVERFLOW(article,PREV,SETVERBOSE)` sits
+  beside "Beginning of document"); and the single `|1A` in the shipped
+  corpus is in **NEWS.RIP**, selecting article 1.
+
+  `|1w` was a bare `break` and now implements playback, `$OFF$` included.
+  No corpus scene was affected — NEWS.RIP sends exactly the six fixed
+  characters and no filename, so the wrong path emitted nothing.
+
+  **Why this survived every previous audit:** slot 86 had a recovered
+  *name* in the dispatch table and a confident comment in `ripscrip.c`
+  asserting "DLL: calls `ripAudioPlay()`". Neither had been checked
+  against the handler's instructions. A recovered name tells you what a
+  handler calls *itself*; it does not tell you what it *does*.
+
+- **`|1F` answered file queries the driver refuses.** Slot 94 bounds the
+  mode with `cmp ebx,4 / jbe` and reports "Invalid mode parameter" above
+  four, answering nothing. RIPlib decoded the mode and discarded it —
+  there was a literal `(void)mode;` — so it replied where the driver stays
+  silent. A query reply is host-visible traffic, which makes this the same
+  defect class as a loose length gate. Found on the *first* handler of the
+  new audit queue.
+
+- `|1A`'s gate was briefly set to 2 (the width the handler actually reads)
+  before `dll-conformance.py` caught it: the record declares 6, and the
+  driver will not dispatch a record it cannot parse in full.
+
 ### Documentation
 
 A separate pass audited the prose itself rather than the code, on the

@@ -3229,12 +3229,46 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
-        case 'w': /* mode:1 res:3 — handler RVA 0x00D24E, "Invalid string
-                   * parameter", "Unable to create temp buffer".  The
-                   * reconstruction reads this letter as RIP_PLAY_AUDIO;
-                   * RIPlib performs no audio, so the request is consumed.
-                   * Slot record is 1 + 3, not the single digit previously
-                   * noted here; bbs-land documents a single 4 instead. */
+        case 'w': /* RIP_PlayAudio — mode:1 res:3 <filename>
+                   *
+                   * IMPLEMENTED 2026-08-14.  This letter really is the
+                   * driver's audio command, and RIPlib had it as a bare
+                   * 'break' while emitting sound requests from '|1A', which
+                   * is article selection.  The two were swapped.
+                   *
+                   * Slot 109, RVA 0x00D24E.  The handler takes the string
+                   * tail, rejects it when null or empty, compares it to
+                   * "$OFF$" -- which stops playback rather than naming a
+                   * file -- and otherwise buffers the name, reporting
+                   * "Unable to create temp buffer" against the name string
+                   * "RIP_PlayAudio".  The driver imports sndPlaySoundA and
+                   * PlaySoundA from WINMM.
+                   *
+                   * RIPlib performs no audio itself: the request goes to the
+                   * host over the TX FIFO behind the CMD_PLAY_SOUND marker,
+                   * exactly as '|1Z' does for MIDI, and the host decides.
+                   * "$OFF$" is forwarded as an empty name, which is this
+                   * library's spelling of "stop".
+                   *
+                   * No corpus scene sends '|1w'. */
+            if (len > 4) {
+                const char *fname = p + 4;
+                int fname_len = len - 4;
+                bool off = (fname_len == 5 && memcmp(fname, "$OFF$", 5) == 0);
+                if (off) {
+                    char snd_buf[2];
+                    snd_buf[0] = (char)0x3D;  /* CMD_PLAY_SOUND marker */
+                    snd_buf[1] = '\0';        /* empty name == stop        */
+                    riplib_host_tx(snd_buf, 2);
+                } else if (fname_len > 0 && fname_len <= 64) {
+                    char snd_buf[70];
+                    int copy = fname_len < 68 ? fname_len : 68;
+                    snd_buf[0] = (char)0x3D;
+                    memcpy(snd_buf + 1, fname, (size_t)copy);
+                    snd_buf[1 + copy] = '\0';
+                    riplib_host_tx(snd_buf, 2 + copy);
+                }
+            }
             break;
 
         case 'W': /* RIP_WRITE_ICON — res:1 filename
@@ -3258,33 +3292,54 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Audio playback commands ───────────────────────────── */
-        case 'A': /* RIP_PLAY_AUDIO — play audio file.
-                   * DLL: calls ripAudioPlay() which invokes CB_PLAY_SOUND.
-                   * Format: mode:2 res:4 filename (free text, pipe-terminated).
-                   * RIPlib:push CMD_PLAY_SOUND marker (0x3D) + filename + NUL
-                   * via TX FIFO; host bridge dispatches to DOC sound chip.
+        case 'A': /* RIP_SelectArticle — article:2 res:4
                    *
-                   * CORRECTED: slot 86 records mega2 + mega4, so the fixed
-                   * prefix is SIX characters and the filename starts there;
-                   * the comment said "res:2" and the code read from 4.
-                   * NEWS.RIP sends "|1A010000" -- exactly the six fixed
-                   * characters and no filename -- so RIPlib took "00" as a
-                   * name and pushed a sound request for it.  That was the
-                   * only host traffic any of the 35 corpus scenes produced
-                   * during passive replay, and it is how this was found:
-                   * the corpus harness now asserts that rendering content
-                   * sends nothing to the host.  D-25. */
+                   * IDENTIFIED 2026-08-14 from the handler body, correcting a
+                   * reading that had survived every previous audit because
+                   * nothing disassembled it.  This was implemented as
+                   * RIP_PLAY_AUDIO, taking a filename after the fixed prefix
+                   * and pushing a sound request for it.  It is not audio at
+                   * all.
+                   *
+                   * Slot 86, RVA 0x00DC58, does exactly this:
+                   *     mov  edi,[eax]        ; args[0] only
+                   *     cmp  edi,0x24         ; 36
+                   *     jb   ok
+                   *     push "Invalid article number"
+                   *     push "RIP_SelectArticle()"
+                   * ok: push edi / push esi / call 0x1003C399
+                   *
+                   * It loads ONE argument, bounds it to 36 -- an index into a
+                   * 36-entry table, the same size as the port and style
+                   * tables -- and never touches args[1] or any string.  The
+                   * callee walks an instance-held table at [inst+0x2A]+0x16.
+                   * There is no filename, no buffer, no sound API.
+                   *
+                   * Corroboration, three ways:
+                   *   - the driver's real audio command is '|1w', whose
+                   *     handler pushes the name string "RIP_PlayAudio" and
+                   *     imports sndPlaySoundA/PlaySoundA from WINMM;
+                   *   - "article" appears in the driver's text-navigation
+                   *     strings, tvarProcOVERFLOW(article,PREV,SETVERBOSE)
+                   *     beside "Beginning of document";
+                   *   - the one '|1A' in the shipped corpus is in NEWS.RIP
+                   *     and selects article 1, which is what a news reader
+                   *     would do.
+                   *
+                   * RIPlib records the index for a host that wants it and
+                   * emits nothing.  Selecting an article is a session
+                   * concept, not a rendering one. */
             if (len >= 6) {
-                const char *fname = p + 6;
-                int fname_len = len - 6;
-                if (fname_len > 0 && fname_len <= 64) {
-                    char snd_buf[70];
-                    snd_buf[0] = (char)0x3D; /* CMD_PLAY_SOUND marker */
-                    int copy = fname_len < 68 ? fname_len : 68;
-                    memcpy(snd_buf + 1, fname, (size_t)copy);
-                    snd_buf[1 + copy] = '\0';
-                    riplib_host_tx(snd_buf, 2 + copy);
-                }
+                /* Gate on SIX, not two.  The handler reads only args[0],
+                 * but slot 86 records mega2 + mega4 and the driver will not
+                 * dispatch a record it cannot parse in full -- accepting a
+                 * truncated one would act where the driver stays silent.
+                 * Same discipline as '|1g', '|2p' and '|2s'. */
+                int16_t article = mega2(p);
+                if (article >= 0 && article < 36)
+                    s->selected_article = (uint8_t)article;
+                /* else: "Invalid article number" -- the driver rejects it
+                 * and draws nothing, so neither do we. */
             }
             break;
 
@@ -3518,6 +3573,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 const char *fname = p + 6;
                 int flen = len - 6;
                 if (flen <= 0) break;
+                /* Slot 94 (RVA 0x00BDE4) bounds the mode:
+                 *     cmp ebx,4 / jbe ok
+                 *     push "Invalid mode parameter"
+                 * so the driver ANSWERS NOTHING above four.  RIPlib decoded
+                 * the mode and then discarded it -- there was a literal
+                 * "(void)mode;" below -- and replied to queries the driver
+                 * refuses.  A query is host-visible traffic, so replying
+                 * where the driver stays silent is the same defect class as
+                 * a loose length gate.  Found 2026-08-14 by disassembling a
+                 * handler nothing had ever read. */
+                if (mode > 4) break;
                 if (!rip_filename_is_safe(fname, flen)) {
                     riplib_host_tx("0\r", 2);
                     break;
@@ -3546,7 +3612,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     riplib_host_tx("0\r", 2);
                     rip_icon_request_file(&s->icon_state, fname, flen);
                 }
-                (void)mode; /* mode byte reserved for future size/date filtering */
+                (void)mode; /* bounded above; no per-mode behaviour yet */
             }
             break;
 

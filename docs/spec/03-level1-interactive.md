@@ -406,15 +406,29 @@ not a persistent filesystem write.
 3.13  RIP_PLAY_AUDIO — Play Audio File
 ---------------------------------------------------------------------
 
-     Function:     Play Audio
+     Function:     Select Article
      Command:      |1A
-     Arguments:    mode:2 res:4 filename
-     Format:       !|1A<mode><res><filename>|
+     Arguments:    article:2 res:4
+     Format:       !|1A<article><res>|
+     Example:      !|1A010000|      article=1
 
-Requests playback of an audio file.  RIPlib has no built-in
-audio path; consumers receive the filename via the TX FIFO
-(prefixed with the CMD_PLAY_SOUND marker) and dispatch it to
-their own sound subsystem.
+Selects which article (message, document) is current. The index is
+bounded to 0-35 -- a 36-entry table, the same size as the port and
+style tables -- and "Invalid article number" is reported above that.
+
+**This is not an audio command.** It was documented and implemented as
+RIP_PLAY_AUDIO until 2026-08-14. Slot 86 (RVA `0x00DC58`) loads ONE
+argument, compares it against `0x24`, names itself `RIP_SelectArticle()`
+in its own diagnostic, and never touches args[1] or any string. The
+driver's real audio command is `|1w` (§3.21). "article" is a
+document-navigation term throughout this driver --
+`tvarProcOVERFLOW(article,PREV,SETVERBOSE)` sits beside "Beginning of
+document". The single `|1A` in the shipped corpus is in NEWS.RIP and
+selects article 1.
+
+RIPlib records the index and emits nothing: choosing an article is a
+session concept, not a rendering one. See 14-divergence-register.md
+§14.5.
 
      Note: dispatch slot 86 records mega2 + mega4, so the fixed prefix
      is SIX characters and the filename starts there.  This mattered:
@@ -581,6 +595,41 @@ flags for response formatting.
      res         2       0         Reserved
      varname     var     ASCII     Variable name to query
 
+
+
+---------------------------------------------------------------------
+3.21  RIP_PlayAudio — Play an Audio File
+---------------------------------------------------------------------
+
+     Function:     Play Audio
+     Command:      |1w     (lowercase)
+     Arguments:    mode:1 res:3 filename
+     Format:       !|1w<mode><res><filename>|
+     Example:      !|1w0000CHIME.WAV|
+
+Requests playback of an audio file. RIPlib has no built-in audio path;
+consumers receive the filename via the TX FIFO, prefixed with the
+CMD_PLAY_SOUND marker, and dispatch it to their own sound subsystem.
+
+     Parameter   Width   Range     Description
+     ---------   -----   -------   -----------
+     mode        1       0-35      Playback mode
+     res         3       0         Reserved
+     filename    var     ASCII     File to play, or the literal $OFF$
+
+     The literal string `$OFF$` in place of a filename STOPS playback
+     rather than naming a file.  Slot 109's handler (RVA `0x00D24E`)
+     compares the string tail against `$OFF$` before doing anything
+     else with it.  RIPlib forwards that as an empty name, which is
+     this library's spelling of "stop".
+
+     This section did not exist until 2026-08-14, and the command was
+     a bare `break` in the parser, because the audio path had been
+     attached to `|1A` — which is article selection (§3.13).  The two
+     were swapped.  Slot 109 is the one that pushes the name string
+     `RIP_PlayAudio` on its error path, and this driver imports
+     `sndPlaySoundA` and `PlaySoundA` from WINMM.  No corpus scene
+     sends `|1w`.  See 14-divergence-register.md §14.5.
 
 =====================================================================
 ==                    END OF SEGMENT 3                              ==

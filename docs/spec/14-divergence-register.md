@@ -575,26 +575,62 @@ style is normalised ('RIP_ExtendedTextWindow' against
 'RIP_EXT_TEXT_WINDOW', 'RIP_FilledPolygon' against
 'RIP_FILL_POLYGON', and so on).
 
-TWO do not, and both are recorded rather than resolved:
+TWO did not.  ONE IS NOW RESOLVED, AGAINST RIPlib:
 
-     command   handler self-name      RIPlib's name
-     -------   ------------------     -------------
-     '|1A'     RIP_SelectArticle      RIP_PLAY_AUDIO
+     command   handler self-name      RIPlib's name (before 2026-08-14)
+     -------   ------------------     --------------------------------
+     '|1A'     RIP_SelectArticle      RIP_PLAY_AUDIO      <- was WRONG
      '|1N'*    RIP_SetBorder          RIP_SET_ICON_DIR
 
-     * slot 48 is LEVEL 0 '|N'; see 14.3.9.  RIPlib's level-1 '|1N'
-       has no dispatch entry, so this row is a collision of letters
-       rather than a contradiction, and only '|1A' is a genuine
-       disagreement about one record.
+     * slot 48 is LEVEL 0 '|N'; see 14.3.9.  RIPlib's level-1 '|1N' has
+       no dispatch entry, so that row is a collision of letters rather
+       than a contradiction.
 
-For '|1A' the FIELD LAYOUT is settled and the SEMANTICS are not.  The
-handler at RVA 0x00DC58 pushes both "Invalid article number" and
-"RIP_SelectArticle()", and its entry records mega2 + mega4 -- six
-fixed characters then a string.  RIPlib reads exactly those six and
-treats the remainder as a filename.  Any consumer relying on the
-audio reading should know that the driver's own diagnostics call it
-something else; the wire format is the same either way, which is why
-this has never affected a shipped scene.
+'|1A' WAS NOT A NAMING DISAGREEMENT.  It was RIPlib being wrong, and
+this register said the field layout was settled and only the semantics
+were open -- which understated it.  Disassembling slot 86 (RVA
+0x00DC58) settles it outright:
+
+     mov  edi,[eax]          ; args[0], and nothing else
+     cmp  edi,0x24           ; 36
+     jb   ok
+     push "Invalid article number"
+     push "RIP_SelectArticle()"
+ ok: push edi / push esi / call 0x1003C399
+
+The handler loads ONE argument, bounds it to 36 -- an index into a
+36-entry table, the same size as the port and style tables -- and never
+touches args[1] or any string.  The callee walks an instance-held table
+at [inst+0x2A]+0x16.  There is no filename, no buffer and no sound API
+anywhere in it.
+
+Three independent lines agree:
+
+  * the driver's REAL audio command is '|1w', slot 109 (RVA 0x00D24E),
+    whose handler pushes the name string "RIP_PlayAudio", takes the
+    string tail, compares it against "$OFF$" to stop playback, and sits
+    in an image that imports sndPlaySoundA and PlaySoundA from WINMM;
+
+  * "article" is a document-navigation term in this driver --
+    tvarProcOVERFLOW(article,PREV,SETVERBOSE) appears beside "Beginning
+    of document" and "End of document";
+
+  * the single '|1A' in the shipped corpus is in NEWS.RIP and selects
+    article 1.
+
+RIPlib had the two commands swapped: '|1A' pushed a sound request for
+text it read as a filename, and '|1w' was a bare 'break'.  Both are
+corrected, and both now have tests.  No corpus scene was affected --
+NEWS.RIP sends exactly the six fixed characters and no filename, so the
+wrong path emitted nothing.
+
+WHY THIS SURVIVED EVERY PREVIOUS AUDIT.  Slot 86 had a recovered NAME in
+13-dll-command-table.md and a confident comment in src/ripscrip.c
+asserting "DLL: calls ripAudioPlay() which invokes CB_PLAY_SOUND".
+Neither was checked against the handler's instructions.  A recovered
+name tells you what a handler CALLS ITSELF; it does not tell you what
+the handler DOES, and a comment asserting driver behaviour is worth
+exactly as much as the reading behind it.  See 14.7.
 
 Regenerate this comparison by extracting the NAME column of
 13-dll-command-table.md and the leading identifier of each 'case'
@@ -677,3 +713,66 @@ The bbs-land divergences in 14.2 are a different matter and this rule
 does not license them: those are places a reference and the driver
 disagree about EXISTING syntax, where following the driver is
 conformance rather than extension.
+
+
+14.7  WHAT HAS ACTUALLY BEEN DISASSEMBLED
+---------------------------------------------------------------------
+
+'|1A' was wrong for months while carrying a recovered NAME in
+13-dll-command-table.md and a confident comment in src/ripscrip.c
+describing driver behaviour it had never been checked against.  Nothing
+in this project had read its instructions.  That is a coverage gap, not
+bad luck, so it is measured here rather than left to be rediscovered.
+
+A recovered name tells you what a handler CALLS ITSELF.  It does not
+tell you what the handler DOES.  '|1A' names itself RIP_SelectArticle
+and RIPlib called it RIP_PLAY_AUDIO for months with the name sitting
+right there in the table.
+
+MEASURED 2026-08-14.  Of the 129 dispatch entries, 66 have their handler
+address cited somewhere that REASONS about it -- src/ comments, segment
+12, this register, an ADR.  63 do not.  (Counting citations in
+13-dll-command-table.md instead gives 129 of 129, because that file
+lists every address mechanically; a coverage metric that reads its own
+index as evidence measures nothing.)
+
+Sixty-three is not sixty-three risks.  A drawing primitive is validated
+by the corpus replay every time a scene renders: '|L' does not need
+disassembly, because 35 scenes would go wrong if it were misread.  The
+'|1A' profile is narrower and much more dangerous:
+
+     NOT a drawing primitive  -- nothing renders, so pixel replay is
+                                 blind to it
+     ZERO corpus uses         -- no shipped content exercises it either
+     RIPlib does something    -- host traffic, session state, an asset
+                                 request: a behaviour that can be wrong
+
+Nine handlers match it exactly, and they are the audit queue:
+
+     cmd    slot   handler     what RIPlib currently claims
+     ----   ----   ---------   -------------------------------------
+     |1F     94    0x00bde4    file query        (AUDITED 2026-08-14)
+     |1I     97    0x00cb38    load icon
+     |1W    108    0x00dd67    write icon to cache
+     |2A    111    0x046c64    switch palette slot
+     |2B    112    0x046d08    switch button style
+     |2E    114    0x046da0    switch environment
+     |2T    119    0x046ece    switch text window
+     |2W    120    0x04699a    port write to bitmap
+     |2Y    121    0x046e41    switch graphics style
+
+The first has been done and found a defect on the first read: slot 94
+bounds its mode with 'cmp ebx,4 / jbe', reporting "Invalid mode
+parameter" above four and answering NOTHING.  RIPlib decoded the mode
+and discarded it -- there was a literal '(void)mode;' -- so it replied
+to queries the driver refuses.  A query reply is host-visible traffic,
+which makes that the same defect class as a loose length gate.  Fixed,
+with a test.
+
+That is one defect in one handler, on the first look at a queue of
+nine.  Expect more.
+
+The same sweep also confirmed something already recorded: '|1F' and
+'|1W' both read the protection word at <inst>+0x104 and bail out when
+it is set, which is 14.3.6's "41 commands READ it and none WRITE it"
+holding up under direct inspection rather than by inference.

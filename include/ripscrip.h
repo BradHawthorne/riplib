@@ -394,6 +394,16 @@ struct rip_state_s {
      * as its host drives it and applies no artificial delay, so the rate is
      * recorded for an embedder that wants to honour it.  0 = never set. */
     uint32_t baud_emulation;
+    /* '|1A' RIP_SelectArticle — index 0..35 into the driver's 36-entry
+     * article table.  Selecting an article is a session concept rather than
+     * a rendering one, so RIPlib records the choice and emits nothing; an
+     * embedder that presents documents can act on it.  0 = never set.
+     *
+     * This command was implemented as RIP_PLAY_AUDIO until 2026-08-14 and
+     * pushed a sound request for text it read as a filename.  The handler
+     * loads one argument, bounds it to 36 and names itself
+     * RIP_SelectArticle; the driver's real audio command is '|1w'. */
+    uint8_t  selected_article;
     /* '|1c' RIP_SetMouseCursor selection. RIPlib renders no pointer, so the
      * choice is recorded for an embedder that does. */
     uint8_t  mouse_cursor_id;
