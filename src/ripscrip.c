@@ -2699,6 +2699,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * wid:2 hgt:2 orient:2 flags:4 bevsize:2 dfore:2 dback:2
                    * bright:2 dark:2 surface:2 grp_no:2 flags2:2 uline:2 corner:2 res:6
                    * Total: 36 chars (30 meaningful + 6 reserved) */
+            if (RIP_BTNSTYLE_PROTECTED(s)) break;  /* protected slot */
             if (len >= 36) {
                 rip_button_style_t *bs = &s->button_style;
                 bs->width      = mega2(p);
@@ -3148,7 +3149,15 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
         case 'c': /* RIP_SetMouseCursor — cursor:2 res:4
                    * Handler RVA 0x00DC96.  RIPlib renders no pointer, so the
-                   * selection is recorded for an embedder that does. */
+                   * selection is recorded for an embedder that does.
+                   *
+                   * Guarded by ENVIRONMENT protection, which is not a guess:
+                   * the handler calls the environment protection query at
+                   * 0x1003D9E1 and refuses with "Can't modify current
+                   * environment - its protected!" while naming itself
+                   * RIP_SetMouseCursor().  The pointer is environment state
+                   * in this driver's model. */
+            if (RIP_ENV_PROTECTED(s)) break;      /* protected slot */
             if (len >= 6)
                 s->mouse_cursor_id = (uint8_t)(mega2(p) & 0xFF);
             break;
