@@ -51,6 +51,39 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   against the handler's instructions. A recovered name tells you what a
   handler calls *itself*; it does not tell you what it *does*.
 
+- **`|1I`'s second "reserved" column is a stretch flag.** Slot 97 bounds
+  `args[5]` — payload offset 7 — with `cmp dword [ebp-0x10],1 / jbe` and
+  reports "Invalid stretch parameter" above one, drawing nothing. RIPlib
+  called that column reserved with "meaning not recovered", which was true
+  only in the sense that nobody had looked. The refusal is now
+  implemented; stretching itself is not, and RIPlib still blits at native
+  size. `args[3]` and `args[6]` remain genuinely unexamined.
+
+- **The nine-handler audit queue is complete: four findings.** `|1F`
+  (mode bound) and `|1I` (stretch bound) are fixed with tests; the
+  `Switch*` protection flags and `|1W`'s two unexplained `args[0]` bits
+  are recorded as unimplemented rather than guessed at. `|1W`'s identity
+  was confirmed by *behaviour* — it indexes a 120-byte-per-entry table
+  through a 16-bit current-item field where `-1` means nothing to write —
+  because its error path pushes the wrong name entirely.
+
+- **A caveat on handler self-naming, new §14.7.1.** The register calls a
+  name recovered from a handler's own error path "stronger than any
+  secondary reference". That holds only when the name is *unique*, and
+  three are not: `RIP_TextXY` is pushed from two handlers, `RIP_Polygon`
+  from two, and `RIP_ExtendedFontStyle` from **four spanning all four
+  level bands** — plainly copy-pasted boilerplate identifying none of
+  them. It's why `|1W` has no recovered name: the string in its error path
+  belongs to `|y`. Segment 13 already attributes all three correctly and
+  leaves `|1W` blank, so this is a caveat on the method, not a table
+  correction.
+
+  Measuring it took two attempts. Counting *references* reported 24 of 50
+  names as shared, because a handler with eight error paths pushes its own
+  name eight times. Attributing each reference to the handler body
+  containing it gives three — the right thing measured the wrong way was
+  eight times too alarming.
+
 - **Slot protection is writable from content — the register said it wasn't.**
   §14.3.6 claimed "41 commands READ the protection word at `<state>+0x104`
   and no dispatched command WRITES it, so protection is host-side state

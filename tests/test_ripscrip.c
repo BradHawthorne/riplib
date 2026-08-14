@@ -1223,6 +1223,27 @@ static void test_l1_file_query_mode_bound(void) {
     else FAIL("1F did not answer a valid query");
 }
 
+static void test_l1_load_icon_stretch_bound(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("1I refuses a stretch flag above 1, as the driver does");
+    init_fixture(&s, &ctx);
+    /* Slot 97 bounds args[5] -- payload offset 7 -- with
+     *     cmp dword [ebp-0x10],1 / jbe / push "Invalid stretch parameter"
+     * so above one the driver draws nothing.  RIPlib documented that
+     * column as reserved and ignored it.
+     *
+     * Layout: x(2) y(2) mode(1) res(1) clip(1) STRETCH(1) res(1) name. */
+    feed_script(&s, &ctx, "!|1I000000020NOSUCHICON|");   /* stretch = 2 */
+    if (s.icon_state.request_count != 0) {
+        FAIL("1I acted on a command the driver refuses"); return;
+    }
+    feed_script(&s, &ctx, "!|1I000000010NOSUCHICON|");   /* stretch = 1 */
+    if (s.icon_state.request_count == 1) PASS();
+    else FAIL("1I refused a valid stretch flag");
+}
+
 static void test_l1_select_article(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -6115,6 +6136,7 @@ int main(void) {
     test_l1_audio_pushes_marker();
     test_l1_audio_off_sentinel();
     test_l1_file_query_mode_bound();
+    test_l1_load_icon_stretch_bound();
     test_l1_select_article();
     test_iso_week_var_expansion();
     test_iso_week_year_wrap();

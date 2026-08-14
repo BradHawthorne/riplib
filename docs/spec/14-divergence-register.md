@@ -821,17 +821,71 @@ both READ <inst>+0x104 and bail out when it is set, which is the read
 side of 14.3.6 confirmed by direct inspection.  The WRITE side is where
 14.3.6 was wrong, and the Switch* audit below is what found it.
 
-AUDIT LOG.  Four of the nine done, two findings:
+AUDIT LOG -- QUEUE COMPLETE.  All nine audited, four findings.
 
-  '|1F'  the mode bound (above).  Fixed.
+  '|1F'  mode bound.  Slot 94 refuses a mode above 4 and answers
+         nothing; RIPlib decoded the mode and discarded it.  FIXED.
 
-  '|2A' '|2B' '|2E'  the second field is NOT a reserved pair.  It is a
-        flags word the driver acts on, and it WRITES protection state,
-        which refutes what 14.3.6 used to say about protection being
-        unreachable from content.  See 14.3.6, now corrected.  Not a
-        code defect in the narrow sense -- RIPlib's gate and slot bound
-        are right -- but a documented claim that was false, and a
-        feature RIPlib does not implement for five of six families.
+  '|1I'  the second 'res' is a STRETCH flag.  Slot 97 bounds args[5]
+         -- payload offset 7 -- with 'cmp dword [ebp-0x10],1 / jbe' and
+         reports "Invalid stretch parameter" above one, drawing nothing.
+         RIPlib called that column reserved, "meaning not recovered",
+         which was true only in the sense that nobody had looked.  The
+         refusal is now implemented; stretching itself is not, and
+         RIPlib still blits at native size.  args[3] at p[5] and args[6]
+         at p[8] remain genuinely unexamined.  FIXED.
 
-Four handlers audited, two findings, one of them a false claim in
-this very register.  Five left.  The queue is worth finishing.
+  '|2A' '|2B' '|2E' '|2T' '|2Y'  the second field is not a reserved
+         pair but a flags word that WRITES protection state, refuting
+         what 14.3.6 used to say.  All five share one shape: protection
+         check, slot bound of 36, then the four bit tests.  '|2T' errors
+         with "Illegal text window slot number"; '|2Y' rejects
+         out-of-range slots SILENTLY, with no diagnostic at all, which
+         is consistent with its unnamed row in segment 13.  Documented,
+         not implemented -- see 14.3.6.
+
+  '|1W'  identity confirmed by behaviour rather than by name.  The
+         handler indexes a 120-byte-per-entry table through a 16-bit
+         current-item field where -1 means nothing to write, which is
+         the clipboard-to-named-cache-entry reading RIPlib already had.
+         It also extracts two flag bits from args[0], which RIPlib
+         treats as reserved.  Not fixed: the bits' meaning is not
+         established, and guessing is what this register exists to
+         prevent.
+
+  '|2W'  no change.  RIPlib writes no file, so there is nothing for the
+         handler's behaviour to diverge from.
+
+Nine handlers, four findings, two of them fixed with tests and two
+recorded as unimplemented features.  The hit rate justified the sweep.
+
+
+14.7.1  A CAVEAT ON HANDLER SELF-NAMING
+
+     14.5 calls a name recovered from a handler's own error path
+     "strong evidence -- stronger than any secondary reference".  That
+     holds only when the name is UNIQUE to that handler, and three are
+     not.  Measured across the fifty names in segment 13:
+
+          RIP_TextXY              pushed from 0x01a0da and 0x020cbc
+          RIP_Polygon             pushed from 0x01eb03 and 0x01ed28
+          RIP_ExtendedFontStyle   pushed from 0x00dd67, 0x01adc0,
+                                  0x024b4e and 0x046bd9
+
+     The last spans all four level bands, so it is plainly a
+     copy-pasted error-reporter argument and identifies none of them.
+     It is why '|1W' has no recovered name: the string in its error
+     path belongs to '|y'.
+
+     Segment 13 already handles this correctly -- it attributes
+     RIP_TextXY to '|@' and not to '|"', RIP_Polygon to '|P' and not to
+     '|l', RIP_ExtendedFontStyle to '|y' alone, and leaves '|1W'
+     blank.  The argument-type records agree in each case.  So this is
+     a caveat on the METHOD, not a correction to the table.
+
+     Measuring it took two attempts, and the first was wrong in a way
+     worth recording: counting REFERENCES to a name string reported 24
+     of 50 as shared, because a handler with eight error paths pushes
+     its own name eight times.  Attributing each reference to the
+     handler body containing it gives three.  A count of the right
+     thing measured the wrong way was eight times too alarming.

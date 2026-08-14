@@ -3006,8 +3006,23 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                  * The filename offset (9) was already correct. */
                 uint8_t mode = (uint8_t)mega_digit(p[4]);
                 bool copy_to_clipboard = (mega_digit(p[6]) != 0);
-                /* args[3] at p+5 and args[5..6] at p+7,p+8 are reserved;
-                 * their meaning is not recovered, so they are not read. */
+                /* args[5] -- p[7] -- IS NOT RESERVED.  It is a stretch flag
+                 * and the handler bounds it:
+                 *     cmp dword [ebp-0x10],1
+                 *     jbe ok
+                 *     push "Invalid stretch parameter"
+                 * so above one the driver reports and draws NOTHING.  This
+                 * comment used to call p[7] reserved "meaning not
+                 * recovered", which was true only in the sense that nobody
+                 * had looked.  Found 2026-08-14 disassembling slot 97.
+                 *
+                 * The stretch behaviour itself is not implemented -- RIPlib
+                 * blits at native size -- but refusing what the driver
+                 * refuses costs nothing and keeps a malformed icon command
+                 * from drawing where the driver would not.  args[3] at p[5]
+                 * and args[6] at p[8] remain genuinely unexamined. */
+                if (mega_digit(p[7]) > 1)
+                    break;
                 int fname_start = 9;
                 int fname_len = len - fname_start;
                 if (fname_len > 0) {

@@ -260,7 +260,10 @@ region, advancing the cursor downward after each line.
      x0,y0       XY,XY   coords    Top-left of text region
      x1,y1       XY,XY   coords    Bottom-right
      res         1       0         Reserved (record field 5)
-     res         1       0         Reserved (record field 6)
+     stretch     1       0-1       Stretch to the icon-style box
+                                      (bounded; above 1 the driver
+                                      reports "Invalid stretch
+                                      parameter" and draws nothing)
 
      Note: dispatch slot 105 splits the reserved tail into two single
      digits.  The total is unchanged at ten characters by default, so
@@ -348,8 +351,8 @@ accepted but not performed; see D-14.
 
      Function:     Load Icon from Cache/Flash
      Command:      |1I
-     Arguments:    x:XY y:XY mode:1 res:1 clipboard:1 res:1 res:1 filename
-     Format:       !|1I<x><y><mode><res><clip><res><res><filename>|
+     Arguments:    x:XY y:XY mode:1 res:1 clipboard:1 stretch:1 res:1 filename
+     Format:       !|1I<x><y><mode><res><clip><stretch><res><filename>|
      Example:      !|1I0A0F000000MYICON|
 
 Looks up an icon by filename and displays it at (x,y).
