@@ -154,9 +154,27 @@ When the active port is deleted, the system falls back to port 0.
 
      Function:     Switch Active Drawing Port
      Command:      |2s
-     Arguments:    port:1 [switch_flags:2]
-     Format:       !|2s<port>[<flags>]|
-     Example:      !|2s3|          switch to port 3
+     Arguments:    port:1 switch_flags:2
+     Format:       !|2s<port><flags>|
+     Example:      !|2s000|        switch to port 0, no flag action
+
+     The second field is a FLAGS word, not a reserved pair, and every
+     Switch* command carries it -- '|2A' '|2B' '|2E' '|2T' '|2Y' as
+     well as '|2s'.  Four bits are acted on:
+
+          bit   effect
+          ---   -------------------------------------------
+          2     protect the slot being LEFT
+          3     unprotect the slot being LEFT
+          0     protect the slot being ENTERED
+          1     unprotect the slot being ENTERED
+
+     RIPlib honours these for ports only; for the other five families
+     the flags are ignored.  See 14-divergence-register.md 14.3.6.
+
+     All three '|2s' commands in the shipped corpus are exactly three
+     characters -- "000", "002", "100" -- so the field is not
+     optional in practice either.
 
 Switches the active drawing port. Saves the current port's
 state and loads the target port's state.

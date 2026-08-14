@@ -781,11 +781,34 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
     case RIP2_CMD_SWITCH_TEXT_WINDOW:
     case RIP2_CMD_SWITCH_STYLE: {
         /* Slots 111, 112, 114, 119 and 121 all record  mega1, mega2  -- three
-         * characters, of which RIPlib uses the leading slot digit and ignores
-         * the reserved pair.  The gate was one character, so a truncated
-         * command was acted on where the driver rejects it; the corpus sends
-         * three ("!|2s000", "!|2s100").  Same defect class as '|1g' and
-         * '|1i' in D-14/D-16.  See D-17. */
+         * characters.  The gate was one character, so a truncated command was
+         * acted on where the driver rejects it; the corpus sends three
+         * ("!|2s000", "!|2s100").  Same defect class as '|1g' and '|1i' in
+         * D-14/D-16.  See D-17.
+         *
+         * THE SECOND FIELD IS NOT RESERVED.  This comment used to call it a
+         * "reserved pair", and 14.3.6 used to call slot protection inert on
+         * the strength of that.  Disassembly on 2026-08-14 showed the driver
+         * acting on four of its bits -- from slot 111:
+         *
+         *     test esi,4 -> paletteSlotProtect(inst,-1,1)   before switch
+         *     test esi,8 -> paletteSlotProtect(inst,-1,0)   before switch
+         *                   (the switch itself)
+         *     test esi,1 -> paletteSlotProtect(inst,-1,1)   after switch
+         *     test esi,2 -> paletteSlotProtect(inst,-1,0)   after switch
+         *
+         * so bits 2/3 protect and unprotect the slot being LEFT and bits 0/1
+         * the slot being ENTERED.  Each family has its own protector
+         * (styleSlotProtect, textWindowSlotProtect, environmentProtect,
+         * colorTableProtect, and 0x100454C4 for button styles).
+         *
+         * RIPlib honours these bits for '|2s' and ports only.  For the other
+         * five families the flags are still ignored, which means RIPlib
+         * completes writes the driver would refuse -- the tolerable
+         * direction under 14.6, but a real divergence.  Implementing it
+         * needs a protected flag per slot per family plus checks at the 24
+         * write sites the driver guards; that is a feature, not a patch, and
+         * it is recorded in 14.3.6 rather than half-done here. */
         if (raw_len < 3)
             break;
         uint8_t slot = (uint8_t)mega1(raw + 0);

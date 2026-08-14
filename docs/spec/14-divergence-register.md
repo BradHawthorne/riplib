@@ -396,15 +396,56 @@ rather than a slogan.
      environments, text windows and button styles.  RIPlib implements
      none of those.
 
-     That is inert rather than divergent: 41 commands READ the
-     protection word at <state>+0x104 and no dispatched command WRITES
-     it, so protection is host-side state that no RIP stream can set.
-     The guards cannot fire from content.
+     CORRECTED 2026-08-14.  This section used to call that inert, on
+     the grounds that "41 commands READ the protection word at
+     <state>+0x104 and no dispatched command WRITES it, so protection
+     is host-side state that no RIP stream can set.  The guards cannot
+     fire from content."
 
-     PORT protection is the exception and RIPlib does implement it --
-     port 0 permanently, '|2s' bits 0..3 to protect and unprotect the
-     destination and source ports, and create/delete refusing a
-     protected port.  See D-22.
+     THAT IS WRONG, AND IT WAS WRONG IN THE SAFE-SOUNDING DIRECTION.
+     A RIP stream CAN set protection.  The second field of every
+     Switch* command -- the one this project had been calling a
+     reserved pair -- is a FLAGS word, and the driver acts on four of
+     its bits.  From slot 111, RIP_SwitchPalette:
+
+          test esi,4  -> paletteSlotProtect(inst, -1, 1)   before switch
+          test esi,8  -> paletteSlotProtect(inst, -1, 0)   before switch
+                         (the switch itself)
+          test esi,1  -> paletteSlotProtect(inst, -1, 1)   after switch
+          test esi,2  -> paletteSlotProtect(inst, -1, 0)   after switch
+
+     So bits 2 and 3 protect and unprotect the slot being left, and
+     bits 0 and 1 the slot being entered.  The callee is named in its
+     own diagnostic -- "Cannot protect current color palette slot when
+     it is #0", paletteSlotProtect() -- and each family has its own:
+     styleSlotProtect(), textWindowSlotProtect(), environmentProtect(),
+     colorTableProtect(), and an unnamed one at 0x100454C4 for button
+     styles.  '|2B' reaches its protector through exactly the same four
+     bit tests.
+
+     This is the same mechanism already documented for '|2s' and ports.
+     What was missed is that it is not special to ports: ALL SIX
+     Switch* commands carry it, and RIPlib honours the flags only for
+     '|2s'.
+
+     WHAT IT MEANS IN PRACTICE.  Protection is live, writable from
+     content, and unimplemented by RIPlib for five of the six families.
+     A scene that protects a palette slot and then writes to it gets a
+     refusal from the driver and a completed write from RIPlib.  Under
+     14.6 that is the tolerable direction -- RIPlib does MORE, and
+     nothing that renders correctly under the driver fails under RIPlib
+     -- but it is a real divergence and no longer an inert one.
+
+     Not yet implemented, and deliberately not rushed: doing it
+     properly means a protected flag per slot for five families, set
+     from these bits, and honoured at the twenty-four write sites the
+     driver guards.  That is a feature, not a patch.  Recorded here so
+     the decision is visible rather than implied by silence.
+
+     PORT protection RIPlib does implement -- port 0 permanently,
+     '|2s' bits 0..3 to protect and unprotect the destination and
+     source ports, and create/delete refusing a protected port.  The
+     bit assignment above is the same one.  See D-22.
 
 14.3.7  APPROXIMATED HIT AREAS
 
@@ -751,7 +792,10 @@ Nine handlers match it exactly, and they are the audit queue:
 
      cmd    slot   handler     what RIPlib currently claims
      ----   ----   ---------   -------------------------------------
-     |1F     94    0x00bde4    file query        (AUDITED 2026-08-14)
+     |1F     94    0x00bde4    file query      AUDITED -- defect found
+     |2A    111    0x046c64    switch palette  AUDITED -- defect found
+     |2B    112    0x046d08    switch button   AUDITED -- same finding
+     |2E    114    0x046da0    switch env      AUDITED -- same finding
      |1I     97    0x00cb38    load icon
      |1W    108    0x00dd67    write icon to cache
      |2A    111    0x046c64    switch palette slot
@@ -772,7 +816,22 @@ with a test.
 That is one defect in one handler, on the first look at a queue of
 nine.  Expect more.
 
-The same sweep also confirmed something already recorded: '|1F' and
-'|1W' both read the protection word at <inst>+0x104 and bail out when
-it is set, which is 14.3.6's "41 commands READ it and none WRITE it"
-holding up under direct inspection rather than by inference.
+The same sweep also looked at the protection word.  '|1F' and '|1W'
+both READ <inst>+0x104 and bail out when it is set, which is the read
+side of 14.3.6 confirmed by direct inspection.  The WRITE side is where
+14.3.6 was wrong, and the Switch* audit below is what found it.
+
+AUDIT LOG.  Four of the nine done, two findings:
+
+  '|1F'  the mode bound (above).  Fixed.
+
+  '|2A' '|2B' '|2E'  the second field is NOT a reserved pair.  It is a
+        flags word the driver acts on, and it WRITES protection state,
+        which refutes what 14.3.6 used to say about protection being
+        unreachable from content.  See 14.3.6, now corrected.  Not a
+        code defect in the narrow sense -- RIPlib's gate and slot bound
+        are right -- but a documented claim that was false, and a
+        feature RIPlib does not implement for five of six families.
+
+Four handlers audited, two findings, one of them a false claim in
+this very register.  Five left.  The queue is worth finishing.

@@ -51,6 +51,36 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   against the handler's instructions. A recovered name tells you what a
   handler calls *itself*; it does not tell you what it *does*.
 
+- **Slot protection is writable from content — the register said it wasn't.**
+  §14.3.6 claimed "41 commands READ the protection word at `<state>+0x104`
+  and no dispatched command WRITES it, so protection is host-side state
+  that no RIP stream can set. The guards cannot fire from content." That
+  is false, and false in the safe-sounding direction.
+
+  The second field of every `Switch*` command — which this project had
+  been calling a reserved pair — is a **flags word**. From slot 111
+  (`RIP_SwitchPalette`): bit 2 → `paletteSlotProtect(inst,-1,1)` and bit 3
+  → `…(inst,-1,0)` *before* the switch; bits 0 and 1 do the same *after*
+  it. So bits 2/3 protect and unprotect the slot being left, bits 0/1 the
+  slot being entered. The callee names itself in its own diagnostic
+  ("Cannot protect current color palette slot when it is #0"), and each
+  family has its own: `styleSlotProtect`, `textWindowSlotProtect`,
+  `environmentProtect`, `colorTableProtect`, plus `0x100454C4` for button
+  styles. `|2B` and `|2E` reach theirs through the identical four bit
+  tests.
+
+  This is the mechanism already documented for `|2s` and ports — what was
+  missed is that it isn't special to ports. **All six `Switch*` commands
+  carry it and RIPlib honours it only for `|2s`.** A scene that protects a
+  palette slot and then writes to it gets a refusal from the driver and a
+  completed write from RIPlib. Under §14.6 that's the tolerable direction,
+  but it is a real divergence and no longer an inert one.
+
+  Not implemented, deliberately: doing it properly means a protected flag
+  per slot across five families, set from these bits and honoured at the
+  24 write sites the driver guards. That's a feature, not a patch, and
+  it's recorded so the decision is visible rather than implied by silence.
+
 - **`|1F` answered file queries the driver refuses.** Slot 94 bounds the
   mode with `cmp ebx,4 / jbe` and reports "Invalid mode parameter" above
   four, answering nothing. RIPlib decoded the mode and discarded it —
