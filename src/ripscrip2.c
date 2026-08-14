@@ -814,14 +814,36 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         uint8_t slot = (uint8_t)mega1(raw + 0);
         if (slot >= RIP_MAX_PORTS)      /* same 36-slot table size as ports */
             break;                        /* driver rejects out-of-range slots */
-        switch (cmd) {
-        case RIP2_CMD_SWITCH_PALETTE:      s->cur_palette_slot      = slot; break;
-        case RIP2_CMD_SWITCH_BUTTON_STYLE: s->cur_button_style_slot = slot; break;
-        case RIP2_CMD_SWITCH_ENVIRONMENT:  s->cur_environment_slot  = slot; break;
-        case RIP2_CMD_SWITCH_TEXT_WINDOW:  s->cur_text_window_slot  = slot; break;
-        default:                           s->cur_style_slot        = slot; break;
+        {
+            /* IMPLEMENTED 2026-08-14.  Pick the family's current-slot field
+             * and protection mask together, so the flag bits below act on
+             * the right pair without a second switch. */
+            uint8_t  *cur;
+            uint64_t *mask;
+            switch (cmd) {
+            case RIP2_CMD_SWITCH_PALETTE:
+                cur = &s->cur_palette_slot;      mask = &s->protected_palette;      break;
+            case RIP2_CMD_SWITCH_BUTTON_STYLE:
+                cur = &s->cur_button_style_slot; mask = &s->protected_button_style; break;
+            case RIP2_CMD_SWITCH_ENVIRONMENT:
+                cur = &s->cur_environment_slot;  mask = &s->protected_environment;  break;
+            case RIP2_CMD_SWITCH_TEXT_WINDOW:
+                cur = &s->cur_text_window_slot;  mask = &s->protected_text_window;  break;
+            default:
+                cur = &s->cur_style_slot;        mask = &s->protected_style;        break;
+            }
+            {
+                uint8_t  fl   = (uint8_t)mega2l(raw + 1);
+                uint64_t from = (uint64_t)1u << *cur;
+                uint64_t to   = (uint64_t)1u << slot;
+                if (fl & 0x04) *mask |=  from;   /* protect the slot being left  */
+                if (fl & 0x08) *mask &= ~from;   /* unprotect it                 */
+                *cur = slot;                      /* the switch itself            */
+                if (fl & 0x01) *mask |=  to;     /* protect the slot entered     */
+                if (fl & 0x02) *mask &= ~to;     /* unprotect it                 */
+            }
+            break;
         }
-        break;
     }
 
     /* ── !|2W -- RIP_PortWrite ──────────────────────────────────────

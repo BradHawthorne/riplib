@@ -389,12 +389,15 @@ rather than a slogan.
      enforced as the driver enforces them (0..10 and 1..10); it is only
      the direction range that is wider on purpose.  See D-21.
 
-14.3.6  PROTECTION IS IMPLEMENTED ONLY FOR PORTS
+14.3.6  SLOT PROTECTION
 
      The driver guards 24 command sites with twelve "its protected!"
      diagnostics covering graphics styles, colour palettes,
-     environments, text windows and button styles.  RIPlib implements
-     none of those.
+     environments, text windows and button styles.  RIPlib implemented
+     none of those until 2026-08-14 and now implements nineteen; the
+     heading of this section used to read "PROTECTION IS IMPLEMENTED
+     ONLY FOR PORTS", which stopped being true in the same commit that
+     made it worth reading.
 
      CORRECTED 2026-08-14.  This section used to call that inert, on
      the grounds that "41 commands READ the protection word at
@@ -436,34 +439,38 @@ rather than a slogan.
      nothing that renders correctly under the driver fails under RIPlib
      -- but it is a real divergence and no longer an inert one.
 
-     Not yet implemented, and deliberately not rushed: doing it
-     properly means a protected flag per slot for five families, set
-     from these bits, and honoured at the twenty-four write sites the
-     driver guards.  That is a feature, not a patch.  Recorded here so
-     the decision is visible rather than implied by silence.
+     IMPLEMENTED 2026-08-14.  RIPlib now carries a 36-bit protection
+     mask per family in ripscrip2_state_t, sets it from the Switch*
+     flag bits, and refuses modification at the guarded sites.
 
-     THE LOOP IS NOW VERIFIED AT BOTH ENDS, by disassembly rather than
-     inference.  On 2026-08-14 the write side was found ('|2A's flag
-     bits calling paletteSlotProtect); the read side was then read too.
-     '|Q' RIP_SetPalette calls the query at 0x10044508 and, when it
-     returns true, refuses with "Can't modify current color palette -
-     its protected!" and draws nothing.
+     The enforcement sites were recovered MECHANICALLY rather than
+     guessed: every "protected" diagnostic string in the image was
+     located, then attributed to the handler body that pushes it.  That
+     yields twenty-four sites, which is the figure this section already
+     quoted from a different method:
 
-     The state itself, for anyone implementing this:
+          style        '|=' '|N' '|S' '|W' '|Y' '|c' '|k' '|q' '|s' '|y'
+          environment  '|J' '|M' '|f' '|n' '|1c'
+          palette      '|D' '|Q' '|a' '|d'
+          port         '|2P' '|v' '|1ESC'
+          buttonstyle  '|1B'
+          textwindow   '|w'
 
-          <inst>+0x1A  ->  +5   base of the slot array
-          stride            0x302 bytes per slot
-          +0x300 bit 0      the protected flag
-          slots scanned     1 .. 0x24 (36)
+     Nineteen of those are level 0 and are guarded now.  '|1B', '|1c'
+     and the port trio are not yet, and are named here rather than left
+     to be inferred from silence.
 
-     paletteSlotProtect writes that byte; the query at 0x10044508 reads
-     it; '|Q' honours it.  So a stream can protect a palette slot with
-     '|2A' and every later '|Q' is refused by the driver.  RIPlib does
-     neither half, so it applies the write the driver rejects.
+     Everything starts unprotected, so the guards are inert until a
+     stream opts in -- which is why turning them on changed nothing for
+     the 35 corpus scenes or the 315 assertions.  The driver reports a
+     diagnostic and draws nothing; RIPlib draws nothing and stays
+     silent, having no diagnostic channel.
 
-     This is what the original claim -- "the guards cannot fire from
-     content" -- got exactly backwards.  Every link in that chain is
-     now a disassembled instruction rather than an inference.
+     Pinned by "|2Y protects a style slot and |W then refuses", which
+     walks the whole loop: switch with no flags and the write lands,
+     switch with bit 0 and it is refused, switch with bit 1 and it lands
+     again.  The unprotected leg is first on purpose -- a guard that is
+     simply always-on fails there rather than passing quietly.
      PORT protection RIPlib does implement -- port 0 permanently,
      '|2s' bits 0..3 to protect and unprotect the destination and
      source ports, and create/delete refusing a protected port.  The

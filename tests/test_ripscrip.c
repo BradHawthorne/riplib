@@ -1203,6 +1203,53 @@ static void test_l1_audio_off_sentinel(void) {
         FAIL("1w treated $OFF$ as a filename");
 }
 
+static void test_slot_protection_round_trip(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|2Y protects a style slot and |W then refuses");
+    init_fixture(&s, &ctx);
+    /* Both halves of this were disassembled before either was implemented:
+     *   write side -- a Switch* flag bit calls the family's slot protector
+     *                 (paletteSlotProtect and its four siblings);
+     *   read side  -- the guarded command queries it and refuses, e.g. '|W'
+     *                 with "Can't modify current graphics style - its
+     *                 protected!".
+     *
+     * '|W' RIP_WRITE_MODE is the observable because it writes plain state.
+     * '|Q' is the more obvious choice and is the wrong one: it writes
+     * through palette_write_rgb565() rather than into rip_state_t, so a
+     * test on it asserts nothing.  The first version of this test used it
+     * and failed on its own premise. */
+
+    /* Unprotected first, so a guard that is simply always-on fails here. */
+    feed_script(&s, &ctx, "!|2Y500|\r\n");        /* style slot 5, no flags */
+    feed_script(&s, &ctx, "!|W02|\r\n");
+    if (s.write_mode != 2) {
+        FAIL("|W was refused while the slot was unprotected"); return;
+    }
+
+    /* Protect the slot being entered -- flag bit 0. */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2Y501|\r\n");
+    if (!((s.rip2_state.protected_style >> 5) & 1u)) {
+        FAIL("|2Y did not set the protection bit"); return;
+    }
+    feed_script(&s, &ctx, "!|W02|\r\n");
+    if (s.write_mode == 2) {
+        FAIL("|W modified state on a protected style slot"); return;
+    }
+
+    /* Unprotect -- flag bit 1 -- and the write must go through again. */
+    feed_script(&s, &ctx, "!|2Y502|\r\n");
+    if ((s.rip2_state.protected_style >> 5) & 1u) {
+        FAIL("|2Y did not clear the protection bit"); return;
+    }
+    feed_script(&s, &ctx, "!|W02|\r\n");
+    if (s.write_mode == 2) PASS();
+    else FAIL("|W still refused after unprotecting");
+}
+
 static void test_l1_file_query_mode_bound(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -6135,6 +6182,7 @@ int main(void) {
     test_text_xy_expands_variables();
     test_l1_audio_pushes_marker();
     test_l1_audio_off_sentinel();
+    test_slot_protection_round_trip();
     test_l1_file_query_mode_bound();
     test_l1_load_icon_stretch_bound();
     test_l1_select_article();

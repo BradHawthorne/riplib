@@ -224,6 +224,32 @@ typedef struct {
     uint8_t  cur_environment_slot;
     uint8_t  cur_text_window_slot;
     uint8_t  cur_style_slot;      /* '|2Y' RIP_SwitchStyle — graphics style slot */
+
+    /* SLOT PROTECTION.  Bit N of each mask means "slot N is protected";
+     * a protected slot refuses modification, the way the driver's
+     * "Can't modify current color palette - its protected!" path does.
+     *
+     * A stream sets these through the Switch* commands' second field,
+     * which is a flags word and not the reserved pair this project used
+     * to call it (14-divergence-register.md 14.3.6):
+     *
+     *     bit 2  protect the slot being LEFT
+     *     bit 3  unprotect the slot being LEFT
+     *     bit 0  protect the slot being ENTERED
+     *     bit 1  unprotect the slot being ENTERED
+     *
+     * Driver side, verified at both ends: paletteSlotProtect() writes
+     * <inst>+0x1A -> +5, stride 0x302, flag at +0x300 bit 0, slots
+     * 1..36; the query at 0x10044508 reads it; '|Q' honours it.
+     *
+     * Everything starts unprotected, so these are inert until content
+     * opts in -- exactly as the driver behaves, and why enabling this
+     * changes nothing for the 35 corpus scenes. */
+    uint64_t protected_palette;
+    uint64_t protected_style;
+    uint64_t protected_environment;
+    uint64_t protected_text_window;
+    uint64_t protected_button_style;
 } ripscrip2_state_t;
 
 /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────────── *

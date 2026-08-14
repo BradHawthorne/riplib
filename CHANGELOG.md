@@ -71,6 +71,47 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   one documented as padding, every one carrying meaning. "Reserved" has
   been this codebase's word for "not looked at".
 
+- **Slot protection is implemented.** RIPlib now carries a 36-bit
+  protection mask per family, sets it from the `Switch*` flag bits, and
+  refuses modification at the guarded sites — closing the gap the previous
+  commits documented.
+
+  The 24 enforcement sites were recovered **mechanically**, not guessed:
+  every "protected" diagnostic string in the image was located, then
+  attributed to the handler body that pushes it. That independently
+  reproduces the figure of 24 this register already quoted from a
+  different method.
+
+  | family | sites |
+  |---|---|
+  | style | `\|=` `\|N` `\|S` `\|W` `\|Y` `\|c` `\|k` `\|q` `\|s` `\|y` |
+  | environment | `\|J` `\|M` `\|f` `\|n` `\|1c` |
+  | palette | `\|D` `\|Q` `\|a` `\|d` |
+  | port | `\|2P` `\|v` `\|1ESC` |
+  | buttonstyle | `\|1B` |
+  | textwindow | `\|w` |
+
+  Nineteen (all level 0) are guarded now; `|1B`, `|1c` and the port trio
+  are named as not-yet rather than left to inference. Everything starts
+  unprotected, so the guards are inert until a stream opts in — which is
+  why enabling them changed nothing for the 35 corpus scenes or the 315
+  assertions.
+
+  Pinned by a round-trip test that walks the whole loop: switch with no
+  flags and the write lands, switch with bit 0 and it is refused, switch
+  with bit 1 and it lands again. The **unprotected leg runs first on
+  purpose** — a guard that is simply always-on fails there rather than
+  passing quietly.
+
+  Three of my own mistakes were caught by existing checks while building
+  this, which is the system working: the family switch initially mapped
+  `|2A` to *style* via a `default:` arm (caught instantly by the existing
+  `|2A` test), one guard landed *before* its `case` label as dead code
+  (caught by `-Wimplicit-fallthrough`), and the first version of the
+  round-trip test asserted on `s.palette[]`, which `|Q` never writes — it
+  goes through `palette_write_rgb565()`. That last one failed on its own
+  premise rather than on the feature.
+
 - **Protection is now verified at both ends, and §14.7 overstated its own
   coverage.** Having found the *write* side (`|2A`'s flag bits calling
   `paletteSlotProtect`), the *read* side was read too: `|Q` RIP_SetPalette

@@ -119,6 +119,29 @@ static inline void set_session_viewport(rip_state_t *s,
 }
 
 /* BGI stroke fonts (parsed at init, indexed by BGI_FONT_* ID) */
+/* -- Slot protection -------------------------------------------------
+ *
+ * A protected slot refuses modification.  The driver enforces this at 24
+ * command sites with twelve "its protected!" diagnostics.  The sites were
+ * recovered mechanically -- by finding which handler body pushes each
+ * diagnostic -- rather than by guessing which commands look like state
+ * writes.
+ *
+ * Content sets protection through the Switch* commands' flag bits; see
+ * src/ripscrip2.c and 14-divergence-register.md 14.3.6.  Everything starts
+ * unprotected, so these guards are inert until a stream opts in, which is
+ * why turning them on changes nothing for the 35 corpus scenes.
+ *
+ * The driver reports a diagnostic and draws nothing.  RIPlib draws nothing
+ * and stays silent -- it has no diagnostic channel to report on. */
+#define RIP_PROT(s, fam) \
+    ((((s)->rip2_state.protected_##fam) >> ((s)->rip2_state.cur_##fam##_slot)) & 1u)
+
+#define RIP_STYLE_PROTECTED(s)    RIP_PROT(s, style)
+#define RIP_PALETTE_PROTECTED(s)  RIP_PROT(s, palette)
+#define RIP_ENV_PROTECTED(s)      RIP_PROT(s, environment)
+#define RIP_TEXTWIN_PROTECTED(s)  RIP_PROT(s, text_window)
+#define RIP_BTNSTYLE_PROTECTED(s) RIP_PROT(s, button_style)
 #define BGI_FONT_COUNT 11  /* 0=bitmap, 1-10=stroke */
 static bgi_font_t bgi_fonts[BGI_FONT_COUNT];
 static bool bgi_fonts_loaded = false;
@@ -3875,9 +3898,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* ── Drawing state ───────────────────────────────────────── */
     case 'c': /* RIP_COLOR */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 2) s->draw_color = mega2(p) & 0x0F;
         break;
     case 'S': /* v1.54 spec: 'S' = RIP_FILL_STYLE — pattern:2 color:2 */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 4) {
             /* spec §2.4: pattern range 0-12.  A malformed out-of-range
              * value maps to 0 (no fill) rather than a wrapped junk pattern
@@ -3911,6 +3936,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                *
                * Same class as '|k' (D-18): the record says what the driver
                * accepts, not what content exists.  See 14.3.3. */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 4) {
             s->line_off_draw = (uint8_t)mega_digit(p[0]);
             s->line_style    = (uint8_t)mega_digit(p[1]);
@@ -3926,6 +3952,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
     case 'W': /* v1.54 spec: 'W' = RIP_WRITE_MODE — mode:2 */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 2) {
             uint8_t wm = (uint8_t)mega2(p);
             if (wm > 4) wm = 0;
@@ -3934,6 +3961,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
     case 'Y': /* RIP_FONT_STYLE — font:2 dir:2 size:2 flags:2 */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 8) {
             uint8_t fid = (uint8_t)mega2(p);
             uint8_t fdir = (uint8_t)mega2(p + 2);
@@ -4021,6 +4049,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         comp_clear_line(c, 0);
         break;
     case 'w': /* RIP_TEXT_WINDOW — pixel coordinates for text region */
+        if (RIP_TEXTWIN_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 10) {
             int16_t tw_x0 = mega2(p);
             int16_t tw_y0 = mega2(p + 2);
@@ -4067,6 +4096,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* ── Palette ─────────────────────────────────────────────── */
     case 'Q': /* RIP_SET_PALETTE — 16 entries, values are EGA 64-color indices.
                * EGA indices map to framebuffer values 240-255 (see rip_init_first). */
+        if (RIP_PALETTE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 32) {
             for (int i = 0; i < 16; i++) {
                 uint8_t ega64 = mega2(p + i * 2) & 0x3F;
@@ -4088,6 +4118,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * still masking.  Every '|a' in the corpus is in range -- the
                * values used are 2, 9, 20, 52, 54, 59 and 61 -- so nothing
                * shipped depends on the fold.  D-21. */
+        if (RIP_PALETTE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 4) {
             uint16_t idx = (uint16_t)mega2(p);
             uint16_t ega64 = (uint16_t)mega2(p + 2);
@@ -4342,6 +4373,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * IcyTerm: FillPattern { c1..c8, col } — parse_params.rs line 323:
                *   (0, b's') → parse_base36_complete(..., 17) = 18 digits = 9 two-digit params.
                * 's' is strictly this command; dual-dispatch by len was wrong. */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 18) {
             uint8_t pat[8];
             for (int i = 0; i < 8; i++)
@@ -4508,6 +4540,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * patterned fills and the clear color for RIP_ERASE_VIEW.
                * Push the new value into the draw layer so subsequent fills
                * pick it up without waiting for the next 'S'/'s'/'D'. */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 1) {
             /* Width-negotiated: the payload is normalised to 2 digits before
              * dispatch when '|M' has selected anything else (D-11).
@@ -4544,6 +4577,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * This letter previously ran a clipboard slot save, which had no basis
      * in the dispatch table and consumed a slot on each of those 24 uses. */
     case 'J': /* RIP_SET_BASE_MATH -- base:2, accepts 36 or 64 */
+        if (RIP_ENV_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 2) {
             int16_t base = mega2(p);
             s->mega_base = (uint8_t)((base == 36 || base == 64) ? base : 36);
@@ -4689,6 +4723,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * can check coord_size_unsupported and stop rather than render
                * garbage.  All 24 uses of '|n' in TeleGrafix's shipped corpus
                * request 2, so no real content trips this.  See D-11. */
+        if (RIP_ENV_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 4) {
             uint8_t size = (uint8_t)mega_digit(p[0]);
             if (size >= 2 && size <= 5) {
@@ -4703,6 +4738,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* -- Color mode (v2.0+) ---------------------------------------------- */
     /* DLL command table entry 46: 'M' = RIP_SET_COLOR_MODE (2 args: 1,1) */
     case 'M': /* RIP_SET_COLOR_MODE -- mode:1 bits:1 */
+        if (RIP_ENV_PROTECTED(s)) break;   /* protected slot: driver refuses */
         /* mode=0: palette mapping. mode!=0: direct RGB with bits/component.
          * The card remains palette-backed, but mode tracking is observable
          * through $COLORMODE$ and future color-parameter handlers. */
@@ -4723,6 +4759,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* -- Filled-object border control (v2.A3+) ---------------------------- */
     /* DLL command table entry 48: 'N' = RIP_SET_BORDER (1 arg: 2-digit) */
     case 'N': /* RIP_SET_BORDER -- borders:2, 00=off, nonzero=on */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 2)
             s->filled_borders_enabled = (mega2(p) != 0);
         break;
@@ -4977,6 +5014,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
      * The 8×8 user fill pattern this letter used to carry is not lost: that
      * is '|s' RIP_FILL_PATTERN, which RIPlib already implements. */
     case 'D': /* RIP_SET_DRAWING_PALETTE — start:2 count:2 bits:1 (rgb:4)×count */
+        if (RIP_PALETTE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 5) {
             /* Base 64, same flag as '|d' -- see D-12. */
             /* FIELD ORDER, from the handler's own validation: args[0] is
@@ -5230,6 +5268,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * 2026-08-12.  Parsing '|d' as font style actively corrupted
                * font state on any stream that set a palette entry, so that
                * behaviour was removed. */
+        if (RIP_PALETTE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 7) {
             /* Base 64: the dispatch entry's flag word marks '|d' as always
              * using the extended radix.  Decoded as base 36 this command is
@@ -5321,6 +5360,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * The remaining fields are parsed at their correct widths but
                * NOT interpreted: their meanings have not been recovered, and
                * assigning them would be a guess.  See docs/spec §12.12. */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 26) {
             /* Base 64: the dispatch entry marks '|y' as always using the
              * extended radix, and real content proves it -- every |y in the
@@ -5377,6 +5417,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * world->device transform (tracked as D-1 in
                * docs/spec/12-dll-provenance.md).  Storing it is strictly
                * better than the previous behaviour, which mis-applied it. */
+        if (RIP_ENV_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 4) {
             s->world_w = (int16_t)mega2(p);
             s->world_h = (int16_t)mega2(p + 2);
@@ -5394,6 +5435,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * anything larger down the invalid-argument path rather than
                * masking it.  Match that: ignore out-of-range values instead
                * of silently truncating them. */
+        if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 2) {
             uint16_t attrib = mega2(p);
             if (attrib <= 0x0F)
