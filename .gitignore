@@ -30,3 +30,17 @@ dispatch-table.json
 # scripts/ci-local.sh working files
 analyzer-local.log
 .ci-local-probe/
+
+# Internal working record -- kept on local disk, out of version control.
+# These are the session-by-session ledgers the project is steered with:
+# candidate/decision traces, the uncertainty register, and the alignment
+# phase plan.  They are working notes, not deliverables, and they carry
+# incidental local machine layout.  The ADRs in design/adr/ and
+# design/syntax-audit.md ARE published -- they are the reasoning a
+# consumer or a reviewer needs, and public docs cite them as evidence.
+design/decisions.md
+design/knowledge.md
+design/bbs-land-alignment.md
+
+# Assistant tooling for working on this repo, not part of the library.
+.claude/
