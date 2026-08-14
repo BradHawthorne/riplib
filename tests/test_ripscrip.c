@@ -1250,6 +1250,40 @@ static void test_slot_protection_round_trip(void) {
     else FAIL("|W still refused after unprotecting");
 }
 
+static void test_port0_permanent_is_not_protected(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("port 0 is permanent but not protected: |v still works on it");
+    init_fixture(&s, &ctx);
+    /* RIPlib marked port 0 PROTECTED, conflating two different things.  The
+     * driver keeps them apart, and IMAGES.RIP proves it: all three of its
+     * '|v' commands run with port 0 active, and the driver renders that
+     * scene.  A port-0-is-protected reading refuses content the driver
+     * accepts -- and nothing would have caught it, because protection is
+     * inert until content opts in, so no test and no corpus scene exercised
+     * the guard at all.
+     *
+     * PERMANENT: port 0 cannot be deleted or redefined.
+     * PROTECTED: content-set, blocks modification.  Port 0 has the first
+     * and not the second. */
+    if (!(s.ports[0].flags & RIP_PORT_FLAG_PERMANENT)) {
+        FAIL("port 0 lost its permanence"); return;
+    }
+    if (s.ports[0].flags & RIP_PORT_FLAG_PROTECTED) {
+        FAIL("port 0 is marked protected; |v would be refused on it"); return;
+    }
+    /* '|v' on port 0 must take effect. */
+    feed_script(&s, &ctx, "!|v000A0A14|\r\n");
+    if (s.vp_x1 != 10) {   /* mega2("0A") */
+        FAIL("|v was refused while port 0 was active"); return;
+    }
+    /* And port 0 must still be undeletable. */
+    feed_script(&s, &ctx, "!|2p0000|\r\n");
+    if (s.ports[0].allocated) PASS();
+    else FAIL("port 0 was deleted");
+}
+
 static void test_l1_file_query_mode_bound(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -6183,6 +6217,7 @@ int main(void) {
     test_l1_audio_pushes_marker();
     test_l1_audio_off_sentinel();
     test_slot_protection_round_trip();
+    test_port0_permanent_is_not_protected();
     test_l1_file_query_mode_bound();
     test_l1_load_icon_stretch_bound();
     test_l1_select_article();

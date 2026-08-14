@@ -467,7 +467,7 @@ static bool rip_port_create(rip_state_t *rs, uint8_t idx,
 
     rip_port_t *p = &rs->ports[idx];
 
-    if (p->flags & RIP_PORT_FLAG_PROTECTED)
+    if (p->flags & (RIP_PORT_FLAG_PROTECTED | RIP_PORT_FLAG_PERMANENT))
         return false;  /* DLL: "Port is protected - cannot redefine it" */
 
     memset(p, 0, sizeof(*p));
@@ -531,7 +531,8 @@ static bool rip_port_destroy(rip_state_t *rs, uint8_t idx, bool force)
     if (!p->allocated)
         return true;   /* already empty -- not an error */
 
-    if ((p->flags & RIP_PORT_FLAG_PROTECTED) && !force)
+    if ((p->flags & RIP_PORT_FLAG_PERMANENT) ||
+        ((p->flags & RIP_PORT_FLAG_PROTECTED) && !force))
         return false;  /* DLL: "Specified port is protected - not deleted" */
 
     memset(p, 0, sizeof(*p));

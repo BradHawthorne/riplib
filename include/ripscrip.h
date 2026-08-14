@@ -272,6 +272,19 @@ typedef struct {
 #define RIP_MAX_PORTS              36
 #define RIP_PORT_FLAG_PROTECTED    0x01
 #define RIP_PORT_FLAG_FULLSCREEN   0x02
+/* PERMANENT is not PROTECTED, and conflating them was a bug.  Port 0 cannot
+ * be deleted or redefined, but it is NOT protected against modification --
+ * all three '|v' RIP_ViewPort commands in IMAGES.RIP run with port 0 active
+ * and the driver renders that scene, so a port-0-is-protected reading would
+ * refuse content the driver accepts.
+ *
+ * The driver keeps them apart: '|v's query (0x10033821, with index -1
+ * meaning "the current entry") tests a protected bit at +0x17 of a
+ * 0x78-stride table, while delete and redefine refuse port 0 for a
+ * different reason.  PROTECTED is set by CONTENT, through the Switch* flag
+ * bits; PERMANENT belongs to slot 0 alone and no stream can set or clear
+ * it. */
+#define RIP_PORT_FLAG_PERMANENT    0x04
 
 typedef struct {
     bool     allocated;          /* Port slot is in use */

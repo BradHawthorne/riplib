@@ -1034,7 +1034,7 @@ void rip_init_first(rip_state_t *s) {
     {
         rip_port_t *p0 = &s->ports[0];
         p0->allocated    = true;
-        p0->flags        = RIP_PORT_FLAG_PROTECTED | RIP_PORT_FLAG_FULLSCREEN;
+        p0->flags        = RIP_PORT_FLAG_PERMANENT | RIP_PORT_FLAG_FULLSCREEN;
         p0->vp_x0        = 0;
         p0->vp_y0        = 0;
         p0->vp_x1        = 639;
@@ -1217,7 +1217,7 @@ void rip_session_reset(rip_state_t *s) {
     {
         rip_port_t *p0 = &s->ports[0];
         p0->allocated    = true;
-        p0->flags        = RIP_PORT_FLAG_PROTECTED | RIP_PORT_FLAG_FULLSCREEN;
+        p0->flags        = RIP_PORT_FLAG_PERMANENT | RIP_PORT_FLAG_FULLSCREEN;
         p0->vp_x0        = 0;   p0->vp_y0 = 0;
         p0->vp_x1        = 639; p0->vp_y1 = 399;
         p0->draw_color   = 15;
@@ -4092,7 +4092,21 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                             s->tw_x1 != 639 || s->tw_y1 != 349);
         }
         break;
-    case 'v': /* RIP_VIEWPORT */
+    case 'v': /* RIP_VIEWPORT
+               *
+               * Refuses when the CURRENT port is protected, per slot 62's
+               * query at 0x10033821: index -1 means "the current entry", and
+               * it tests the protected bit at +0x17 of a 0x78-stride table.
+               * The diagnostic is "Port can't be modified - it's protected!".
+               *
+               * This guard was held back until port PERMANENCE was separated
+               * from port PROTECTION.  RIPlib marked port 0 PROTECTED, and
+               * all three '|v' commands in IMAGES.RIP run with port 0 active
+               * -- so guarding on the old flag would have refused content the
+               * driver renders, and nothing would have caught it, since
+               * protection is inert until content opts in. */
+        if (s->ports[s->active_port].flags & RIP_PORT_FLAG_PROTECTED)
+            break;
         if (len >= 8) {
             int16_t vx0 = mega2(p), vy0 = mega2(p + 2);
             int16_t vx1 = mega2(p + 4), vy1 = mega2(p + 6);

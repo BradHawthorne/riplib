@@ -91,7 +91,7 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   | buttonstyle | `\|1B` |
   | textwindow | `\|w` |
 
-  **Twenty-two of the twenty-four are enforced**: nineteen level-0 sites,
+  **Twenty-three of the twenty-four are enforced**: nineteen level-0 sites,
   plus `|1B` (button style), `|1c` (environment) and `|2P` (port
   redefine, which RIPlib already refused on a protected port).
 
@@ -102,14 +102,23 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   names itself `RIP_SetMouseCursor()` in the same error. The pointer is
   environment state in this driver's model.
 
-  **Two are deliberately not guarded.** `|v` RIP_ViewPort queries a
-  different table (`<inst>+0x22`, stride `0x78`, flag at `+0x17`, slot 0
-  skipped) and the index it passes takes a branch I have not read — and
-  **three corpus scenes send `|v`**, so a guard on incomplete evidence
-  would break shipped content rather than merely being wrong on paper.
-  RIPlib's port 0 is permanently protected, so a naive "current port
-  protected" guard would refuse every `|v` in the default state.
-  `|1ESC`'s diagnostics are about *defining* a query rather than answering
+  **`|v` took a prerequisite, and it is the more interesting half.** Its
+  query passes index `-1`, which that routine reads as "the current entry",
+  testing a protected bit at `+0x17` of a `0x78`-stride table — so `|v`
+  refuses on a protected *current port*. Guarding it directly would have
+  broken shipped content: RIPlib marked port 0 `PROTECTED`, and **all three
+  `|v` commands in IMAGES.RIP run with port 0 active**. The driver renders
+  that scene, so port 0 cannot be protected in the sense `|v` tests.
+
+  RIPlib was conflating two properties in one flag — `PERMANENT` (slot 0
+  alone, undeletable, unsettable by any stream) and `PROTECTED` (set by
+  content via the `Switch*` bits). Separating them was the prerequisite.
+  Port 0 now carries `PERMANENT`; delete and redefine refuse on either;
+  `|v` refuses on `PROTECTED` alone. IMAGES.RIP renders byte-identically
+  before and after — 91237 foreground pixels either way, **checked rather
+  than assumed**.
+
+  **One is still not guarded.** `|1ESC`'s diagnostics are about *defining* a query rather than answering
   one, and the mapping to RIPlib's query paths isn't established. Both are
   named in §14.3.6 with the reason.
 

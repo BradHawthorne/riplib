@@ -456,35 +456,44 @@ rather than a slogan.
           buttonstyle  '|1B'
           textwindow   '|w'
 
-     TWENTY-TWO of the twenty-four are enforced.  Nineteen level-0
-     sites, plus '|1B' (button style), '|1c' (environment) and '|2P'
-     (port redefine, which RIPlib already refused on a protected port).
+     TWENTY-THREE of the twenty-four are enforced.  Nineteen level-0
+     sites, plus '|1B' (button style), '|1c' (environment), '|2P' (port
+     redefine) and '|v' (viewport).
 
      '|1c' is worth a note because the pairing looks wrong and is not.
      RIPlib calls it RIP_SetMouseCursor and the diagnostic it guards on
-     is "Can't modify current environment - its protected!".  The
-     handler settles it: slot 90 calls the ENVIRONMENT protection query
-     at 0x1003D9E1 and names itself RIP_SetMouseCursor() in the same
-     error.  The pointer is environment state in this driver's model.
+     is "Can't modify current environment - its protected!".  Slot 90
+     settles it: it calls the ENVIRONMENT protection query at
+     0x1003D9E1 and names itself RIP_SetMouseCursor() in the same error.
+     The pointer is environment state in this driver's model.
 
-     TWO ARE DELIBERATELY NOT GUARDED:
+     '|v' TOOK A PREREQUISITE, and it is the more interesting half.  Its
+     query at 0x10033821 passes index -1, which that routine reads as
+     "the current entry": it tests the protected bit at +0x17 of a
+     0x78-stride table.  So '|v' refuses on a protected CURRENT port.
 
-     '|v' RIP_ViewPort.  Its query at 0x10033821 walks a DIFFERENT table
-          from the palette one -- <inst>+0x22, stride 0x78, flag at
-          +0x17 bit 0, slots 1..36, with slot 0 skipped -- and the
-          index it passes (-1) takes a branch at 0x10033858 that has not
-          been read.  Three corpus scenes send '|v', so a guard placed
-          on incomplete evidence would break shipped content rather than
-          merely being wrong on paper.  RIPlib's port 0 is permanently
-          protected, so a naive "is the current port protected" guard
-          would refuse every '|v' in the default state.  Left alone
-          until the branch is read.
+     Guarding it directly would have broken shipped content.  RIPlib
+     marked port 0 RIP_PORT_FLAG_PROTECTED, and all three '|v' commands
+     in IMAGES.RIP run with port 0 active -- the driver renders that
+     scene, so port 0 cannot be protected in the sense '|v' tests.
+     RIPlib was conflating two different properties in one flag:
 
-     '|1ESC' rip_query.  The diagnostics attributed to it -- "Port is
-          protected - can't define query", "Text window is protected -
-          can't define query" -- are about DEFINING a query rather than
-          answering one, and which of RIPlib's query paths that
-          corresponds to has not been established.
+          PERMANENT   slot 0 alone; cannot be deleted or redefined,
+                      and no stream can set or clear it
+          PROTECTED   set by CONTENT through the Switch* flag bits;
+                      blocks modification
+
+     Separating them was the prerequisite.  Port 0 now carries
+     PERMANENT; delete and redefine refuse on either; '|v' refuses on
+     PROTECTED alone.  IMAGES.RIP renders byte-identically before and
+     after -- 91237 foreground pixels either way, checked rather than
+     assumed.
+
+     ONE IS STILL NOT GUARDED.  '|1ESC' rip_query: its diagnostics --
+     "Port is protected - can't define query", "Text window is
+     protected - can't define query" -- are about DEFINING a query
+     rather than answering one, and which of RIPlib's query paths that
+     corresponds to has not been established.
      Everything starts unprotected, so the guards are inert until a
      stream opts in -- which is why turning them on changed nothing for
      the 35 corpus scenes or the 315 assertions.  The driver reports a
