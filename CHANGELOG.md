@@ -169,6 +169,36 @@ produced them.
   so content relying on `|^`/`|~` to bracket a colour change should
   restore explicitly when targeting mixed audiences.
 
+- `scripts/ci-local.sh` — runs the CI workflow's jobs against the local
+  toolchain. Added because the pipeline had gained a job that was never
+  observed green: the doc checks were written, pushed, and taken on
+  trust. A CI step nobody has watched run is a claim, not a check.
+
+  It reports `PASS`, `FAIL`, or `SKIP` **with a reason**, and a skip is
+  never counted as a pass — skips are listed separately under "A SKIP IS
+  NOT A PASS" and the exit status ignores them, so "13 passed, 1
+  skipped" cannot be misread as fully green. First full run: 13 passed,
+  0 failed, 1 skipped (sanitizers — a Cygwin gcc accepts `-fsanitize`
+  and then fails to link for want of `libasan`, so that job genuinely
+  cannot be reproduced off Linux).
+
+  Three faults in the runner itself surfaced while building it, each of
+  which would have produced a confidently wrong result:
+
+  - **`command -v python3` is not evidence Python works.** On Windows it
+    resolves to a Microsoft Store stub that exits with an install
+    advert. The runner now probes the interpreter instead of trusting
+    `PATH`.
+  - **msys `grep -E` reads `\[` as opening a character class**, not as a
+    literal bracket. The floor-drift check matched any one of
+    `{b,g,i,_,f,o,n,t}` and found `b=2048` on an unrelated line,
+    reporting nine coverage-floor mismatches that did not exist. `[]]`
+    is the portable spelling.
+  - **Git Bash and a Cygwin gcc resolve `/tmp` to different
+    directories** — the shell writes to `%LOCALAPPDATA%\Temp`, the
+    compiler looks in `C:/msys64/tmp` — so a probe file written to
+    `/tmp` was invisible to the very compiler it was probing.
+
 - `scripts/ref-compare.py` — reproduces §14.2's comparison of RIPlib and
   bbs-land against the dispatch record. **§14.2 was the one part of the
   divergence register not reproducible from the repository**: its counts

@@ -89,6 +89,13 @@ evidence behind each one.
   [`docs/spec/13-dll-command-table.md`](docs/spec/13-dll-command-table.md);
   the scripts under `scripts/` regenerate every binary-derived table and
   verify the image fingerprint before reporting.
+- `scripts/ci-local.sh` runs the CI jobs against the local toolchain.
+  It reports `PASS`, `FAIL`, or `SKIP` **with a reason**, and never
+  counts a skip as a pass — the summary lists skips separately under
+  "A SKIP IS NOT A PASS" and the exit status ignores them. Use
+  `--list` to see which jobs this machine can run; the sanitizer job
+  needs a toolchain that ships `libasan`/`libubsan`, which a Cygwin
+  gcc does not.
 - **Base-64 MegaNum** is implemented. RIPscrip has a second radix
   (`0-9 A-Z a-z # &`, case-sensitive) that four commands always use
   regardless of any global setting — see
@@ -272,10 +279,14 @@ riplib/
 │   ├── test_fuzz_seeded.c Seeded mutation fuzzer
 │   └── fuzz_parser.c     libFuzzer target (optional, needs clang)
 ├── scripts/          Tooling
+│   ├── ci-local.sh       Run the CI jobs locally (PASS/FAIL/SKIP-with-reason)
 │   ├── dll-*.py          Regenerate binary-derived tables from the driver
+│   ├── ref-compare.py    RIPlib and a third-party reference vs the driver
 │   ├── corpus-scan.py    Opcode census over a corpus
 │   ├── check-branding.sh Platform-independence lint (CI)
-│   └── check-command-docs.py Parser/spec agreement lint (CI)
+│   ├── check-command-docs.py Parser/spec agreement lint (CI)
+│   ├── check-spec-examples.py Spec command blocks vs the record (CI)
+│   └── check-dll-table.py  Segment 13 vs the dispatch record
 ├── examples/         Demo programs
 └── docs/             Documentation
 ```

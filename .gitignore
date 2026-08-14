@@ -26,3 +26,7 @@ dispatch-table.json
 # Claude Code local settings — machine-specific permissions and paths.
 # The shared project commands in .claude/commands/ ARE tracked.
 .claude/settings.local.json
+
+# scripts/ci-local.sh working files
+analyzer-local.log
+.ci-local-probe/
