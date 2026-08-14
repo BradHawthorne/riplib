@@ -4157,6 +4157,172 @@ static void test_preproc_unknown_directive_passes_through(void) {
     }
 }
 
+/* ── The bbs-land divergences ────────────────────────────────────────
+ *
+ * Thirteen commands where bbs-land/remote-imaging-protocol and
+ * RIPSCRIP.DLL disagree about the argument layout.  THE BINARY IS THE
+ * ARBITER: RIPlib follows the dispatch record and the handler body in
+ * all thirteen, and 14-divergence-register.md 14.2 records the
+ * reasoning for each.
+ *
+ * These tests exist so the register's claim is checkable rather than
+ * asserted.  They are written to FAIL if RIPlib ever adopts the
+ * reference's reading -- which is the actual risk, since that reference
+ * is the most convenient secondary source and reads plausibly.
+ *
+ * Not all thirteen are testable, and the ones that are not are listed
+ * in 14.2.3 rather than given a test that proves nothing.  Where the two
+ * readings describe the SAME wire bytes and differ only in how they name
+ * a reserved span -- '|1M's res:2+res:3 against res:5, '|1T's res:1+res:1
+ * against res:2 -- there is no behaviour to observe, because RIPlib reads
+ * neither field.  A test there would assert its own fixture.  What IS
+ * testable in those cases is the total width, which is what a consumer
+ * actually depends on, so that is what is pinned.
+ * ──────────────────────────────────────────────────────────────────── */
+
+/* 14.2.1 -- TOTALS DIFFER.  These seven desynchronise a consumer that
+ * believes the reference: it consumes the wrong number of bytes and
+ * every command after it lands in the wrong place. */
+
+static void test_bbsland_switch_family_needs_three_chars(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|2A |2B |2E |2T |2Y |2s: driver records 3 chars, not 2");
+    /* Slots 111, 112, 114, 118, 119 and 121 every one record mega1 +
+     * mega2.  The reference documents a bare 2 for most of them and
+     * 'port-num:1 flags:2 res:3' (6) for '|2s'.  The shipped corpus
+     * settles it: all three '|2s' commands in it are three characters
+     * ("!|2s000", "!|2s100").  A two-character command is a truncated
+     * one and the driver rejects it, so RIPlib must too -- accepting it
+     * would act on a record the driver would have thrown away. */
+    /* The short form must be exactly TWO characters -- the width the
+     * reference documents.  An earlier version of this test used one
+     * character, which a loosened gate still rejects, so it passed
+     * against a deliberately regressed parser and proved nothing.  Two
+     * is the boundary that separates the two readings. */
+    struct { const char *three; const char *two; } t[] = {
+        { "!|2A500|\r\n", "!|2A50|\r\n" },
+        { "!|2B500|\r\n", "!|2B50|\r\n" },
+        { "!|2E500|\r\n", "!|2E50|\r\n" },
+        { "!|2T500|\r\n", "!|2T50|\r\n" },
+        { "!|2Y500|\r\n", "!|2Y50|\r\n" },
+    };
+    size_t i;
+    for (i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        uint8_t got_full, got_short;
+        init_fixture(&s, &ctx);
+        feed_script(&s, &ctx, t[i].three);
+        got_full = (uint8_t)(s.rip2_state.cur_palette_slot +
+                             s.rip2_state.cur_button_style_slot +
+                             s.rip2_state.cur_environment_slot +
+                             s.rip2_state.cur_text_window_slot +
+                             s.rip2_state.cur_style_slot);
+        init_fixture(&s, &ctx);
+        feed_script(&s, &ctx, t[i].two);
+        got_short = (uint8_t)(s.rip2_state.cur_palette_slot +
+                              s.rip2_state.cur_button_style_slot +
+                              s.rip2_state.cur_environment_slot +
+                              s.rip2_state.cur_text_window_slot +
+                              s.rip2_state.cur_style_slot);
+        if (got_full != 5) { FAIL("a 3-char Switch* was not honoured"); return; }
+        if (got_short != 0) { FAIL("a 2-char Switch* was acted on"); return; }
+    }
+    PASS();
+}
+
+static void test_bbsland_2s_needs_three_not_six(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|2s: driver records 3 chars; the reference's 6 would over-consume");
+    init_fixture(&s, &ctx);
+    /* Feed the corpus form followed by another command.  If RIPlib
+     * believed the reference's six-character layout it would swallow
+     * "|X0A" and the pixel would never be drawn.  Framing alone does not
+     * save this: a consumer reading by declared width, not to '|', is
+     * exactly the case 14.6 warns about. */
+    feed_script(&s, &ctx, "!|2s000|X0A00|\r\n");
+    if (draw_get_pixel(10, 0) != 0) PASS();
+    else FAIL("|2s consumed the command after it");
+}
+
+static void test_bbsland_3e_is_mega2_not_mega4(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|3e RIP_BAUD_EMULATION reads mega2, not the reference's rate:4");
+    init_fixture(&s, &ctx);
+    /* Slot 123 records ONE mega2, and the handler at RVA 0x038BE1 loads
+     * exactly one argument -- mov edi,[eax] -- and stores it.  There is
+     * no second field.  The reference's rate:4 comes from the 2.0 draft.
+     *
+     * "0A00" decodes to 10 as mega2 and 12960 as mega4, so the two
+     * readings are trivially distinguishable.  RIPlib preferred mega4
+     * whenever four characters were available until 2026-08-12, which
+     * read two of the driver's fields as one. */
+    feed_script(&s, &ctx, "!|3e0A00|\r\n");
+    if (s.baud_emulation == 10) PASS();
+    else if (s.baud_emulation == 12960)
+        FAIL("|3e fell back to mega4 -- the 2.0 draft's reading");
+    else FAIL("|3e decoded to neither the mega2 nor the mega4 value");
+}
+
+/* 14.2.2 -- SAME TOTAL, DIFFERENT SUBDIVISION.  The stream stays in
+ * sync; individual fields decode wrong.  Only some are observable. */
+
+static void test_bbsland_1I_prefix_is_nine(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|1I fixed prefix is 9 chars; the filename starts there");
+    init_fixture(&s, &ctx);
+    /* Slot 97 records FF FF 01 01 01 01 01 -- after the two coordinates
+     * come FIVE single-digit fields.  The reference reads the first two
+     * of those as one 2-digit mode, which spans the driver's args[2] and
+     * args[3] and agrees only while args[3] is zero.
+     *
+     * Be precise about what this test does and does not show.  Both
+     * readings total nine and both put the filename at offset 9, so the
+     * FILENAME cannot distinguish them -- what it pins is that the fixed
+     * prefix is nine wide, which is the property a consumer depends on
+     * and which RIPlib's own documentation had wrong.  The only field
+     * the two readings actually place differently is the mode, and they
+     * agree even on that whenever the driver's args[3] is zero.
+     *
+     * There is NO corpus evidence either way: the shipped scenes contain
+     * zero '|1I' commands.  The dispatch record is the whole of the
+     * argument here, which is the normal case for this family -- nine of
+     * the thirteen divergent commands never appear in shipped content.
+     * That residue is recorded in 14.2.3 as reasoned rather than tested;
+     * asserting it would need a cached icon and a visible blit to
+     * observe a mode nothing sends.
+     *
+     * Payload: x=00 y=00 mode=0 res=1 clip=1 res=0 res=0, then the name.
+     * Offset 5 is deliberately non-zero -- it is the digit the
+     * reference's 2-digit mode would swallow. */
+    feed_script(&s, &ctx, "!|1I000001100NOSUCHICON|\r\n");
+    if (s.icon_state.request_count != 1) {
+        FAIL("|1I produced no file request for a missing icon"); return;
+    }
+    if (strcmp(s.icon_state.request_queue[0], "NOSUCHICON") == 0) PASS();
+    else FAIL("|1I read the filename from the wrong offset");
+}
+
+static void test_bbsland_2W_stays_in_sync(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("|2W leaves the stream in sync (its gate has no observable)");
+    init_fixture(&s, &ctx);
+    /* Be careful what this claims.  Slot 120 records mega1 + XY*4 +
+     * mega2 + mega2 = thirteen, with the bitmap filename following as a
+     * string tail; the reference merges the two trailing mega2s into one
+     * 4.  RIPlib gated on nine for a while -- the width of the port and
+     * rect alone -- so a record truncated before its flags was still
+     * acted on.  That gate is now thirteen.
+     *
+     * But '|2W' WRITES NO FILE: it validates and returns, changing no
+     * state a test can read.  An earlier version of this test was named
+     * for the gate and passed with the gate deliberately regressed from
+     * 13 to 9, because all it really measured was framing.  The gate is
+     * therefore listed in 14.2.3 as not testable, and this test is named
+     * for the one thing it does establish. */
+    feed_script(&s, &ctx, "!|2W10A000K0U0000|X0A00|\r\n");
+    if (draw_get_pixel(10, 0) != 0) PASS();
+    else FAIL("|2W desynchronised the stream");
+}
+
 /* ── Forward compatibility ───────────────────────────────────────────
  *
  * RIPscrip framing is DELIMITER-based, not length-based: a payload runs
@@ -5949,6 +6115,11 @@ int main(void) {
     test_l0_font_style_rejects_bad_font_number();
     test_preproc_directive_inside_command_payload();
     test_preproc_unknown_directive_passes_through();
+    test_bbsland_switch_family_needs_three_chars();
+    test_bbsland_2s_needs_three_not_six();
+    test_bbsland_3e_is_mega2_not_mega4();
+    test_bbsland_1I_prefix_is_nine();
+    test_bbsland_2W_stays_in_sync();
     test_fwdcompat_unknown_command_does_not_desync();
     test_fwdcompat_extensions_are_skippable();
     test_fwdcompat_overlong_payload_does_not_desync();

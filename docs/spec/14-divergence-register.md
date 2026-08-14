@@ -103,6 +103,40 @@ The split that matters is whether the TOTAL width agrees.  A consumer
 that mis-subdivides a command decodes that one command badly; a
 consumer that gets the total wrong desynchronises everything after it.
 
+WHAT THE EVIDENCE ACTUALLY IS, PER COMMAND.  The dispatch record is the
+arbiter throughout, but it is worth being blunt about how much
+CORROBORATION each finding has, because it is much less than the length
+of this section suggests.  Only FOUR of the thirteen appear in shipped
+content at all:
+
+     cmd    corpus uses   widths observed
+     ----   -----------   ----------------------------------------
+     |1M         38       28,29,32,34,36,37,38,51,61,65,66,71,76
+     |1R         25       18,19,20,21,68
+     |1T         12       10 -- every one
+     |2s          3       3  -- every one  ("002", "100", "000")
+
+     |1I  |1w  |2A  |2B  |2E  |2T  |2W  |2Y  |3e        zero uses
+
+For the nine with zero uses there is no corpus arbiter and there never
+will be: the record and the handler body are the whole of the argument.
+That is not a weakness of the finding -- the record IS the driver's own
+statement of what it accepts -- but it does mean these are settled by
+one line of evidence rather than two, and a reader weighing them should
+know which.
+
+The two that ARE corroborated corroborate strongly.  Every '|1T' in
+shipped content is exactly ten characters, and every '|2s' is exactly
+three, which refutes the reference's six outright.  '|2s' is also the
+only member of the Switch* family that appears anywhere in the corpus;
+the other five are carried by the shared record shape -- slots 111,
+112, 114, 118, 119 and 121 all record mega1 + mega2 -- and not by
+independent observation.
+
+TESTS.  Five tests in tests/test_ripscrip.c pin the divergences that
+can be demonstrated; 14.2.3 lists the ones that cannot, and why, rather
+than giving them a test that asserts its own fixture.
+
 14.2.1  TOTALS DIFFER -- seven commands, stream desync
 
      cmd   driver          chars  bbs-land      chars
@@ -117,9 +151,22 @@ consumer that gets the total wrong desynchronises everything after it.
 
      The Switch* family is one shape -- a slot digit plus a 2-digit
      field -- recorded identically across slots 111, 112, 114, 118, 119
-     and 121.  The corpus agrees: every '|2s' in shipped content is
-     three characters ("!|2s000", "!|2s100").  A consumer reading six
+     and 121.  ALL SIX, not just '|2s': an issue filed upstream named
+     only '|2s', which understates the finding fivefold.  The corpus
+     agrees as far as it can reach: all three '|2s' commands in shipped
+     content are three characters ("!|2s000", "!|2s100", "!|2s002"),
+     and no other member appears at all.  A consumer reading six
      over-consumes three bytes and loses the rest of the frame.
+
+     PINNED BY  "|2A |2B |2E |2T |2Y |2s: driver records 3 chars, not 2"
+                -- feeds each a 3-character command and a 2-character
+                one, and requires the first to take effect and the
+                second to be rejected, since a truncated record is one
+                the driver throws away.
+     PINNED BY  "|2s: driver records 3 chars; the reference's 6 would
+                over-consume" -- feeds "!|2s000|X0A00|" and requires the
+                pixel to land.  A consumer reading by declared width
+                rather than to '|' loses it.
 
      '|3e' RIP_BAUD_EMULATION is the one place BOTH projects disagreed
      with the driver, and RIPlib was wrong for longer: it preferred a
@@ -127,6 +174,13 @@ consumer that gets the total wrong desynchronises everything after it.
      draft's rate:4.  Slot 123 records a single mega2 and the handler
      (RVA 0x038BE1) loads exactly ONE argument -- mov edi,[eax] -- and
      stores it.  There is no second field.  Corrected; see D-16.
+
+     PINNED BY  "|3e RIP_BAUD_EMULATION reads mega2, not the reference's
+                rate:4" -- feeds "!|3e0A00|", which decodes to 10 as a
+                mega2 and 12960 as a mega4, so the two readings cannot
+                be confused.  The test names the mega4 value in its
+                failure message, so a regression says which reading it
+                fell back to rather than only that it failed.
 
 14.2.2  SAME TOTAL, DIFFERENT SUBDIVISION -- six commands
 
@@ -155,6 +209,99 @@ consumer that gets the total wrong desynchronises everything after it.
      confirms it -- all 25 '|1R' commands in the corpus start with eight
      zeros ("00000000dragon.txt").  RIPlib read the filename from offset
      0.  See D-19.
+
+     PINNED BY  "|1R takes the filename at offset 8 (D-19)"
+     PINNED BY  "1M defines a mouse region with clk/clr flags + host
+                text" -- asserts the host text is exactly "HELLO",
+                which can only be true if the fixed prefix is
+                seventeen characters wide.  It also pins the clk/clr
+                split itself, which is the half of the '|1M' finding
+                that IS observable: hotkey must read 0, RIP_MF_INVERT
+                must be set and RIP_MF_RESET clear.
+     PINNED BY  "|1I fixed prefix is 9 chars; the filename starts there"
+                -- named for what it demonstrates.  It does NOT
+                discriminate the mode width; see 14.2.3.
+     PINNED BY  "|2W leaves the stream in sync (its gate has no
+                observable)" -- likewise named for what it shows, which
+                is less than the '|2W' finding.  See 14.2.3.
+
+     EVERY TEST ABOVE WAS VERIFIED BY INJECTION -- the parser was
+     deliberately regressed to the reference's reading and the test
+     required to fail.  Two did not, and both were the test's fault:
+
+       * the Switch* test fed a ONE-character short form, which a gate
+         loosened from three to two still rejects, so it passed against
+         a regressed parser.  Two characters is the boundary that
+         separates the readings; it now uses two.
+
+       * the '|2W' test was named for the gate but measured only
+         framing, and passed with the gate regressed from thirteen to
+         nine.  '|2W' writes no file and changes no readable state, so
+         the gate has no observable at all; the test was renamed to the
+         one thing it does establish and the gate moved to 14.2.3.
+
+     A test that cannot fail is worse than no test, because it is
+     counted.  Both faults were invisible until the injection ran.
+
+
+14.2.3  WHAT IS NOT TESTED, AND WHY
+
+     Four of the thirteen cannot be demonstrated, and two more are
+     demonstrated only in part.  Listing them is the point: a suite that
+     appears to cover thirteen cases while several assert nothing is
+     worse than one that says so, because the count is what gets
+     quoted.
+
+     '|1M' and '|1T'  -- THE DIVERGENCE ITSELF IS INERT.  Be careful
+          to separate two things here, because '|1M' carries both.
+
+          The bbs-land DIVERGENCE is only in how a trailing RESERVED
+          span is named: res:2+res:3 against res:5 for '|1M',
+          res:1+res:1 against res:2 for '|1T'.  Both readings describe
+          identical wire bytes, RIPlib reads neither field, and no
+          behaviour can tell them apart.  A test would assert its own
+          fixture.  What a consumer depends on is the TOTAL, and that
+          IS pinned -- all twelve '|1T' commands in the corpus are ten
+          characters, and the '|1M' test's host text can only come out
+          right if the prefix is seventeen.
+
+          Separately, '|1M's clk/clr pair is where RIPlib was wrong and
+          the reference was RIGHT -- see 14.2.2.  That half is fully
+          observable and fully tested.  It is not a divergence from
+          bbs-land at all, which is why it is not counted among the
+          thirteen; it is listed here only so the two are not confused.
+
+     '|1w'  -- INERT, more so.  Driver 1+3, reference 4, same total,
+          and RIPlib's handler body is a bare 'break'.  The command is
+          consumed and nothing is done with it, exactly as the record's
+          width requires.  There is no observable to assert.  No corpus
+          scene sends '|1w' either.
+
+     '|1I'  -- PARTLY TESTED.  Both readings total nine and both put
+          the filename at offset 9, so the filename cannot distinguish
+          them.  The test pins the nine-character prefix, which is a
+          real property that RIPlib's own documentation had wrong, but
+          it does NOT discriminate the mode width.  The only field the
+          readings place differently is the mode, and even that agrees
+          whenever the driver's args[3] is zero.  There are zero '|1I'
+          commands in the shipped corpus, so no content exercises the
+          difference.  Discriminating it would need a cached icon and a
+          visible blit staged purely for the test; the record is clear
+          (FF FF 01 01 01 01 01) and is left to carry it.
+
+     '|2W'  -- GATE NOT TESTABLE.  Driver 1+XY*4+2+2 = thirteen fixed
+          characters, reference 1+XY*4+4 = eleven, same total, filename
+          following either way.  RIPlib's gate is thirteen and was nine
+          for a while, so a record truncated before its flags was still
+          acted on.  But '|2W' WRITES NO FILE -- it validates the port
+          and rectangle and returns, changing nothing a test can read.
+          The gate is real and correct; it simply has no observable.
+          This was found the honest way: the test WAS named for the
+          gate, and it passed with the gate regressed from thirteen to
+          nine, because all it measured was framing.
+
+     The other seven are pinned as described in 14.2.1 and 14.2.2, and
+     every one of those tests was verified by injection.
 
 
 14.3  DIVERGENCES FROM THE DRIVER THAT RIPlib MAKES DELIBERATELY

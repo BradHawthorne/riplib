@@ -191,9 +191,13 @@ All six record `mega1 + mega2` — **three characters**. The corpus agrees: ever
 
 These matter more than the rest because the **totals** differ. A consumer following the six-character `|2s` layout over-consumes three bytes and desynchronises the remainder of the frame. The issue filed upstream covered `|2s` alone; it is six times wider than reported.
 
+`|3e` RIP_BAUD_EMULATION belongs in this group too, and was filed under the wrong heading here until 2026-08-14. Slot 123 records a single `mega2` — **two** characters — against the reference's `rate:4`, so the totals differ and a consumer following the reference over-consumes two bytes. The handler at RVA `0x038BE1` loads exactly one argument (`mov edi,[eax]`) and stores it; there is no second field. This is the one place *both* projects disagreed with the driver, and RIPlib was wrong for longer.
+
+That makes **seven** commands in the desync class, not six.
+
 ### Same total, different subdivision
 
-`|1I`, `|1M`, `|1R`, `|1T`, `|1w`, `|2W`, `|3e` — the stream stays in sync, individual fields decode wrong. `|1R` is `2 6` against their `8`; `|1w` is `1 3` against their `4`.
+`|1I`, `|1M`, `|1R`, `|1T`, `|1w`, `|2W` — the stream stays in sync, individual fields decode wrong. `|1R` is `2 6` against their `8`; `|1w` is `1 3` against their `4`.
 
 ### `|F` RIP_FILL
 

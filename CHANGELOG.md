@@ -88,6 +88,60 @@ produced them.
 
 ### Added
 
+- **The bbs-land divergences are now pinned by tests, not just recorded.**
+  Seven of the thirteen had no test at all — `|1w`, `|2B`, `|2E`, `|2T`,
+  `|2W`, `|2Y`, `|3e` — so RIPlib could have drifted to the reference's
+  reading undetected. Five new tests close that where it can be closed:
+  `|2B`, `|2E`, `|2T`, `|2Y` and `|3e` are now fully pinned, `|2W` is
+  covered for stream sync only because its gate has no observable, and
+  `|1w` remains untestable by nature — its handler body is a bare
+  `break`.
+
+  **Every one was verified by injection**: the parser was deliberately
+  regressed to the reference's reading and each test required to fail.
+  Two did not, and both were the test's fault. The `Switch*` test fed a
+  *one*-character short form, which a gate loosened from three to two
+  still rejects — it passed against a regressed parser and proved
+  nothing; two characters is the boundary that separates the readings.
+  The `|2W` test was named for the gate but measured only framing, and
+  passed with the gate regressed from thirteen to nine. Both were fixed
+  or renamed. A test that cannot fail is worse than no test, because it
+  gets counted.
+
+  New §14.2.3 lists what is **not** testable and why, rather than giving
+  those cases a test that asserts its own fixture: `|1M` and `|1T`
+  differ only in how a reserved span is named, so no behaviour can tell
+  the readings apart; `|1w`'s handler body is a bare `break`; `|2W`
+  writes no file and changes no readable state, so its gate — real and
+  correct — has no observable.
+
+- **§14.2 now states how much corroboration each finding actually has.**
+  Only **four of the thirteen appear in shipped content at all**: `|1M`
+  (38 uses), `|1R` (25), `|1T` (12), `|2s` (3). The other nine have zero
+  corpus uses, so the dispatch record and handler body are the whole of
+  the argument — one line of evidence, not two, and a reader weighing
+  them should know which. Where corroboration exists it is decisive:
+  every `|1T` in the corpus is exactly ten characters and every `|2s` is
+  exactly three, which refutes the reference's six outright.
+
+- `design/bbs-land-issue-2-correction.md` — a ready-to-send correction to
+  the issue we filed upstream, which understates itself twice: the
+  `Switch*` finding covers six commands (slots 111, 112, 114, 118, 119,
+  121 all record `mega1 + mega2`), not just `|2s`, and `|3e` belongs in
+  the same desync class, making seven. It also records the three places
+  their reference was right and RIPlib was not — `|1M`'s clk/clr split,
+  `|1A` as `RIP_SelectArticle`, and `|F`'s wire layout — since the
+  original issue read one-directionally.
+
+### Fixed
+
+- `design/syntax-audit.md` filed `|3e` under "same total, different
+  subdivision" when driver `mega2` (2 chars) against the reference's `4`
+  is a *different* total. It belongs in the desync class, as the
+  divergence register has it — two of our own documents disagreed.
+
+### Added
+
 - **The wire compatibility contract is now written down and tested** —
   new §14.6 of the divergence register. Everything in §14.3 is a place
   RIPlib deliberately differs from the driver, which is only defensible
