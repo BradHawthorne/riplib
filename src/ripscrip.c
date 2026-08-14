@@ -4572,7 +4572,22 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
     /* -- Copy region (v2.0+) --------------------------------------------- */
     /* DLL command table entry 8: ',' = RIP_COPY_REGION (10 args: XY*10) */
-    case ',': /* RIP_COPY_REGION -- sx0:2 sy0:2 sx1:2 sy1:2 dx:2 dy:2 dx1:2 dy1:2 res:2 res:2 */
+    case ',': /* RIP_COPY_REGION -- sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY
+               *                   dx1:XY dy1:XY p4x:XY p4y:XY
+               *
+               * The trailing pair is NOT reserved.  Slot 8 (RVA 0x01D5C2)
+               * loads all ten arguments and passes FIVE pairs through the
+               * coordinate transform at 0x10031084 -- (a0,a1) (a2,a3)
+               * (a4,a5) (a6,a7) and (a8,a9) -- so the driver treats the
+               * last two as a coordinate pair like the rest, not as
+               * padding.  This comment called them 'res:2 res:2'.
+               *
+               * WHAT they mean is NOT established.  Five pairs for a
+               * region copy could be source rect, destination rect and an
+               * anchor, but that is a guess and guessing is what
+               * 14-divergence-register.md exists to prevent.  Recorded
+               * rather than invented; no shipped scene sends '|,' at all,
+               * so nothing observable depends on it today.  See 14.7. */
         if (len >= 20) {
             int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
             int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));

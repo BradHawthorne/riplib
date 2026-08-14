@@ -51,6 +51,26 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   against the handler's instructions. A recovered name tells you what a
   handler calls *itself*; it does not tell you what it *does*.
 
+- **`|,` RIP_COPY_REGION's trailing pair is a fifth coordinate pair, not
+  padding.** Slot 8 loads all ten arguments and passes **five** pairs
+  through the coordinate transform at `0x10031084` — `(a0,a1) (a2,a3)
+  (a4,a5) (a6,a7) (a8,a9)` — so the driver treats the last two as
+  coordinates like the rest. RIPlib's comment called them `res:2 res:2`
+  and the code ignores them. What they *mean* is not established: five
+  pairs for a region copy could be source rect, destination rect and an
+  anchor, but that is a guess, and guessing is what the register exists to
+  prevent. Recorded, not invented. No shipped scene sends `|,`.
+
+  `ref-compare.py` caught this edit mid-change: naming the fifth pair only
+  in prose left the signature at eight fields against a ten-field record,
+  and the tool refused it.
+
+- **The pattern across all eleven findings is one thing: a field this
+  project called RESERVED almost never is.** `|1I`'s stretch, the
+  `Switch*` protection flags, `|1W`'s two bits, `|,`'s fifth pair — every
+  one documented as padding, every one carrying meaning. "Reserved" has
+  been this codebase's word for "not looked at".
+
 - **Protection is now verified at both ends, and §14.7 overstated its own
   coverage.** Having found the *write* side (`|2A`'s flag bits calling
   `paletteSlotProtect`), the *read* side was read too: `|Q` RIP_SetPalette

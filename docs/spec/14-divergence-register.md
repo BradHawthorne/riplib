@@ -895,9 +895,33 @@ recorded as unimplemented features.  The hit rate justified the sweep.
 NEXT QUEUE -- the thirteen that draw and are unexercised, listed
 above.  '|Q' is done and produced the missing half of 14.3.6.  Twelve
 remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
-They are ordered by argument count in the queue, on the reasoning that
+     '|Q'  DONE.  Supplied the missing half of 14.3.6 -- the query at
+           0x10044508 and '|Q's refusal, "Can't modify current color
+           palette - its protected!".
+
+     '|,'  DONE, one finding.  The trailing pair is NOT reserved.  Slot
+           8 loads all ten arguments and passes FIVE pairs through the
+           coordinate transform at 0x10031084 -- (a0,a1) (a2,a3)
+           (a4,a5) (a6,a7) (a8,a9) -- so the driver treats the last two
+           as a coordinate pair like the rest.  RIPlib's comment called
+           them 'res:2 res:2' and the code ignores them.
+
+           WHAT they mean is not established.  Five pairs for a region
+           copy could be source rect, destination rect and an anchor,
+           but that is a guess.  Recorded, not invented.  No shipped
+           scene sends '|,', so nothing observable depends on it.
+
+     Ten remain: '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H'
+     '|T'.  Ordered by argument count, on the reasoning that
 a sixteen-field command has more room for a field-layout error than a
 zero-field one.
+
+Two of the thirteen audited, two findings.  The pattern across all
+eleven findings so far is one thing: a field this project called
+RESERVED almost never is.  '|1I's stretch, the Switch* protection
+flags, '|1W's two bits, '|,'s fifth pair -- every one was documented
+as padding and every one carries meaning.  "Reserved" has been this
+codebase's word for "not looked at".
 
 
 14.7.1  A CAVEAT ON HANDLER SELF-NAMING
