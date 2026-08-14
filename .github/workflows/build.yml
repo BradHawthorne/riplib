@@ -85,20 +85,36 @@ jobs:
         cd build-cov
         # Thresholds set just below current coverage so future commits
         # cannot meaningfully regress.  Bump after intentional gains.
+        #
+        # CALIBRATED 2026-08-14.  These were provisional -- deliberately set
+        # below likely coverage so they could not false-fail before anyone
+        # had measured the real numbers -- and the extracted modules had
+        # drifted absurdly far from reality: rip_variables was floored at 35
+        # while actually covering 82.48, so its coverage could have HALVED
+        # with CI still green.  A floor that far below the truth is not a
+        # guard, it is decoration.
+        #
+        # Measured with scripts/ci-local.sh (gcov, per file):
+        #   bgi_font 88.61  drawing 93.29  rip_icn 97.37  rip_icons 89.00
+        #   ripscrip 92.38  ripscrip2 92.49  rip_preproc 85.94
+        #   rip_variables 82.48  rip_clipboard 77.84
+        #
+        # Floors are measured-5, not the measured-3 this comment used to
+        # suggest, and never looser than before.  The extra margin is
+        # because those numbers come from a Cygwin gcc 15.2 and this job
+        # runs Ubuntu: small per-platform differences in which lines the
+        # optimiser keeps are expected, and a floor that fails only on the
+        # runner is worse than one that is two points generous.
         declare -A floors=(
-          [bgi_font]=82
-          [drawing]=85
+          [bgi_font]=83
+          [drawing]=88
           [rip_icn]=95
-          [rip_icons]=80
-          [ripscrip]=80
-          [ripscrip2]=85
-          # Extracted modules (C-002).  Provisional LOW floors (C-015): set
-          # below likely coverage so they catch real regressions without
-          # false-failing CI before the first green run calibrates them.
-          # Tighten to ~(measured - 3) once the actual percentages are known.
-          [rip_preproc]=60
-          [rip_variables]=35
-          [rip_clipboard]=50
+          [rip_icons]=84
+          [ripscrip]=87
+          [ripscrip2]=87
+          [rip_preproc]=80
+          [rip_variables]=77
+          [rip_clipboard]=72
         )
         fail=0
         for f in "${!floors[@]}"; do

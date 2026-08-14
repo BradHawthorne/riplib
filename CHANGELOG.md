@@ -169,6 +169,33 @@ produced them.
   so content relying on `|^`/`|~` to bracket a colour change should
   restore explicitly when targeting mixed audiences.
 
+- **Coverage floors calibrated against measured coverage.** They had been
+  provisional — deliberately set below likely coverage so they could not
+  false-fail before anyone had measured the real numbers — and the
+  extracted modules had drifted absurdly far from reality. `rip_variables`
+  was floored at 35% while actually covering 82.48%: **its coverage could
+  have halved with CI still green.** A floor that far below the truth is
+  decoration, not a guard.
+
+  New floors are `measured − 5`, never looser than before:
+  `bgi_font` 82→83, `drawing` 85→88, `rip_icons` 80→84, `ripscrip` 80→87,
+  `ripscrip2` 85→87, `rip_preproc` 60→80, `rip_variables` 35→77,
+  `rip_clipboard` 50→72 (`rip_icn` stays 95, already tight). The margin is
+  5 rather than the 3 the old comment suggested, because the measurements
+  come from a Cygwin gcc 15.2 while the job runs Ubuntu — a floor that
+  fails only on the runner is worse than one that is two points generous.
+  `ci-local.sh` cross-checks its copy against `build.yml`, so the two
+  cannot drift apart silently.
+
+- **The build is now warning-free.** The last one was a `-Warray-bounds` in
+  `test_fuzz_seeded.c`, reported only at `-O2` and above — GCC gives up
+  reconstructing that `o < cap` and reports the subscript range as
+  `[-3,-2]`, a wrapped `size_t` that a monotonically-incrementing counter
+  cannot reach. Rather than suppress it, the invariant is now stated in
+  one place instead of being emergent from three separate guards. A
+  standing warning is not free: it trains a reader to skim past
+  `-Warray-bounds`, and the next one might be real.
+
 - `scripts/ci-local.sh` — runs the CI workflow's jobs against the local
   toolchain. Added because the pipeline had gained a job that was never
   observed green: the doc checks were written, pushed, and taken on

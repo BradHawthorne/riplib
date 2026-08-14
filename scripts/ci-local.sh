@@ -151,7 +151,7 @@ job_coverage() {
     # the mismatch check below shouts if they drift apart.
     local names=(bgi_font drawing rip_icn rip_icons ripscrip ripscrip2
                  rip_preproc rip_variables rip_clipboard)
-    local floors=(82 85 95 80 80 85 60 35 50)
+    local floors=(83 88 95 84 87 87 80 77 72)
     local i failed=0
     for i in "${!names[@]}"; do
         local f="${names[$i]}" floor="${floors[$i]}"

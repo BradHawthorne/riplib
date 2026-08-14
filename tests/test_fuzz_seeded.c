@@ -137,6 +137,22 @@ static size_t build_long(char *out, size_t cap, char cmd, int nargs, int cont) {
         }
     }
     if (o + 1 < cap) out[o++] = '|';
+
+    /* o < cap holds here, but only as an EMERGENT property of three
+     * separate guards: cap >= 16 above, `o + 5 < cap` before a body that
+     * writes at most four bytes (so o <= cap-2 on exit), and `o + 1 < cap`
+     * before the terminator (so o <= cap-1).  Nothing states it in one
+     * place, and at -O2 and above GCC gives up reconstructing it and warns
+     * that this subscript may be out of bounds -- it reports the range as
+     * [-3,-2], which is a wrapped size_t and unreachable, since o starts
+     * at zero and only ever increments.
+     *
+     * The clamp below is therefore a no-op.  It is here because a standing
+     * warning is not free: it trains a reader to skim past -Warray-bounds,
+     * and the next one might be real.  Making the invariant explicit is
+     * also just better than leaving it to be re-derived from three
+     * conditions on every read. */
+    if (o >= cap) o = cap - 1;
     out[o] = '\0';
     return o;
 }
