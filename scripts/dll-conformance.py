@@ -176,7 +176,16 @@ def handler_bodies(lines, stop_at_break=True):
             if j > i - 1 and re.match(r"\s+case '.':", ln):
                 break
             body.append(ln)
-            if stop_at_break and re.match(r"\s+break;\s*$", ln):
+            # Stop at the case's OWN terminating break, not at an early exit
+            # inside a guard.  Matching any bare `break;` truncated the body
+            # at the first guard, hiding everything after it -- a two-line
+            # protection guard added to '|v' silently removed its `len >= 8`
+            # gate from the gate check, and the only reason the other
+            # eighteen guards did not do the same is that they happen to be
+            # written on one line.  A checker that depends on the formatting
+            # of the code it checks will lose coverage without saying so, so
+            # require the break to be at the case body's own indent level.
+            if stop_at_break and re.match(r"\s{8}break;\s*$", ln):
                 break
         txt = re.sub(r"/\*.*?\*/", "", "\n".join(body), flags=re.S)
         txt = re.sub(r"/\*.*", "", txt, flags=re.S)

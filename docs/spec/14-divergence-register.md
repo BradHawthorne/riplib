@@ -1094,6 +1094,45 @@ remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
      signatures on one handler, so any single line would misrepresent
      it; that is what the continuation rows in 12.11 exist to describe.
 
+14.7.3  THE CHECKERS' OWN COVERAGE
+
+     Having measured ref-compare.py's blind spots (14.7.2), the same
+     question was put to dll-conformance.py.  Its verbose output already
+     reported "9 without a numeric gate" -- nine commands whose length
+     gate it cannot verify -- and that number had never been read as a
+     coverage figure.
+
+     ONE OF THE NINE WAS A REGRESSION I HAD JUST INTRODUCED.  The
+     checker reads a handler body only as far as a bare `break;`, and
+     the protection guard added to '|v' was written across two lines:
+
+          if (... & RIP_PORT_FLAG_PROTECTED)
+              break;
+
+     so the body it saw ENDED at that break and the `len >= 8` gate
+     below became invisible.  The eighteen other guards escaped only
+     because they happen to be written on one line.  A checker that
+     depends on the formatting of the code it checks loses coverage
+     without saying so.
+
+     Both halves fixed: the guard is one line like the rest, and the
+     extractor now requires the break to be at the case body's own
+     indent rather than matching any bare `break;`.  Gate coverage went
+     72 to 73 and read-offset coverage 69 commands to 70.
+
+     THE REMAINING EIGHT ARE NOT DEFECTS, and are listed so the number
+     is not read as one:
+
+          |O            falls through to '|V', where the gate lives
+          |3G |1R |3R   gate inside a shared helper
+          |x |z |t      the poly-bezier family, which dispatches BY
+                        length across several accepted signatures, so a
+                        single numeric gate would be wrong
+          |1t           the record needs one character
+
+     They are reported rather than suppressed because a suppressed
+     exception is indistinguishable from a check that passed.
+
 14.7.1  A CAVEAT ON HANDLER SELF-NAMING
 
      14.5 calls a name recovered from a handler's own error path

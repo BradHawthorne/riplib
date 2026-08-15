@@ -4168,8 +4168,13 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                * -- so guarding on the old flag would have refused content the
                * driver renders, and nothing would have caught it, since
                * protection is inert until content opts in. */
-        if (s->ports[s->active_port].flags & RIP_PORT_FLAG_PROTECTED)
-            break;
+        /* One line, deliberately.  dll-conformance.py reads a handler body
+         * only as far as a bare `break;` on its own line, so writing this
+         * guard across two lines hid the `len >= 8` gate below it from the
+         * gate check -- a guard I added silently reduced a checker's
+         * coverage.  Every other protection guard in this file is one line
+         * for the same reason. */
+        if (s->ports[s->active_port].flags & RIP_PORT_FLAG_PROTECTED) break;
         if (len >= 8) {
             int16_t vx0 = mega2(p), vy0 = mega2(p + 2);
             int16_t vx1 = mega2(p + 4), vy1 = mega2(p + 6);

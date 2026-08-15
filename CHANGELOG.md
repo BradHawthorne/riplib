@@ -66,6 +66,28 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
+- **A protection guard I added had silently reduced a checker's coverage.**
+  `dll-conformance.py` reads a handler body only as far as a bare `break;`,
+  and the `|v` guard was written across two lines — so the body it saw
+  ended at that break and the `len >= 8` gate below became invisible. The
+  eighteen other guards escaped only because they happen to be on one line.
+
+  Found by turning the `ref-compare` question on the next tool: its verbose
+  output already said "9 without a numeric gate", and that number had never
+  been read as a *coverage* figure. Both halves fixed — the guard matches
+  the one-line convention, and the extractor now requires the break at the
+  case body's own indent rather than matching any bare `break;`, so the
+  checker no longer depends on the formatting of the code it checks. Gate
+  coverage 72 → **73**, read-offset coverage 69 → **70** commands.
+
+  **The remaining eight are not defects** and are listed in §14.7.3 so the
+  number isn't read as one: `|O` falls through to `|V` where the gate
+  lives; `|3G` `|1R` `|3R` gate inside a shared helper; `|x` `|z` `|t` are
+  the poly-bezier family, which dispatches *by* length across several
+  accepted signatures so a single numeric gate would be wrong; `|1t` needs
+  one character. They're reported rather than suppressed, because a
+  suppressed exception is indistinguishable from a check that passed.
+
 - **Three more commands were already documented, just unreadably placed.**
   `|1U`, `|1B` and `|s` each carried a full field list two or three lines
   into their comment, where the extractor stops at the preceding sentence
