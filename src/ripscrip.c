@@ -3754,8 +3754,14 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 }
             }
             break;
-        case 0x1B: /* RIP_QUERY (ESC char) — query/send text variable.
-                    * Format: flags:3 res:2 varname
+        case 0x1B: /* rip_query -- mode:1 target:1 res:2 varname
+                    *
+                    * Query/send a text variable.  Slot 85 records
+                    * mega1 + mega1 + mega2, so the fixed prefix is FOUR
+                    * characters.  This line read "flags:3 res:2 varname"
+                    * and the code read from offset five, which swallowed
+                    * the leading '$' of every name.
+                    *
                     * Recognized variables: $APP0$-$APP9$, $OVERFLOW$,
                     *   $OVERFLOW(NEXT)$, $OVERFLOW(PREV)$, $OVERFLOW(RESET)$
                     *
@@ -3769,10 +3775,32 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     *   3. Do NOT send a response to the BBS yet; wait for the host
                     *      to send response bytes via rip_query_response_byte().
                     * If the variable already has content, return it immediately
-                    * (BBS is just querying a stored value, not requesting input). */
-            if (len >= 5) {
-                const char *vname = p + 5;
-                int vlen = len - 5;
+                    * (BBS is just querying a stored value, not requesting input).
+                    *
+                    * CORRECTED 2026-08-15.  The fixed prefix is FOUR
+                    * characters, not five.  Reading five swallowed the
+                    * leading '$' of every variable name -- "0000$DTW$" was
+                    * parsed as "DTW$" -- so every vname[0] == '$' test below
+                    * failed and the query silently did nothing.
+                    *
+                    * Two independent confirmations.  Slot 85 records
+                    * mega1 + mega1 + mega2 = four.  And all EIGHTY
+                    * '|1<ESC>' commands in the shipped corpus carry exactly
+                    * four leading characters before the name: "0000$DTW$",
+                    * "0000$COMPAT$", "0000$SBAROFF$".
+                    *
+                    * It survived because ref-compare.py could not see it:
+                    * the extractor matches `case 'X':` and this arm is
+                    * `case 0x1B:`, so the Level 1 command with the MOST
+                    * corpus traffic was the one the comparison skipped.
+                    *
+                    * '|1Q' RIP_QUERY_EXT below keeps its five-character
+                    * prefix: it has no dispatch entry at all, so that width
+                    * is RIPlib's own convention rather than a record to
+                    * conform to. */
+            if (len >= 4) {
+                const char *vname = p + 4;
+                int vlen = len - 4;
                 char resp[64];
                 int rlen = 0;
 
@@ -3865,9 +3893,29 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                             if (rlen > (int)sizeof(resp))
                                 rlen = (int)sizeof(resp);
                             memcpy(resp, s->user_var_values[uidx], (size_t)rlen);
-                        } else if (rip_query_prompt_begin(s, vname, vlen)) {
-                            rlen = -1;
                         } else {
+                            /* UNDEFINED variable: say nothing.  Do NOT prompt.
+                             *
+                             * This branch used to call
+                             * rip_query_prompt_begin(), asking the host to
+                             * put up an input form for any name it did not
+                             * recognise.  With the offset bug above that
+                             * never fired; correcting the offset fired it
+                             * eighty times across eleven corpus scenes.
+                             *
+                             * It is wrong independently of the harness.  The
+                             * names shipped content actually queries --
+                             * $DTW$, $COMPAT$, $SBAROFF$ -- are CAPABILITY
+                             * queries, and the driver carries "DTW",
+                             * "COMPAT" and "SBAROFF" as known strings.  A
+                             * terminal answers those from its own state; it
+                             * does not interrupt the user to ask what DTW
+                             * should be.
+                             *
+                             * RIPlib implements none of them, so it has
+                             * nothing to say and says nothing.  Prompting is
+                             * reserved for variables the STREAM defined,
+                             * which is the '$APPn$' path above. */
                             rlen = 0;
                         }
                     } else {

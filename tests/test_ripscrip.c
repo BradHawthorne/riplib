@@ -1250,6 +1250,47 @@ static void test_slot_protection_round_trip(void) {
     else FAIL("|W still refused after unprotecting");
 }
 
+static void test_query_prefix_is_four(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|1<ESC> query prefix is 4 chars; the '$' is not swallowed");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    /* Slot 85 records mega1 + mega1 + mega2 = FOUR fixed characters, and
+     * all eighty '|1<ESC>' commands in the shipped corpus agree:
+     * "0000$DTW$", "0000$COMPAT$", "0000$SBAROFF$".
+     *
+     * RIPlib read from offset five, so "0000$APP0$" arrived as "APP0$" and
+     * every vname[0] == '$' test failed.  Set an app variable, then query
+     * it: the response only comes back if the name parsed. */
+    feed_script(&s, &ctx, "!|1D00000$APP0$=hello|\r\n");
+    tx_reset();
+    feed_script(&s, &ctx, "!|1\x1b" "0000$APP0$|\r\n");
+    if (tx_len >= 5 && memcmp(tx_capture, "hello", 5) == 0) PASS();
+    else FAIL("|1<ESC> did not resolve $APP0$ -- prefix width is wrong");
+}
+
+static void test_query_unknown_variable_is_silent(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("|1<ESC> says nothing for a variable it does not implement");
+    init_fixture(&s, &ctx);
+    tx_reset();
+    /* $DTW$, $COMPAT$ and $SBAROFF$ are CAPABILITY queries -- the driver
+     * carries "DTW", "COMPAT" and "SBAROFF" as known strings and answers
+     * them from its own state.  RIPlib implements none of them.
+     *
+     * It used to ask the HOST to put up an input form for any name it did
+     * not recognise.  With the offset bug that never fired; correcting the
+     * offset fired it eighty times across eleven corpus scenes.  A terminal
+     * does not interrupt the user to ask what DTW should be. */
+    feed_script(&s, &ctx, "!|1\x1b" "0000$DTW$|\r\n");
+    if (tx_len == 0) PASS();
+    else FAIL("|1<ESC> prompted the host for an unimplemented capability");
+}
+
 static void test_zero_viewport_suppresses_drawing(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -6276,6 +6317,8 @@ int main(void) {
     test_l1_audio_pushes_marker();
     test_l1_audio_off_sentinel();
     test_slot_protection_round_trip();
+    test_query_prefix_is_four();
+    test_query_unknown_variable_is_silent();
     test_zero_viewport_suppresses_drawing();
     test_port0_permanent_is_not_protected();
     test_l1_file_query_mode_bound();

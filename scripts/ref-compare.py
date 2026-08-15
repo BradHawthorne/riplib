@@ -62,7 +62,12 @@ def load_driver(dll):
         raw = d[base + i * STRIDE: base + (i + 1) * STRIDE]
         letter = raw[15]
         argc = struct.unpack_from("<i", raw, 16)[0]
-        if not (0x20 <= letter < 0x7F):
+        # ESC (0x1B) is a real command letter, not padding.  Filtering on
+        # printability dropped it from the driver side, which -- together
+        # with the `case 'X':` extractor on the RIPlib side -- meant
+        # '|1<ESC>' was invisible to this comparison from both directions
+        # at once.  It is the Level 1 command with the most corpus traffic.
+        if letter != 0x1B and not (0x20 <= letter < 0x7F):
             continue
         types = []
         for b in raw[20:38]:
@@ -146,11 +151,21 @@ def load_riplib():
             return 0
         return None
 
+    # `case 0x1B:` is the ESC command and must be matched too.  Matching only
+    # `case 'X':` skipped it -- and '|1<ESC>' is the Level 1 command with the
+    # MOST corpus traffic (80 uses), so the one command this comparison could
+    # not see was the one shipped content exercises hardest.  It carried a
+    # five-character prefix against the record's four for months.
     out = {}
     for i, line in enumerate(lines, 1):
         mt = re.match(r"\s+case '(.)':(.*)", line)
         if not mt:
-            continue
+            me = re.match(r"\s+case 0x1[Bb]:(.*)", line)
+            if me:
+                mt = type("M", (), {"group": lambda self, n: "\x1b" if n == 1
+                                    else me.group(1)})()
+            else:
+                continue
         lvl = level_at(i)
         if lvl is None:
             continue

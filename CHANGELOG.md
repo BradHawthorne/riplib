@@ -66,6 +66,31 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
+- **`|1<ESC>` read a five-character prefix where the record says four —
+  and it is the Level 1 command with the MOST corpus traffic.** Slot 85
+  records `mega1 + mega1 + mega2` = 4. All **eighty** `|1<ESC>` commands in
+  the shipped corpus agree: `0000$DTW$`, `0000$COMPAT$`, `0000$SBAROFF$`.
+  Reading five swallowed the leading `$`, so `0000$APP0$` arrived as
+  `APP0$`, every `vname[0] == '$'` test failed, and every query silently did
+  nothing.
+
+  **`ref-compare.py` could not see it, from both directions at once**: the
+  RIPlib extractor matched `case 'X':` and this arm is `case 0x1B:`, while
+  the driver loader filtered letters to `0x20..0x7E` and dropped ESC. So
+  the command shipped content exercises hardest was the one the comparison
+  structurally could not compare. Both halves fixed — the comparison now
+  covers **55** commands, up from 54.
+
+- **Correcting that offset exposed a second bug it had been masking.** With
+  queries working, eleven corpus scenes started sending host traffic: RIPlib
+  asked the host to display an **input form** for any variable it did not
+  recognise. That is wrong independently of the corpus harness — `$DTW$`,
+  `$COMPAT$` and `$SBAROFF$` are *capability* queries, and the driver
+  carries `DTW`, `COMPAT` and `SBAROFF` as known strings it answers from its
+  own state. A terminal does not interrupt the user to ask what DTW should
+  be. RIPlib implements none of them, so it now says nothing. Prompting is
+  reserved for variables the stream defined, which is the `$APPn$` path.
+
 - **The port-flag bit 1 observation is resolved: it is an empty-region
   marker.** Every drawing command calls `0x1003445B` first, which reads the
   same byte as `|v`'s protection query (`+0x17`) but tests **bit 1**, and
