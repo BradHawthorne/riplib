@@ -66,6 +66,23 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
+- **`|L` — the most-used command in the corpus — was invisible to the
+  comparison.** 7565 occurrences, and no machine-readable signature, so
+  `ref-compare.py` could not extract or check it. Together with `|1<ESC>`
+  (80 uses, fixed last commit) that makes **both of the two
+  highest-traffic commands** unseen by the tool meant to check them.
+
+  Five now have signatures — `|L` `|c` `|R` `|B` `|o` — taking coverage
+  from 64 to **69**. All five agree with the record.
+
+  Each signature describes **what the code reads**, not what the record
+  says. Copying the record into the comment would make the comparison
+  agree with itself and report coverage while checking nothing. That is
+  also why the remaining **thirty** are being done one at a time, as each
+  command is next touched and its handler actually read — a sweep would
+  put thirty unverified field lists into the tree and call it
+  verification.
+
 - **The comparison's blind spots were measured instead of waited for.**
   The `|1<ESC>` bug survived because `ref-compare.py` could not see that
   command from either side. Rather than treat that as bad luck, the tool's

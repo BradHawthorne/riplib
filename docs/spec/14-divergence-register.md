@@ -1059,19 +1059,28 @@ remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
      0 and 1, reintroduced in the new code path.  A lesson learned in one
      function does not transfer to the next one by itself.
 
-     THIRTY-FIVE REMAIN INVISIBLE and are listed so the number is not
-     mistaken for zero:
+     THIRTY REMAIN INVISIBLE, listed so the number is not mistaken for
+     zero:
 
-          |: |A |B |C |I |L |O |Q |R |V |` |a |c |g |h |i |m |o |s
-          |t |v |w |x |y |z |{ |1B |1U |1b |1e |1t |2ESC |2R |2s |3ESC
+          |: |A |C |I |O |Q |V |` |a |g |h |i |m |s |t |v |w |x |y |z
+          |{ |1B |1U |1b |1e |1t |2ESC |2R |2s |3ESC
 
-     These are not filtered out; their RIPlib comments simply do not
+     They are not filtered out; their RIPlib comments simply do not
      carry a machine-readable name:width signature on the lines the
-     extractor reads.  That is a documentation-shape problem rather than
-     a tooling one, and the fix is to give those comments the same
-     signature line the other 64 have -- one command at a time, when each
-     is next touched, rather than in a sweep that would put 35 unverified
-     field lists into the tree at once.
+     extractor reads.  Five were given one on 2026-08-15 -- '|L' '|c'
+     '|R' '|B' '|o' -- taking coverage from 64 to 69, and '|L' is worth
+     naming: 7565 occurrences, the most-used command in the shipped
+     corpus, invisible to the comparison until then.  The two commands
+     with the highest corpus traffic, '|L' and '|1<ESC>', were both
+     unseen by the tool meant to check them.
+
+     THE SIGNATURE MUST DESCRIBE WHAT THE CODE READS, not what the
+     record says.  Copying the record into the comment would make the
+     comparison agree with itself and report coverage while checking
+     nothing.  That is why the remaining thirty are being done one at a
+     time, as each command is next touched and its handler actually
+     read, rather than in a sweep -- a sweep would put thirty
+     unverified field lists into the tree and call it verification.
 
 14.7.1  A CAVEAT ON HANDLER SELF-NAMING
 

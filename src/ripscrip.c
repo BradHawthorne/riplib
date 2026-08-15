@@ -3954,7 +3954,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* ── Drawing state ───────────────────────────────────────── */
-    case 'c': /* RIP_COLOR */
+    case 'c': /* RIP_COLOR -- color:CM */
         if (RIP_STYLE_PROTECTED(s)) break;   /* protected slot: driver refuses */
         if (len >= 2) s->draw_color = mega2(p) & 0x0F;
         break;
@@ -4200,7 +4200,16 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* ── Line ────────────────────────────────────────────────── */
-    case 'L': /* RIP_LINE */
+    case 'L': /* RIP_LINE -- x0:XY y0:XY x1:XY y1:XY
+               *
+               * The signature line above is not decoration: without one,
+               * ref-compare.py cannot extract this command and cannot
+               * compare it against the record.  '|L' is the most-used
+               * command in the shipped corpus -- 7565 occurrences -- and
+               * was invisible to that comparison until 2026-08-15, exactly
+               * as '|1<ESC>' was.  It describes what the CODE READS, which
+               * is the only way the comparison means anything; copying the
+               * record here would make it agree with itself. */
         if (len >= 8) {
             int16_t x0 = mega2(p), y0 = scale_y(mega2(p + 2));
             int16_t x1 = mega2(p + 4), y1 = scale_y(mega2(p + 6));
@@ -4212,7 +4221,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* ── Rectangle ───────────────────────────────────────────── */
-    case 'R': /* RIP_RECTANGLE (outline) */
+    case 'R': /* RIP_RECTANGLE -- x0:XY y0:XY x1:XY y1:XY (outline) */
         if (len >= 8) {
             int16_t x0 = mega2(p), y0 = scale_y(mega2(p + 2));
             int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
@@ -4221,7 +4230,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                       (int16_t)(y1 - y0 + 1), false);
         }
         break;
-    case 'B': /* RIP_BAR (filled rectangle, no border) — uses fill style */
+    case 'B': /* RIP_BAR -- x0:XY y0:XY x1:XY y1:XY (filled, no border) */
         if (len >= 8) {
             int16_t x0 = mega2(p), y0 = scale_y(mega2(p + 2));
             int16_t x1 = mega2(p + 4), y1 = scale_y1(mega2(p + 6));
@@ -4273,7 +4282,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             draw_elliptical_arc(cx, cy, rx, ry, sa, ea);
         }
         break;
-    case 'o': /* v1.54 spec: '|o' = RIP_FILLED_OVAL — filled ellipse (full 360°).
+    case 'o': /* RIP_FILLED_OVAL -- cx:XY cy:XY x_rad:XY y_rad:XY
+               *
+               * Filled ellipse, full 360 degrees; no angle arguments.
                * Args: cx:2 cy:2 x_rad:2 y_rad:2 (4 params, 8 chars). No angle args.
                * IcyTerm: FilledOval { x, y, x_rad, y_rad } — parse_params.rs line 248.
                * Note: previous code had O/o swapped, mapping o to oval-arc (wrong). */
