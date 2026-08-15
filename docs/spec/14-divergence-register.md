@@ -982,10 +982,36 @@ remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
            All four validations and the protection guard are implemented
            now, making '|b' the twenty-fourth enforcement site.
 
-     Ten remain: '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H'
-     '|T'.  Ordered by argument count, on the reasoning that
-a sixteen-field command has more room for a field-layout error than a
-zero-field one.
+     THE REMAINING TEN ARE AUDITED AND CLEAR: '|.' '|{' '|A' '|I' '|C'
+     '|g' '|m' '|>' '|H' '|T'.
+
+     None of them pushes a diagnostic string, which matches their
+     unnamed rows in segment 13 and means there is no bounds check or
+     protection refusal for RIPlib to be missing -- the whole class of
+     finding that '|1F', '|1I' and '|b' produced cannot exist here.
+     '|.' and '|{' each transform three coordinate pairs and draw;
+     ref-compare.py already confirms every field count and width against
+     the record.
+
+     What remains unsettled for them is which coordinate means what
+     within a set -- whether six arguments are three points or a centre
+     plus radii plus angles.  Settling that needs each transform's
+     consumers traced, and the expected yield is low: there is no
+     diagnostic to contradict a wrong reading, no corpus scene to render
+     one wrongly, and no host traffic to emit.  The cheap evidence is
+     exhausted, and saying so is better than grinding on and reporting
+     the grind as coverage.
+
+     ONE OBSERVATION FELL OUT, and is recorded rather than chased.  The
+     drawing commands call 0x1003445B before doing anything, which reads
+     the SAME port-flag byte as '|v's protection query -- <inst>+0x22,
+     stride 0x78, +0x17 -- but tests BIT 1 rather than bit 0, and every
+     caller returns early when it is set.  So that byte carries at least
+     two meanings: bit 0 protects, bit 1 suppresses drawing.  RIPlib's
+     bit 1 is RIP_PORT_FLAG_FULLSCREEN, which is a different thing.
+     Establishing what sets bit 1 would need the writers found, and no
+     shipped content exercises it.  Logged so it is not rediscovered as
+     if new.
 
 Two of the thirteen audited, two findings.  The pattern across all
 eleven findings so far is one thing: a field this project called

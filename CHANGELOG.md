@@ -51,6 +51,30 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   against the handler's instructions. A recovered name tells you what a
   handler calls *itself*; it does not tell you what it *does*.
 
+- **The handler audit is complete: 23 handlers, six findings.** The last
+  ten — `|.` `|{` `|A` `|I` `|C` `|g` `|m` `|>` `|H` `|T` — are clear.
+  None pushes a diagnostic string, matching their unnamed rows in segment
+  13, which means there is no bounds check or protection refusal to be
+  missing: the whole class of finding that `|1F`, `|1I` and `|b` produced
+  cannot exist for them.
+
+  What stays unsettled is which coordinate means what *within* a set —
+  whether six arguments are three points or a centre plus radii plus
+  angles. Settling that needs each transform's consumers traced, and the
+  expected yield is low: no diagnostic to contradict a wrong reading, no
+  corpus scene to render one wrongly, no host traffic to emit. **The cheap
+  evidence is exhausted, and saying so beats grinding on and reporting the
+  grind as coverage.**
+
+- **One observation logged rather than chased.** The drawing commands call
+  `0x1003445B` first, which reads the *same* port-flag byte as `|v`'s
+  protection query (`<inst>+0x22`, stride `0x78`, `+0x17`) but tests **bit
+  1**, and every caller returns early when it is set. So that byte carries
+  at least two meanings — bit 0 protects, bit 1 suppresses drawing.
+  RIPlib's bit 1 is `RIP_PORT_FLAG_FULLSCREEN`, which is a different
+  thing. Finding what sets bit 1 needs the writers located, and no shipped
+  content exercises it.
+
 - **`|b` RIP_ExtendedTextWindow had three fields misidentified** — the
   largest field finding of the audit. Slot 20 names itself in five
   diagnostics and validates four fields: flags `> 0x3FF` → "Flags value is
