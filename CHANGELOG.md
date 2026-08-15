@@ -51,6 +51,30 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   against the handler's instructions. A recovered name tells you what a
   handler calls *itself*; it does not tell you what it *does*.
 
+- **`|b` RIP_ExtendedTextWindow had three fields misidentified** — the
+  largest field finding of the audit. Slot 20 names itself in five
+  diagnostics and validates four fields: flags `> 0x3FF` → "Flags value is
+  out of range"; font `>= 5` (unless flags bit 3) → "Font number is out of
+  range"; `args[4] == 0` → **"Zero width value is not allowed"**;
+  `args[5] == 0` → **"Zero height value is not allowed"**. Then it queries
+  text-window protection.
+
+  RIPlib read `args[4]`/`args[5]` as foreground and background **colours**
+  and `args[7]` as a font **size**. They are a cell width, a cell height,
+  and the flags word. A colour index does not produce "Zero width value is
+  not allowed" — that one string unpicked three fields at once.
+
+  Nothing rendered from it: `etw_fore_col`/`etw_back_col` were written here
+  and read nowhere, and no corpus scene sends `|b`. All four validations
+  and the protection guard are implemented, making `|b` the **24th**
+  enforcement site.
+
+  **The test was wrong in the same direction as the parser.** It asserted
+  `etw_fore_col == 15`, and its payload carried `height = 00` — so under
+  the corrected reading the driver would refuse the very command the test
+  called success. A test written from the same mistaken premise as the code
+  confirms the premise, not the code.
+
 - **`|,` RIP_COPY_REGION's trailing pair is a fifth coordinate pair, not
   padding.** Slot 8 loads all ten arguments and passes **five** pairs
   through the coordinate transform at `0x10031084` — `(a0,a1) (a2,a3)

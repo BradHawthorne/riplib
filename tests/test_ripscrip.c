@@ -4142,12 +4142,38 @@ static void test_ext_poly_marker_rejects_bad_fields(void) {
 
 static void test_ext_ext_text_window_b(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|b activates extended text window");
+    TEST("|b takes a cell width/height, not fore/back colours");
     init_fixture(&s, &ctx);
-    /* x0:2 y0:2 x1:2 y1:2 fore:2 back:2 font:1 size:4 flags:3 = 18 */
-    feed_script(&s, &ctx, "!|b05050F0F0F00000A04000|");
-    if (s.tw_active && s.etw_fore_col == 15) PASS();
-    else FAIL("|b did not activate ext text window");
+    /* x0:XY y0:XY x1:XY y1:XY width:2 height:2 font:1 flags:4 res:3 = 20.
+     *
+     * This test asserted etw_fore_col == 15 until 2026-08-14, encoding the
+     * same misreading as the parser: args[4]/args[5] were taken for
+     * foreground and background colours.  Slot 20 refuses either being zero
+     * with "Zero width value is not allowed" / "Zero height value is not
+     * allowed", which is not something a colour index says.  The old payload
+     * even carried height = 00, so under the corrected reading the driver
+     * would have refused the very command the test called success. */
+    feed_script(&s, &ctx, "!|b05050F0F0F0F00000000|");
+    if (!s.tw_active) {
+        FAIL("|b did not activate the extended text window"); return;
+    }
+    if (s.etw_cell_w != 15 || s.etw_cell_h != 15) {
+        FAIL("|b did not take width/height from args[4]/args[5]"); return;
+    }
+
+    /* A zero height is refused outright, not clamped. */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|b05050F0F0F0000000000|");
+    if (s.tw_active) {
+        FAIL("|b accepted a zero height"); return;
+    }
+
+    /* Flags above 0x3FF are refused: "Flags value is out of range".
+     * mega4("0154") = 1*46656/36... use a value comfortably over 1023. */
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|b05050F0F0F0F00ZZZZ000|");
+    if (!s.tw_active) PASS();
+    else FAIL("|b accepted an out-of-range flags word");
 }
 
 /* Commands recovered from the driver's dispatch table 2026-08-12, completing

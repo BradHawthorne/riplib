@@ -460,10 +460,23 @@ struct rip_state_s {
      * cannot be zero!"). 0 means "never set". */
     uint16_t char_spacing;
 
-    /* Extended text window state (RIP_EXT_TEXT_WINDOW 'b') */
+    /* Extended text window state (RIP_EXT_TEXT_WINDOW 'b')
+     *
+     * CORRECTED 2026-08-14.  args[4] and args[5] were read as foreground and
+     * background colours.  They are a CELL WIDTH and HEIGHT: slot 20's
+     * handler rejects either being zero with "Zero width value is not
+     * allowed" / "Zero height value is not allowed", which is not something
+     * a colour index would say.  args[7] was read as a font size; it is the
+     * FLAGS word, bounded to 0x3FF with "Flags value is out of range".
+     *
+     * Nothing rendered from the mistake -- etw_fore_col and etw_back_col
+     * were written here and read nowhere -- and no corpus scene sends '|b',
+     * so the correction is inert.  It is still a correction: the fields now
+     * hold what the driver says they hold. */
     uint8_t  etw_font_id;    /* Font ID for extended text window */
-    uint8_t  etw_fore_col;   /* Foreground color index */
-    uint8_t  etw_back_col;   /* Background color index */
+    uint16_t etw_cell_w;     /* Cell width  (args[4]); zero is refused */
+    uint16_t etw_cell_h;     /* Cell height (args[5]); zero is refused */
+    uint32_t etw_flags;      /* args[7], bounded to 0x3FF by the driver */
 
     /* Text window */
     int16_t  tw_x0, tw_y0, tw_x1, tw_y1;

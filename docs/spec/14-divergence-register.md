@@ -952,7 +952,37 @@ remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
            but that is a guess.  Recorded, not invented.  No shipped
            scene sends '|,', so nothing observable depends on it.
 
-     Ten remain: '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H'
+     '|b'  DONE, and the largest field finding of the audit.  Slot 20
+           names itself RIP_ExtendedTextWindow() in five diagnostics and
+           validates four fields:
+
+                args[7] > 0x3FF   "Flags value is out of range"
+                args[6] >= 5      "Font number is out of range"
+                                  (unless flags bit 3 is set)
+                args[4] == 0      "Zero width value is not allowed"
+                args[5] == 0      "Zero height value is not allowed"
+
+           then queries text-window protection at 0x10027642.
+
+           RIPlib read args[4] and args[5] as FOREGROUND and BACKGROUND
+           COLOURS and args[7] as a font SIZE.  They are a cell width, a
+           cell height and the flags word.  A colour index does not
+           produce "Zero width value is not allowed", and that single
+           string is what unpicked three fields at once.
+
+           Nothing rendered from the mistake: etw_fore_col and
+           etw_back_col were written here and read nowhere, and no
+           corpus scene sends '|b'.  The TEST was wrong in the same
+           direction as the parser -- it asserted etw_fore_col == 15,
+           and its payload carried height = 00, so under the corrected
+           reading the driver would refuse the very command the test
+           called success.  A test written from the same mistaken
+           premise as the code confirms the premise, not the code.
+
+           All four validations and the protection guard are implemented
+           now, making '|b' the twenty-fourth enforcement site.
+
+     Ten remain: '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H'
      '|T'.  Ordered by argument count, on the reasoning that
 a sixteen-field command has more room for a field-layout error than a
 zero-field one.

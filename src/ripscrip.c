@@ -5248,7 +5248,31 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
     /* ── Extended text window (v2.0+) ───────────────────────── */
     /* DLL command table entry 20: 'b' = RIP_EXT_TEXT_WINDOW
      * (9 args: XY,XY,XY,XY,2,2,1,4,3). */
-    case 'b': /* RIP_EXT_TEXT_WINDOW — x0:2 y0:2 x1:2 y1:2 fore:2 back:2 font:1 size:4 flags:3 */
+    case 'b': /* RIP_EXT_TEXT_WINDOW -- x0:XY y0:XY x1:XY y1:XY
+               *                        width:2 height:2 font:1 flags:4 res:3
+               *
+               * The driver spells it RIP_ExtendedTextWindow; the upper-snake
+               * form is RIPlib's convention and the difference is cosmetic
+               * (14-divergence-register.md 14.5).
+               *
+               * CORRECTED 2026-08-14 from slot 20's handler (RVA 0x01B075),
+               * which names itself RIP_ExtendedTextWindow() in five separate
+               * diagnostics and validates four fields:
+               *
+               *     args[7] > 0x3FF        "Flags value is out of range"
+               *     args[6] >= 5           "Font number is out of range"
+               *       (unless flags bit 3 is set)
+               *     args[4] == 0           "Zero width value is not allowed"
+               *     args[5] == 0           "Zero height value is not allowed"
+               *   then the text-window protection query at 0x10027642,
+               *                            "Can't modify current text window"
+               *
+               * This table read args[4]/args[5] as foreground and background
+               * COLOURS and args[7] as a font SIZE.  A colour index does not
+               * produce "Zero width value is not allowed".  Nothing rendered
+               * from the mistake -- both colour fields were write-only -- and
+               * no corpus scene sends '|b'. */
+        if (RIP_TEXTWIN_PROTECTED(s)) break;   /* protected slot */
         if (len >= 20) {
             int16_t tw_x0 = mega2(p);
             int16_t tw_y0 = mega2(p + 2);
@@ -5259,11 +5283,24 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->tw_y0        = tw_y0;
             s->tw_x1        = tw_x1;
             s->tw_y1        = tw_y1;
-            s->etw_fore_col = mega2(p + 8)  & 0x0F;
-            s->etw_back_col = mega2(p + 10) & 0x0F;
-            s->etw_font_id  = mega_digit(p[12]);
-            /* size:4 at p+13 — stored in font_ext_size; flags:3 at p+17 reserved */
-            s->font_ext_size = (uint32_t)(mega4(p + 13));
+            {
+                uint16_t w  = (uint16_t)mega2(p + 8);
+                uint16_t h  = (uint16_t)mega2(p + 10);
+                uint8_t  fn = (uint8_t)mega_digit(p[12]);
+                uint32_t fl = (uint32_t)mega4(p + 13);
+
+                /* The driver's own order: flags, then font, then width,
+                 * then height.  Each refuses the whole command rather than
+                 * clamping, so RIPlib does the same. */
+                if (fl > 0x3FF)              break;
+                if (fn >= 5 && !(fl & 0x08)) break;
+                if (w == 0 || h == 0)        break;
+
+                s->etw_cell_w  = w;
+                s->etw_cell_h  = h;
+                s->etw_font_id = fn;
+                s->etw_flags   = fl;
+            }
             s->tw_cur_x = s->tw_x0;
             s->tw_cur_y = scale_y(s->tw_y0);
             s->tw_active = true;
