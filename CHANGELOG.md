@@ -66,6 +66,21 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
+- **The `|b` correction never reached the published spec.** Two commits
+  after fixing the parser, `docs/spec/04-extended-commands.md` §4.16 still
+  read `fore:2 back:2 ... size:4` — the exact misreading that commit
+  removed from the code. Corrected to `width:2 height:2 ... flags:4`, with
+  the four driver validations and the reason recorded, plus a worked
+  example so the widths are now machine-checked rather than merely
+  asserted.
+
+  Found by asking the last unexamined denominator — `check-spec-examples`
+  reports **121 skips**, of which **75** are blocks with no worked example
+  at all, so their widths are never validated against a concrete instance.
+  Listing the 42 whose field split is *already* anchored to the record
+  surfaced `|b` immediately: its split matched while its **names** were
+  wrong, which is exactly the gap a split check cannot see.
+
 - **A protection guard I added had silently reduced a checker's coverage.**
   `dll-conformance.py` reads a handler body only as far as a bare `break;`,
   and the `|v` guard was written across two lines — so the body it saw

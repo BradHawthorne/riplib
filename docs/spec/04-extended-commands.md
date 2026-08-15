@@ -349,22 +349,38 @@ increasing point count (28 through 34), 462 points in total.
 
      Function:     Extended Text Window
      Command:      |b
-     Arguments:    x0:2 y0:2 x1:2 y1:2 fore:2 back:2
-                   font:1 size:4 flags:3
-     Format:       !|b<x0><y0><x1><y1><fore><back><font><size><flags>|
+     Arguments:    x0:XY y0:XY x1:XY y1:XY width:2 height:2
+                   font:1 flags:4 res:3
+     Format:       !|b<x0><y0><x1><y1><width><height><font><flags><res>|
+     Example:      !|b00000A0A0F0F00000000|
 
-Extended text window with color, font, and formatting control.
+Extended text window with cell metrics, font and formatting control.
+
+CORRECTED 2026-08-15.  This table read args[4] and args[5] as
+FOREGROUND and BACKGROUND COLOURS and args[7] as a font SIZE.  They are
+a cell WIDTH, a cell HEIGHT and the FLAGS word.  Slot 20 names itself
+RIP_ExtendedTextWindow() in five diagnostics and validates four fields:
+
+     args[7] > 0x3FF        "Flags value is out of range"
+     args[6] >= 5           "Font number is out of range"
+       (unless flags bit 3 is set)
+     args[4] == 0           "Zero width value is not allowed"
+     args[5] == 0           "Zero height value is not allowed"
+
+then queries text-window protection.  A colour index does not produce
+"Zero width value is not allowed" -- that one string unpicked three
+fields at once.  The parser was corrected first; this table lagged it by
+two commits, which is the drift 14.4 exists to catch.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     x0,y0       2,2     coords    Window top-left
-     x1,y1       2,2     coords    Window bottom-right
-     fore        2       0-15      Text foreground color
-     back        2       0-15      Text background color
-     font        1       0-10      Font ID
-     size        4       0-9999    Font size (extended range)
-     flags       3       0-46655   Formatting flags
-
+     x0,y0       XY,XY   coords    Window top-left
+     x1,y1       XY,XY   coords    Window bottom-right
+     width       2       1-1295    Cell width; zero is refused
+     height      2       1-1295    Cell height; zero is refused
+     font        1       0-4       Font ID (0-35 when flags bit 3 set)
+     flags       4       0-1023    Formatting flags; above 0x3FF refused
+     res         3       0         Reserved
 
 ---------------------------------------------------------------------
 4.17  RIP_ONE_DRAWING_PALETTE — Set One Palette Entry
