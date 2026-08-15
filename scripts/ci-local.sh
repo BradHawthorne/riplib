@@ -263,7 +263,7 @@ job_driver_checks() {
     fi
     local s
     for s in "dll-conformance.py" "dll-validate-claims.py" "check-dll-table.py" \
-             "check-spec-examples.py" "ref-compare.py"; do
+             "check-spec-examples.py" "ref-compare.py" "check-field-names.py"; do
         if "$py" "scripts/$s" "$RIPLIB_DLL" >/dev/null 2>&1; then
             ok "$s"
         else

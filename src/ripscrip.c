@@ -3034,8 +3034,17 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Icon loading ──────────────────────────────────────── */
-        case 'I': /* RIP_LOAD_ICON — x:XY y:XY mode:1 res:1 clipboard:1 res:1 res:1
-                                     filename */
+        case 'I': /* RIP_LOAD_ICON -- x:XY y:XY mode:1 res:1 clipboard:1
+                   *                 stretch:1 res:1 filename
+                   *
+                   * args[5] is named STRETCH here because that is what the
+                   * driver calls it -- "Invalid stretch parameter".  The
+                   * bound was implemented two commits before this rename,
+                   * and the field went on being called 'res' in the
+                   * signature the whole time: the behaviour was corrected
+                   * and the NAME was not.  check-field-names.py caught it
+                   * by asking whether a concept the driver complains about
+                   * has a field to complain about. */
             if (len >= 9) {
                 int16_t ix = mega2(p), iy = scale_y(mega2(p + 2));
                 /* Dispatch slot 97 records FF FF 01 01 01 01 01 -- after the

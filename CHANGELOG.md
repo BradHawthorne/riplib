@@ -66,6 +66,35 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
+- `scripts/check-field-names.py` — **the first check here that looks at
+  what a field MEANS rather than how wide it is.** Every other checker
+  compares shapes: widths against the record, read offsets, payload
+  lengths, decoded values. None can see a field that is the right width and
+  the wrong *thing* — `|b`'s split `2/2/2/2/2/2/1/4/3` matched the record
+  exactly while two fields were documented as colours and one as a size.
+
+  It pulls the diagnostic strings out of each handler and requires that a
+  concept the driver complains about has a field to complain about. "Zero
+  width value is not allowed" is not something a colour index says.
+
+  **Its first catch was my own incomplete fix**: `|1I`'s stretch bound was
+  implemented two commits earlier and the field went on being called `res`
+  in the signature the whole time. The behaviour was corrected; the name
+  was not.
+
+  Deliberately advisory — it exits 0 without `--strict`, because a noisy
+  check wired into a build gets muted, and a muted check is worse than
+  none. Sixteen concepts are currently unmatched; they are prompts to read
+  a handler, not defects.
+
+  Two of its own faults were fixed on the way in, both of the same shape:
+  a permissive extractor **manufactures matches**. Scanning ten comment
+  lines pulled prose into field lists (`|1U` acquired "readable" and
+  "instance"), and accepting any word as a width read my own guard comment
+  `"protected slot: driver refuses"` as a field named `slot` — which then
+  satisfied a SLOT concept and suppressed a real question. A loose checker
+  doesn't just add noise; it becomes a rubber stamp.
+
 - **The `|b` correction never reached the published spec.** Two commits
   after fixing the parser, `docs/spec/04-extended-commands.md` §4.16 still
   read `fore:2 back:2 ... size:4` — the exact misreading that commit
