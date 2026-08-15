@@ -1032,6 +1032,47 @@ remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
      set by the driver's own geometry handling and needed only
      confirming.  Same byte, different provenance.
 
+14.7.2  WHAT THE COMPARISON CANNOT SEE
+
+     '|1<ESC>' carried a five-character prefix against the record's four
+     for months, in the Level 1 command with the MOST corpus traffic --
+     eighty uses.  It survived because ref-compare.py could not see it
+     from EITHER side: the RIPlib extractor matched `case 'X':` and that
+     arm is `case 0x1B:`, while the driver loader filtered letters to
+     0x20..0x7E and dropped ESC.  Two independent filters, one blind
+     spot.
+
+     That generalises, so the blind spots were then measured rather than
+     waited for.  Of 99 driver commands with a comparable record, the
+     tool was comparing 55.  FORTY-FOUR were invisible, and the biggest
+     group was structural: EVERY Level 2 command, because load_riplib()
+     read only src/ripscrip.c while Level 2 lives in src/ripscrip2.c and
+     spells its cases `case RIP2_CMD_PORT_COPY:`.  Level 2 is also where
+     the Switch* protection flags had to be found by hand -- which is
+     the job a comparison exists to do.
+
+     Both gaps are closed; coverage is 64.  The fix found nothing new,
+     which is the desirable outcome and not evidence the exercise was
+     pointless: the two differences it first reported ('|2C' and '|2P')
+     were the NEW extractor truncating a wrapped signature -- the exact
+     fault signature_block() had already been written to avoid for levels
+     0 and 1, reintroduced in the new code path.  A lesson learned in one
+     function does not transfer to the next one by itself.
+
+     THIRTY-FIVE REMAIN INVISIBLE and are listed so the number is not
+     mistaken for zero:
+
+          |: |A |B |C |I |L |O |Q |R |V |` |a |c |g |h |i |m |o |s
+          |t |v |w |x |y |z |{ |1B |1U |1b |1e |1t |2ESC |2R |2s |3ESC
+
+     These are not filtered out; their RIPlib comments simply do not
+     carry a machine-readable name:width signature on the lines the
+     extractor reads.  That is a documentation-shape problem rather than
+     a tooling one, and the fix is to give those comments the same
+     signature line the other 64 have -- one command at a time, when each
+     is next touched, rather than in a sweep that would put 35 unverified
+     field lists into the tree at once.
+
 14.7.1  A CAVEAT ON HANDLER SELF-NAMING
 
      14.5 calls a name recovered from a handler's own error path

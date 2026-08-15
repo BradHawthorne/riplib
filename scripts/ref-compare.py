@@ -30,7 +30,9 @@ import struct
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SRC = ROOT / "src" / "ripscrip.c"
+SRC  = ROOT / "src" / "ripscrip.c"
+SRC2 = ROOT / "src" / "ripscrip2.c"      # Level 2 lives here
+HDR2 = ROOT / "include" / "ripscrip2.h"  # ...behind RIP2_CMD_* names
 TABLE_RVA, ENTRIES, STRIDE = 0x080820, 129, 40
 
 # Levels are contiguous slot runs, per 13-dll-command-table.md.  A handler
@@ -135,6 +137,58 @@ def widths_from(text):
     for _, f in FIELD.findall(text):
         f = f.upper()
         out.append("n" if f in ("XY", "CM") else f if f.isdigit() else "?")
+    return out
+
+
+def load_riplib2():
+    """Level 2 commands, which live in a different file behind an enum.
+
+    ref-compare read only src/ripscrip.c and matched `case 'X':`.  Level 2
+    is in src/ripscrip2.c and spells its cases `case RIP2_CMD_PORT_COPY:`,
+    so ALL TWELVE level-2 commands were structurally invisible to this
+    comparison -- the same blind spot that hid '|1<ESC>', twelve commands
+    wide.  Level 2 is also where the Switch* protection flags were found by
+    hand, which is what a comparison is supposed to catch.
+    """
+    letters = {}
+    for line in HDR2.read_text(encoding="latin-1").splitlines():
+        m = re.match(r"#define\s+(RIP2_CMD_\w+)\s+'(.)'", line)
+        if m:
+            letters[m.group(1)] = m.group(2)
+
+    lines = SRC2.read_text(encoding="latin-1").splitlines()
+    out = {}
+    for i, line in enumerate(lines):
+        m = re.match(r"\s+case\s+(RIP2_CMD_\w+)\s*:", line)
+        if not m or m.group(1) not in letters:
+            continue
+        # Level 2 puts its signature in a banner comment BEFORE the case,
+        # not trailing it as level 0/1 do.  Walk back to the opening '/*',
+        # then read FORWARD accumulating every field pair.
+        #
+        # Taking only the first line that carries pairs truncates a wrapped
+        # signature -- '|2C' came out as 5 fields against the record's 12.
+        # That is precisely the fault signature_block() was written to avoid
+        # for levels 0 and 1, reintroduced here in new code; the lesson
+        # apparently has to be learned per code path.
+        start = i
+        for j in range(i - 1, max(-1, i - 40), -1):
+            if "/*" in lines[j]:
+                start = j
+                break
+        w, seen_fields = [], False
+        for j in range(start, i):
+            s = lines[j].strip().lstrip("/*").lstrip("*").strip()
+            if s.startswith("case"):
+                continue
+            cand = widths_from(re.split(r"\.\s", s)[0])
+            if cand:
+                w.extend(cand)
+                seen_fields = True
+            elif seen_fields and not FIELD.search(s):
+                break        # signature ended; the rest is prose
+        if w:
+            out.setdefault((2, letters[m.group(1)]), w)
     return out
 
 
@@ -274,6 +328,7 @@ def main():
 
     driver = load_driver(a.dll)
     ours = load_riplib()
+    ours.update(load_riplib2())
     bad = report("RIPlib", ours, driver, a.verbose)
 
     if a.reference:

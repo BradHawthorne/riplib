@@ -66,6 +66,33 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
+- **The comparison's blind spots were measured instead of waited for.**
+  The `|1<ESC>` bug survived because `ref-compare.py` could not see that
+  command from either side. Rather than treat that as bad luck, the tool's
+  coverage was measured: of **99** driver commands with a comparable
+  record, it was comparing **55**. Forty-four were invisible, and the
+  largest group was structural — **every Level 2 command**, because
+  `load_riplib()` read only `src/ripscrip.c` while Level 2 lives in
+  `src/ripscrip2.c` behind `case RIP2_CMD_*:` labels. Level 2 is also where
+  the `Switch*` protection flags had to be found by hand, which is the job
+  a comparison exists to do.
+
+  Both gaps are closed; coverage is **64**. It found no new divergences —
+  the desirable outcome, and not evidence the exercise was pointless. The
+  two it *first* reported (`|2C`, `|2P`) were the new extractor truncating
+  a wrapped signature: **the exact fault `signature_block()` had already
+  been written to avoid for levels 0 and 1**, reintroduced in the new code
+  path. A lesson learned in one function does not transfer to the next by
+  itself.
+
+  **Thirty-five remain invisible** and are listed in §14.7.2 so the number
+  isn't mistaken for zero. They aren't filtered out — their comments simply
+  lack a machine-readable `name:width` signature. That's a
+  documentation-shape problem, and the fix is to give those comments the
+  same signature line the other 64 have, one command at a time as each is
+  next touched, rather than a sweep that would put 35 unverified field
+  lists into the tree at once.
+
 - **`|1<ESC>` read a five-character prefix where the record says four —
   and it is the Level 1 command with the MOST corpus traffic.** Slot 85
   records `mega1 + mega1 + mega2` = 4. All **eighty** `|1<ESC>` commands in
