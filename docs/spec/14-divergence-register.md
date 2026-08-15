@@ -1002,24 +1002,35 @@ remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
      exhausted, and saying so is better than grinding on and reporting
      the grind as coverage.
 
-     ONE OBSERVATION FELL OUT, and is recorded rather than chased.  The
-     drawing commands call 0x1003445B before doing anything, which reads
-     the SAME port-flag byte as '|v's protection query -- <inst>+0x22,
-     stride 0x78, +0x17 -- but tests BIT 1 rather than bit 0, and every
-     caller returns early when it is set.  So that byte carries at least
-     two meanings: bit 0 protects, bit 1 suppresses drawing.  RIPlib's
-     bit 1 is RIP_PORT_FLAG_FULLSCREEN, which is a different thing.
-     Establishing what sets bit 1 would need the writers found, and no
-     shipped content exercises it.  Logged so it is not rediscovered as
-     if new.
+     ONE OBSERVATION FELL OUT AND WAS RESOLVED.  Every drawing command
+     calls 0x1003445B before doing anything, and that routine reads the
+     SAME port-flag byte as '|v's protection query -- <inst>+0x22,
+     stride 0x78, offset +0x17 -- but tests BIT 1 rather than bit 0,
+     with every caller returning early when it is set.
 
-Two of the thirteen audited, two findings.  The pattern across all
-eleven findings so far is one thing: a field this project called
-RESERVED almost never is.  '|1I's stretch, the Switch* protection
-flags, '|1W's two bits, '|,'s fifth pair -- every one was documented
-as padding and every one carries meaning.  "Reserved" has been this
-codebase's word for "not looked at".
+     Bit 1 is an EMPTY-REGION marker.  The four writers of that bit are
+     at RVA 0x033D18 and 0x033F3D (set) and 0x033D76 and 0x033F4C
+     (clear), and the setter is reached only after
 
+          cmp [ebp+0x10],eax / cmp [ebp+0x14],eax / cmp [ebp+0x18],eax
+
+     with eax zero -- that is, when all four rectangle coordinates are
+     zero.  Otherwise the routine builds a real rect.  So an all-zero
+     '|v' viewport marks the region empty and everything after it is
+     suppressed, which IS reachable from content.
+
+     RIPlib has no such flag: it stores the rectangle and lets the clip
+     do the work.  The OUTCOME agrees, which is what content depends on,
+     and that is now pinned by "an all-zero |v viewport suppresses
+     drawing, as the driver does".  No code change was needed -- but
+     that was checked rather than assumed, which is the whole point of
+     writing the test instead of reasoning that a degenerate clip
+     rectangle probably clips everything.
+
+     Note the asymmetry this closes: bit 0 of that byte is set by
+     CONTENT through the Switch* flags and needed implementing; bit 1 is
+     set by the driver's own geometry handling and needed only
+     confirming.  Same byte, different provenance.
 
 14.7.1  A CAVEAT ON HANDLER SELF-NAMING
 

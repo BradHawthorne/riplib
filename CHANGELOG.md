@@ -66,14 +66,25 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
-- **One observation logged rather than chased.** The drawing commands call
-  `0x1003445B` first, which reads the *same* port-flag byte as `|v`'s
-  protection query (`<inst>+0x22`, stride `0x78`, `+0x17`) but tests **bit
-  1**, and every caller returns early when it is set. So that byte carries
-  at least two meanings — bit 0 protects, bit 1 suppresses drawing.
-  RIPlib's bit 1 is `RIP_PORT_FLAG_FULLSCREEN`, which is a different
-  thing. Finding what sets bit 1 needs the writers located, and no shipped
-  content exercises it.
+- **The port-flag bit 1 observation is resolved: it is an empty-region
+  marker.** Every drawing command calls `0x1003445B` first, which reads the
+  same byte as `|v`'s protection query (`+0x17`) but tests **bit 1**, and
+  every caller returns early when set. The four writers are at `0x033D18`
+  and `0x033F3D` (set), `0x033D76` and `0x033F4C` (clear), and the setter
+  is reached only after comparing all four rectangle coordinates against
+  zero. So **an all-zero `|v` viewport marks the region empty and
+  suppresses everything after it** — and that is reachable from content.
+
+  RIPlib has no such flag; it stores the rectangle and lets the clip do the
+  work. The **outcome** agrees, which is what content depends on, and is
+  now pinned by a test. No code change was needed — but that was *checked*
+  rather than assumed, instead of reasoning that a degenerate clip
+  rectangle probably clips everything.
+
+  The asymmetry is worth noting: bit 0 of that byte is set by **content**
+  through the `Switch*` flags and needed implementing; bit 1 is set by the
+  driver's own geometry handling and needed only confirming. Same byte,
+  different provenance.
 
 - **`|b` RIP_ExtendedTextWindow had three fields misidentified** — the
   largest field finding of the audit. Slot 20 names itself in five

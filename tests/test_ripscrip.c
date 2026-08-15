@@ -1250,6 +1250,39 @@ static void test_slot_protection_round_trip(void) {
     else FAIL("|W still refused after unprotecting");
 }
 
+static void test_zero_viewport_suppresses_drawing(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+
+    TEST("an all-zero |v viewport suppresses drawing, as the driver does");
+    init_fixture(&s, &ctx);
+    /* The driver marks an EMPTY REGION rather than clipping to a degenerate
+     * rectangle.  The routine behind '|v' compares all four coordinates
+     * against zero and, when they are all zero, does
+     *
+     *     or byte ptr [entry+0x17], 2
+     *
+     * on the same port-flag byte whose bit 0 is protection.  Every drawing
+     * command calls 0x1003445B first, which tests that bit and returns
+     * early when it is set -- so an all-zero viewport suppresses everything
+     * after it.
+     *
+     * RIPlib has no such flag; it stores the rectangle and lets the clip
+     * do the work.  This test exists to check the OUTCOME agrees, since
+     * that is what content depends on -- not to assert RIPlib models it the
+     * same way. */
+    feed_script(&s, &ctx, "!|X0A00|\r\n");
+    if (draw_get_pixel(10, 0) == 0) {
+        FAIL("baseline pixel did not land"); return;
+    }
+
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|v00000000|\r\n");
+    feed_script(&s, &ctx, "!|X0A00|\r\n");
+    if (draw_get_pixel(10, 0) == 0) PASS();
+    else FAIL("drawing continued after an all-zero viewport");
+}
+
 static void test_port0_permanent_is_not_protected(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -6243,6 +6276,7 @@ int main(void) {
     test_l1_audio_pushes_marker();
     test_l1_audio_off_sentinel();
     test_slot_protection_round_trip();
+    test_zero_viewport_suppresses_drawing();
     test_port0_permanent_is_not_protected();
     test_l1_file_query_mode_bound();
     test_l1_load_icon_stretch_bound();
