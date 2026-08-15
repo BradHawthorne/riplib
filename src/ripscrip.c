@@ -2692,12 +2692,18 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Button style + buttons ────────────────────────────── */
-        case 'B': /* RIP_BUTTON_STYLE — define style for subsequent buttons.
-                   * v1.54 spec: !|1B = RIP_BUTTON_STYLE. The DLL internal function
-                   * name (ripCmd_Button) is misleading — the command letter is 'B'.
+        case 'B': /* RIP_BUTTON_STYLE -- wid:XY hgt:XY orient:2 flags:4 bevsize:2
+                   *                    dfore:2 dback:2 bright:2 dark:2 surface:2
+                   *                    grp_no:2 flags2:2 uline:2 corner:2 res:1 res:5
                    *
-                   * wid:2 hgt:2 orient:2 flags:4 bevsize:2 dfore:2 dback:2
-                   * bright:2 dark:2 surface:2 grp_no:2 flags2:2 uline:2 corner:2 res:6
+                   * Signature first, prose after -- see '|1U' above for why.
+                   * The reserved tail is TWO fields in the record, mega1 then
+                   * mega5, which this comment merged into one res:6.
+                   *
+                   * Define the style for subsequent RIP_BUTTON commands.
+                   * v1.54 spec: !|1B = RIP_BUTTON_STYLE.  The DLL's internal
+                   * function name (ripCmd_Button) is misleading -- the
+                   * command letter is 'B'.
                    * Total: 36 chars (30 meaningful + 6 reserved) */
             if (RIP_BTNSTYLE_PROTECTED(s)) break;  /* protected slot */
             if (len >= 36) {
@@ -2718,10 +2724,19 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 bs->corner_col = (uint8_t)(mega2(p + 28) & 0x0F);
             }
             break;
-        case 'U': /* RIP_BUTTON — create button instance (draw + register mouse region).
-                   * v1.54 spec: !|1U = RIP_BUTTON. The DLL internal function
-                   * name (ripCmd_MouseRegion) is misleading — the command letter is 'U'.
-                   * x0:XY y0:XY x1:XY y1:XY hotkey:2 flags:1 res:1 text
+        case 'U': /* RIP_BUTTON -- x0:XY y0:XY x1:XY y1:XY hotkey:2 flags:1 res:1 text
+                   *
+                   * The signature has to be on the FIRST line to be machine
+                   * readable: ref-compare.py stops collecting at the first
+                   * sentence break, so a field list sitting below two lines
+                   * of prose is invisible to it.  This command had the list
+                   * all along, three lines down, and was uncomparable
+                   * because of where it sat.
+                   *
+                   * Create a button instance: draw it and register a mouse
+                   * region.  v1.54 spec: !|1U = RIP_BUTTON.  The DLL's
+                   * internal function name (ripCmd_MouseRegion) is
+                   * misleading -- the command letter is 'U'.
                    * text format (spec §3.4): icon_file<>display_label<>host_command.
                    * A single segment with no <> is the label only; it does NOT
                    * become the host command.  (The comment here previously
@@ -4450,8 +4465,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* ── Fill style + custom fill pattern ───────────────────── */
-    case 's': /* v1.54 spec: '|s' = RIP_FILL_PATTERN — custom 8×8 fill pattern + color.
-               * Args: c1:2 c2:2 c3:2 c4:2 c5:2 c6:2 c7:2 c8:2 col:2 (9 params, 18 chars).
+    case 's': /* RIP_FILL_PATTERN -- c1:2 c2:2 c3:2 c4:2 c5:2 c6:2 c7:2 c8:2 col:CM
+               *
+               * Custom 8x8 fill pattern plus colour; 9 params, 18 chars.
+               * Signature first so ref-compare.py can read it -- the list
+               * was already here, one line lower, where the extractor stops
+               * at the preceding sentence break and never saw it.
                * IcyTerm: FillPattern { c1..c8, col } — parse_params.rs line 323:
                *   (0, b's') → parse_base36_complete(..., 17) = 18 digits = 9 two-digit params.
                * 's' is strictly this command; dual-dispatch by len was wrong. */

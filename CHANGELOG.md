@@ -66,6 +66,17 @@ D-14/D-15 in [docs/spec/12-dll-provenance.md](docs/spec/12-dll-provenance.md).
   evidence is exhausted, and saying so beats grinding on and reporting the
   grind as coverage.**
 
+- **Three more commands were already documented, just unreadably placed.**
+  `|1U`, `|1B` and `|s` each carried a full field list two or three lines
+  into their comment, where the extractor stops at the preceding sentence
+  break and never sees it. Moving the list to the first line **adds no
+  claim** — it subjects an already-unverified claim to verification, which
+  is the opposite of the sweep §14.7.2 warns against. All three agree with
+  the record. Coverage 69 → **72**.
+
+  `|h` is left alone deliberately: it carries six accepted signatures on
+  one handler, so any single line would misrepresent it.
+
 - **`|L` — the most-used command in the corpus — was invisible to the
   comparison.** 7565 occurrences, and no machine-readable signature, so
   `ref-compare.py` could not extract or check it. Together with `|1<ESC>`

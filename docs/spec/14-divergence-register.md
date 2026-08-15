@@ -1059,28 +1059,40 @@ remain: '|,' '|b' '|.' '|{' '|A' '|I' '|C' '|g' '|m' '|>' '|H' '|T'.
      0 and 1, reintroduced in the new code path.  A lesson learned in one
      function does not transfer to the next one by itself.
 
-     THIRTY REMAIN INVISIBLE, listed so the number is not mistaken for
-     zero:
+     TWENTY-SEVEN REMAIN INVISIBLE, listed so the number is not
+     mistaken for zero:
 
-          |: |A |C |I |O |Q |V |` |a |g |h |i |m |s |t |v |w |x |y |z
-          |{ |1B |1U |1b |1e |1t |2ESC |2R |2s |3ESC
+          |: |A |C |I |O |Q |V |` |a |g |h |i |m |t |v |w |x |y |z
+          |{ |1b |1e |1t |2ESC |2R |2s |3ESC
 
-     They are not filtered out; their RIPlib comments simply do not
-     carry a machine-readable name:width signature on the lines the
-     extractor reads.  Five were given one on 2026-08-15 -- '|L' '|c'
-     '|R' '|B' '|o' -- taking coverage from 64 to 69, and '|L' is worth
-     naming: 7565 occurrences, the most-used command in the shipped
-     corpus, invisible to the comparison until then.  The two commands
-     with the highest corpus traffic, '|L' and '|1<ESC>', were both
-     unseen by the tool meant to check them.
+     Coverage went 55 -> 64 -> 69 -> 72 across 2026-08-15.  '|L' is
+     worth naming: 7565 occurrences, the most-used command in the
+     shipped corpus, invisible to the comparison until then.  The two
+     commands with the HIGHEST corpus traffic, '|L' and '|1<ESC>', were
+     both unseen by the tool meant to check them.  That is not a
+     coincidence: a command nobody was forced to write a field layout
+     for is a command where a wrong layout survives.
 
-     THE SIGNATURE MUST DESCRIBE WHAT THE CODE READS, not what the
-     record says.  Copying the record into the comment would make the
-     comparison agree with itself and report coverage while checking
-     nothing.  That is why the remaining thirty are being done one at a
-     time, as each command is next touched and its handler actually
-     read, rather than in a sweep -- a sweep would put thirty
-     unverified field lists into the tree and call it verification.
+     TWO WAYS IN, and the distinction matters.
+
+     Writing a NEW signature means reading the handler and describing
+     what the code does.  Copying the record into the comment instead
+     would make the comparison agree with itself, report a higher
+     number, and check nothing -- strictly worse than leaving the
+     command uncovered, because the number would then be misleading.
+
+     MOVING an existing signature to the first line adds no claim at
+     all.  Several commands already carried a field list two or three
+     lines down, where the extractor stops at the preceding sentence
+     break and never reads it.  Relocating it does not assert anything
+     new -- it SUBJECTS AN ALREADY-UNVERIFIED CLAIM TO VERIFICATION,
+     which is the opposite of the sweep this section warns against.
+     '|1U', '|1B' and '|s' were moved on that basis and all three agree
+     with the record.
+
+     '|h' is left alone deliberately.  It carries SIX accepted
+     signatures on one handler, so any single line would misrepresent
+     it; that is what the continuation rows in 12.11 exist to describe.
 
 14.7.1  A CAVEAT ON HANDLER SELF-NAMING
 
