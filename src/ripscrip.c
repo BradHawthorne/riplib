@@ -24,6 +24,7 @@
 
 #include "ripscrip.h"
 #include "ripscrip2.h"
+#include "rip_affine_oval.h"
 #include "riplib_platform.h"
 #include "drawing.h"
 #include "bgi_font.h"
@@ -303,6 +304,12 @@ static int rip_skewed_oval_points(int16_t cx, int16_t cy,
 
 /* Defined further down with the other fill helpers; the skewed-oval renderer
  * needs them here so the family honours |N the same way |O and |I do. */
+/* The driver's empty brush is an all-zero monochrome pattern, painted
+ * in the background colour (table 0x07AFD8, brush builder 0x011210). */
+static uint8_t rip_fill_ink(const rip_state_t *s) {
+    return s->palette[(s->fill_pattern ? s->fill_color : s->back_color) & 15];
+}
+
 static bool rip_begin_filled_border(rip_state_t *s, uint8_t *saved_mode);
 static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode);
 
@@ -370,7 +377,7 @@ static void rip_fill_poly_polygon(const int16_t *pts,
             xs[b + 1] = v;
         }
         for (a = 0; a + 1 < n; a += 2)
-            draw_line(xs[a], (int16_t)y, xs[a + 1], (int16_t)y);
+            draw_rect(xs[a], (int16_t)y, (int16_t)(xs[a + 1]-xs[a]+1), 1, true);
     }
 }
 
@@ -417,8 +424,8 @@ static void rip_exec_polygon(rip_state_t *s, char cmd, const char *p, int len)
         draw_polyline(pts, npts);
     } else if (cmd == 'p') {
         uint8_t border_mode;
-        if (s->fill_pattern != 0) {
-            draw_set_color(s->palette[s->fill_color & 0x0F]);
+        {
+            draw_set_color(rip_fill_ink(s));
             draw_polygon(pts, npts, true);
         }
         if (rip_begin_filled_border(s, &border_mode)) {
@@ -493,8 +500,8 @@ static void rip_exec_poly_polygon(rip_state_t *s, const char *p, int len)
     if (ncontours == 0)
         return;
 
-    if (s->fill_pattern != 0) {
-        draw_set_color(s->palette[s->fill_color & 0x0F]);
+    {
+        draw_set_color(rip_fill_ink(s));
         rip_fill_poly_polygon(pts, starts, counts, ncontours);
     }
     if (rip_begin_filled_border(s, &border_mode)) {
@@ -646,8 +653,8 @@ static void rip_draw_skewed_oval(rip_state_t *s,
         n++;
     }
 
-    if (fill && s->fill_pattern != 0) {
-        draw_set_color(s->palette[s->fill_color & 0x0F]);
+    if (fill) {
+        draw_set_color(rip_fill_ink(s));
         draw_polygon(pts, n, true);
     }
 
@@ -670,6 +677,36 @@ static void rip_draw_skewed_oval(rip_state_t *s,
         draw_set_color(s->palette[s->draw_color & 0x0F]);
         draw_polygon(pts, n, false);
     }
+}
+
+/* Portable rasterization of the point run recovered from 0x00FA70.
+ * These descriptive names are RIPlib names; the five handlers do not name
+ * themselves. The final digit of pie/chord selects fill, not a raster op. */
+static void rip_draw_affine_oval(rip_state_t *s, const char *p, int mode, bool fill)
+{
+    int16_t xy[10] = {0}, pts[2 * RIP_AFFINE_MAX_POINTS];
+    int pairs = mode ? 5 : 3, i, n;
+    bool closed;
+    uint8_t border_mode;
+    for (i = 0; i < pairs; ++i) {
+        xy[2*i] = mega2(p + 4*i);
+        xy[2*i+1] = scale_y(mega2(p + 4*i + 2));
+    }
+    n = rip_affine_oval_points(xy, mode, pts, &closed);
+    if (n < 2) return;
+    if (fill && closed) {
+        draw_set_color(rip_fill_ink(s));
+        draw_polygon(pts, n, true);
+        if (rip_begin_filled_border(s, &border_mode)) {
+            draw_polygon(pts, n, false);
+            rip_end_filled_border(s, border_mode);
+        }
+    } else if (closed) {
+        draw_polygon(pts, n, false);
+    } else {
+        draw_polyline(pts, n);
+    }
+    draw_set_color(s->palette[s->draw_color & 15]);
 }
 
 /* Draw one RIP_PolyMarker glyph.
@@ -1271,7 +1308,7 @@ void rip_session_reset(rip_state_t *s) {
  * Exposed via include/ripscrip.h so tests and ripscrip2.c can share it. */
 int8_t rip_bgi_fill_to_card(uint8_t bgi_style) {
     switch (bgi_style) {
-        case 0:  return -1;  /* EMPTY  — caller skips fill */
+        case 0:  return -1;  /* EMPTY  — solid brush in background ink */
         case 1:  return 0;   /* SOLID  → solid */
         case 2:  return 4;   /* LINE   → horizontal */
         case 3:  return 7;   /* LTSLASH→ light diagonal (sparse /) */
@@ -1455,6 +1492,83 @@ static int unescape_text(const char *src, int len, char *dst, int dst_max) {
         dst[j++] = src[i];
     }
     return j;
+}
+
+/* Internal entry points shared with Level 2. All limits reject rather than
+ * truncating to a different host request. D-32, slots 110 and 117. */
+static bool rip_is_off(const char *p, int n) {
+    return n == 5 && p[0] == '$' && (p[1] == 'O' || p[1] == 'o') &&
+           (p[2] == 'F' || p[2] == 'f') && (p[3] == 'F' || p[3] == 'f') && p[4] == '$';
+}
+
+void rip_set_refresh_command(rip_state_t *s, const char *raw, int len) {
+    if (len < 0 || len >= (int)sizeof(s->refresh_command)) return;
+    if (!len || rip_is_off(raw, len)) {
+        s->refresh_command[0] = '\0';
+        return;
+    }
+    len = unescape_text(raw, len, s->refresh_command, (int)sizeof(s->refresh_command)-1);
+    s->refresh_command[len] = '\0';
+}
+
+bool rip_request_refresh(rip_state_t *s) {
+    if (!s || !s->refresh_command[0]) return false;
+    riplib_host_tx(s->refresh_command, (int)strlen(s->refresh_command));
+    return true;
+}
+
+void rip_switch_directory(rip_state_t *s, const char *raw, int len) {
+    char name[1024], expanded[1024];
+    int n, i;
+    if (len <= 0 || len >= (int)sizeof(name)) return;
+    n = unescape_text(raw, len, name, (int)sizeof(name)-1);
+    while (n > 0 && name[n-1] == ' ') --n;
+    i=0; while (i < n && name[i] == ' ') ++i;
+    n-=i; memmove(name,name+i,(size_t)n); name[n]='\0';
+    if (rip_is_off(name,n)) { s->host_directory[0]='\0'; return; }
+    n = rip_expand_variables(s,name,n,expanded,(int)sizeof(expanded));
+    if (n < 1 || n > 12 || !strcmp(expanded,".") || !strcmp(expanded,"..")) return;
+    for (i=0;i<n;++i) {
+        unsigned char c=(unsigned char)expanded[i];
+        if (c < 32 || c == 127 || strchr("\\:*?+/\",;><=[]|",c)) return;
+        if (c >= 'a' && c <= 'z') expanded[i]=(char)(c-'a'+'A');
+    }
+    memcpy(s->host_directory,expanded,(size_t)n+1);
+}
+
+void rip_set_transfer_handler(rip_state_t *s, rip_transfer_handler_t handler, void *user) {
+    if (!s) return;
+    s->transfer_handler=handler; s->transfer_user=user;
+}
+
+static void rip_enter_block_mode(rip_state_t *s, int direction, int protocol,
+                                  int type, int flags, int reserved,
+                                  const char *raw, int len) {
+    char name[1024], expanded[1024];
+    int n, i;
+    if (direction > 1 || protocol > 10 || protocol == 9 || type > 6 ||
+        len < 0 || len >= (int)sizeof(name)) return;
+    n=unescape_text(raw,len,name,(int)sizeof(name)-1);
+    name[n]='\0';
+    n=rip_expand_variables(s,name,n,expanded,(int)sizeof(expanded));
+    /* The DLL terminates the filename on either '<' or '>' (0x07DF18).
+     * Download protocols 0..5 require a filename. Batch protocols may omit
+     * it; host authorization and the transfer engine remain host-owned. */
+    for (i=0;i<n && expanded[i]!='<' && expanded[i]!='>';++i) {
+        if ((unsigned char)expanded[i] < 32 || expanded[i] == 127) return;
+    }
+    n=i;
+    if (n >= (int)sizeof(s->block_transfer.filename) ||
+        (!n && direction == 0 && protocol < 6)) return;
+    s->block_transfer.direction=(uint8_t)direction;
+    s->block_transfer.protocol=(uint8_t)protocol;
+    s->block_transfer.file_type=(uint16_t)type;
+    s->block_transfer.flags=(uint16_t)flags;
+    s->block_transfer.reserved=(uint16_t)reserved;
+    memcpy(s->block_transfer.filename,expanded,(size_t)n);
+    s->block_transfer.filename[n]='\0';
+    s->block_transfer.pending=true;
+    if (s->transfer_handler) s->transfer_handler(s->transfer_user,&s->block_transfer);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -2007,6 +2121,40 @@ static bool rip_begin_filled_border(rip_state_t *s, uint8_t *saved_mode) {
     return true;
 }
 
+/* Copy/Scroll modes are source-vacating brushes, never destination ROPs.
+ * 0=leave, 1=foreground, 2=background, 3=fill colour, 4=fill pattern,
+ * 5=black; Scroll also supports 6=sampled edge colour. D-33. */
+static void rip_fill_exposed(rip_state_t *s, int sx, int sy, int w, int h,
+                             int dx, int dy, int mode, uint8_t sampled)
+{
+    int x0=sx, x1=sx+w-1, y0=sy, y1=sy+h-1, y;
+    if (!mode) return;
+    if (x0 < draw_get_clip_x0()) x0=draw_get_clip_x0();
+    if (x1 > draw_get_clip_x1()) x1=draw_get_clip_x1();
+    if (y0 < draw_get_clip_y0()) y0=draw_get_clip_y0();
+    if (y1 > draw_get_clip_y1()) y1=draw_get_clip_y1();
+    draw_set_write_mode(DRAW_MODE_COPY);
+    if (mode == 4) draw_set_color(rip_fill_ink(s));
+    else {
+        draw_set_fill_style(0,0);
+        draw_set_color(mode==1 ? s->palette[s->draw_color&15] :
+                       mode==2 ? s->palette[s->back_color&15] :
+                       mode==3 ? s->palette[s->fill_color&15] :
+                       mode==6 ? sampled : 0);
+    }
+    for (y=y0;y<=y1 && x0<=x1;++y) {
+        if (y < dy || y >= dy+h || x1 < dx || x0 >= dx+w) {
+            draw_rect((int16_t)x0,(int16_t)y,(int16_t)(x1-x0+1),1,true);
+        } else {
+            int left=x1 < dx-1 ? x1 : dx-1;
+            int right=x0 > dx+w ? x0 : dx+w;
+            if (left>=x0) draw_rect((int16_t)x0,(int16_t)y,(int16_t)(left-x0+1),1,true);
+            if (right<=x1) draw_rect((int16_t)right,(int16_t)y,(int16_t)(x1-right+1),1,true);
+        }
+    }
+    apply_session_draw_state(s);
+}
+
 static void rip_end_filled_border(rip_state_t *s, uint8_t saved_mode) {
     if (!s)
         return;
@@ -2192,8 +2340,11 @@ static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
                 pts[n*2]     = (int16_t)(a*sx + b*c1x + c*c2x + d*ex);
                 pts[n*2 + 1] = (int16_t)(a*sy + b*c1y + c*c2y + d*ey);
             }
-            if (n >= 3)
-                draw_polygon(pts, n, s->fill_pattern != 0);
+            if (n >= 3) {
+                draw_set_color(rip_fill_ink(s));
+                draw_polygon(pts, n, true);
+                draw_set_color(s->palette[s->draw_color & 15]);
+            }
         } else {
             {
                 int steps = rip_bez_steps(s);
@@ -2228,8 +2379,11 @@ static void rip_poly_bezier_family(rip_state_t *s, const char *p, int len,
                     pts[n*2]     = (int16_t)(a*bx0 + b*bx1 + c*bx2 + d*bx3);
                     pts[n*2 + 1] = (int16_t)(a*by0 + b*by1 + c*by2 + d*by3);
                 }
-                if (n >= 3)
-                    draw_polygon(pts, n, s->fill_pattern != 0);
+                if (n >= 3) {
+                    draw_set_color(rip_fill_ink(s));
+                    draw_polygon(pts, n, true);
+                    draw_set_color(s->palette[s->draw_color & 15]);
+                }
             } else {
                 {
                     int steps = rip_bez_steps(s);
@@ -2299,7 +2453,7 @@ static const rip_argtypes_t rip_argtypes[] = {
     { ']', 0,  7, {0xFF,0xFF,0xFF,0xFF,0x02,0x02,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
     { '_', 0,  6, {0xFF,0xFF,0x02,0x02,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
     { '`', 0, 11, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x01,0x00,0x00,0x00,0x00,0x00} },
-    { '{', 1,  6, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
+    { '{', 0,  6, {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
     { 'B', 1, 16, {0xFF,0xFF,0x02,0x04,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x02,0x01,0x05} },
     { 'b', 1,  9, {0xFF,0xFF,0xFF,0xFF,0x01,0x01,0x02,0x02,0x04,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
     { 'C', 1,  5, {0xFF,0xFF,0xFF,0xFF,0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00} },
@@ -2463,6 +2617,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
          * using any of the five rendered nothing with no diagnosis. */
         switch (s->cmd_char) {
 
+        case 0x1B: /* RIP_EnterBlockMode -- direction:1 protocol:1 type:2 flags:2 res:2 filename */
+            if (len >= 8)
+                rip_enter_block_mode(s, mega_digit(p[0]), mega_digit(p[1]),
+                                     mega2(p + 2), mega2(p + 4), mega2(p + 6), p + 8, len - 8);
+            break;
+
         case 'G': /* RIP_GotoURL — res:8 url:string
                    * Handler RVA 0x0251CB.  Diagnostics: "No URL string
                    * present", "Invalid URL character found", "URL too long".
@@ -2559,8 +2719,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * on a result of 2 calls RIP_Suspend (0x10006C01, which
                    * names itself).  It never touches the decoded argument
                    * array, so it does not match its own argc=1/mega4 row —
-                   * that row is the mis-associated one, and slot 122 is the
-                   * reading '|3D' actually supports.  See §12.12.
+                   * the dispatch rule selecting between the duplicate rows remains
+                   * unresolved. RIPlib implements slot 122 only. See D-30.
                    *
                    * RIPlib does NOT busy-wait.  A rendering library that
                    * blocks the caller for up to 65 seconds a chunk is
@@ -2598,10 +2758,44 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             }
             break;
 
+        case '.': /* RIP_STAMP_ICON — slot:2 x:2 y:2 w:2 h:2 flags:2 */
+            if (len >= 12) {
+                uint16_t slot = (uint16_t)mega2(p);
+                int16_t dx = mega2(p + 2);
+                int16_t dy = scale_y(mega2(p + 4));
+                int16_t dw = 0;
+                int16_t dh = 0;
+                rip_icon_t icon;
+                bool have_icon = false;
+
+                if (len >= 10) {
+                    dw = mega2(p + 6);
+                    dh = scale_y(mega2(p + 8));
+                }
+
+                if (slot < RIP_ICON_SLOT_MAX && s->icon_slot_valid[slot]) {
+                    icon = s->icon_slots[slot];
+                    have_icon = true;
+                } else if (s->clipboard.valid && s->clipboard.data) {
+                    icon.pixels = s->clipboard.data;
+                    icon.width = (uint16_t)s->clipboard.width;
+                    icon.height = (uint16_t)s->clipboard.height;
+                    have_icon = true;
+                }
+
+                if (have_icon) {
+                    rip_draw_icon_pixels(s, dx, dy, icon.pixels,
+                                         icon.width, icon.height,
+                                         dw, dh, s->write_mode);
+                }
+            }
+            break;
+
+
         case 'J': /* save current clipboard into an icon slot -- slot:2
                    * Displaced from Level 0 '|J', which the driver defines as
                    * RIP_SetBaseMath.  The slot mechanism is RIPlib's own (it
-                   * backs '.' RIP_STAMP_ICON and the SLOTnn load alias), so
+                   * backs '|3.' RIP_STAMP_ICON and the SLOTnn load alias), so
                    * it keeps a home here rather than being dropped. */
             if (len >= 2)
                 (void)rip_save_clipboard_slot(s, (uint16_t)mega2(p));
@@ -2995,8 +3189,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * Slot 95 records  FF FF FF FF 01 01 FF  -> 12 characters, and
                    * the handler (RVA 0x00D7E0) names itself in its own
                    * diagnostics: "RIP_Scroll" with "Invalid mode parameter" and
-                   * "Nothing to do".  It is NOT RIP_COPY_REGION -- that command
-                   * is '|,' (slot 8, ten coordinates), handled at Level 0.
+                   * "Nothing to do". The former COPY_REGION name for comma
+                   * was also wrong: slot 8 is an affine elliptical arc (D-31).
                    *
                    * RIPlib previously required 14 characters and read a
                    * destination *pair* at offsets 10 and 12, on the strength of
@@ -3016,20 +3210,29 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * overlapping moves do not smear, which draw_copy_rect
                    * already does for us.
                    *
-                   * Modes 1..6 additionally run a post-scroll effect routine;
-                   * mode 0 exits straight after the move.  Only the move is
-                   * implemented here -- see D-14. */
+                   * Modes 1..6 paint the exposed source area using the
+                   * brush selection at 0x00D9DD; see D-33. */
             if (len >= 12) {
-                int16_t rx0 = mega2(p), ry0 = scale_y(mega2(p + 2));
-                int16_t rx1 = mega2(p + 4), ry1 = scale_y1(mega2(p + 6));
+                int16_t rx0 = mega2(p), ry0 = mega2(p + 2);
+                int16_t rx1 = mega2(p + 4), ry1 = mega2(p + 6);
                 uint8_t smode = (uint8_t)mega_digit(p[8]);
                 uint8_t excl  = (uint8_t)mega_digit(p[9]);
+                if (rx1 < rx0) { int16_t t=rx0; rx0=rx1; rx1=t; }
+                if (ry1 < ry0) { int16_t t=ry0; ry0=ry1; ry1=t; }
+                ry0 = scale_y(ry0);
+                ry1 = excl ? scale_y(ry1) : scale_y1(ry1);
                 int16_t dest_y = scale_y(mega2(p + 10));
                 int16_t bump = (excl == 0) ? 1 : 0;
                 int16_t rw = (int16_t)(rx1 - rx0 + bump);
                 int16_t rh = (int16_t)(ry1 - ry0 + bump);
-                if (smode <= 6 && dest_y != ry0 && rw > 0 && rh > 0)
+                if (smode <= 6 && dest_y != ry0 && rw > 0 && rh > 0) {
+                    uint8_t sample=draw_get_pixel(dest_y < ry0 ? rx0+rw-2 : rx0+1,
+                                                  dest_y < ry0 ? ry0+rh-2 : ry0+1);
+                    draw_set_write_mode(DRAW_MODE_COPY);
                     draw_copy_rect(rx0, ry0, rx0, dest_y, rw, rh);
+                    draw_set_write_mode(s->write_mode);
+                    rip_fill_exposed(s,rx0,ry0,rw,rh,rx0,dest_y,smode,sample);
+                }
             }
             break;
 
@@ -3109,23 +3312,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
          * operation the library deliberately does not have, it is validated
          * the way the driver validates it and recorded, not faked. */
 
-        case 'g': /* RIP_CopyBlit — sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY
-                   *                mode:1 res:1
-                   *
-                   * Slot 96 records  FF FF FF FF FF FF 01 01  -> 14 characters.
-                   * The handler (RVA 0x00B7A4) names itself
-                   * "riprocmd - RIP_CopyBlit()" and loads args[0..6]; args[7] is
-                   * never read, so the trailing digit is accepted and reserved.
-                   * RIPlib gated on 12 characters and treated the mode as
-                   * optional, which let a truncated command blit with mode 0.
-                   *
-                   * Two further corrections from the handler (D-14):
-                   *   - it orders both source pairs through 0x1003112E -- the
-                   *     same helper '|K' RIP_FILLED_RECTANGLE uses -- rather
-                   *     than discarding an inverted rect, which RIPlib did;
-                   *   - the mode check is  cmp ebx,5 / jbe, so modes 0..5 are
-                   *     legal.  RIPlib's raster ops stop at DRAW_MODE_NOT (4),
-                   *     so 5 is accepted per the driver and drawn as COPY. */
+        case 'g': /* RIP_CopyBlit -- sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY mode:1 res:1
+                   * Slot 96 always uses SRCCOPY. Modes 1..5 fill the part of
+                   * the source outside the destination (0x00B9CF). D-33. */
             if (len >= 14) {
                 int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
                 int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
@@ -3134,13 +3323,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 if (sx1 < sx0) { int16_t t = sx0; sx0 = sx1; sx1 = t; }
                 if (sy1 < sy0) { int16_t t = sy0; sy0 = sy1; sy1 = t; }
                 if (bmode <= 5) {
-                    uint8_t saved = s->write_mode;
-                    draw_set_write_mode(bmode > DRAW_MODE_NOT
-                                        ? DRAW_MODE_COPY : bmode);
+                    draw_set_write_mode(DRAW_MODE_COPY);
                     draw_copy_rect(sx0, sy0, dx, dy,
-                                   (int16_t)(sx1 - sx0 + 1),
-                                   (int16_t)(sy1 - sy0 + 1));
-                    draw_set_write_mode(saved);
+                                   (int16_t)(sx1-sx0+1),(int16_t)(sy1-sy0+1));
+                    draw_set_write_mode(s->write_mode);
+                    rip_fill_exposed(s,sx0,sy0,sx1-sx0+1,sy1-sy0+1,dx,dy,bmode,0);
                 }
             }
             break;
@@ -4269,11 +4456,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
              * 2026-08-12 (B9), so `!|S0000|` + a bar — the idiom a scene uses
              * to blank a region — did nothing.
              *
-             * Scope note: this is corrected for the BAR, which is the
-             * corpus's blanking primitive.  The polygon case is deliberately
-             * left as-is: implementations genuinely disagree there (SyncTERM's
-             * scanline polygon filler also skips style 0 while its bars and
-             * floods paint colour 0), so changing it would be a guess. */
+             * D-33 applies the same background brush to all filled shapes. */
             if (s->fill_pattern == 0) {
                 draw_set_fill_style(0, s->palette[s->back_color & 0x0F]);
                 draw_set_color(s->palette[s->back_color & 0x0F]);
@@ -4321,8 +4504,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t rx = mega2(p + 4), ry_s = scale_y(mega2(p + 6));
             uint8_t border_mode;
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
+            {
+                draw_set_color(rip_fill_ink(s));
                 draw_ellipse(cx, cy, rx, ry_s, true);
             }
             if (rip_begin_filled_border(s, &border_mode)) {
@@ -4359,8 +4542,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t sa = mega2(p + 4), ea = mega2(p + 6);
             int16_t r  = scale_y(mega2(p + 8));
             uint8_t border_mode;
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
+            {
+                draw_set_color(rip_fill_ink(s));
                 draw_pie(cx, cy, r, sa, ea, true);
             }
             if (rip_begin_filled_border(s, &border_mode)) {
@@ -4377,8 +4560,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t sa = mega2(p + 4), ea = mega2(p + 6);
             int16_t rx = mega2(p + 8), ry_s = scale_y(mega2(p + 10));
             uint8_t border_mode;
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
+            {
+                draw_set_color(rip_fill_ink(s));
                 draw_elliptical_pie(cx, cy, rx, ry_s, sa, ea, true);
             }
             if (rip_begin_filled_border(s, &border_mode)) {
@@ -4599,8 +4782,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t cx = mega2(p), cy = scale_y(mega2(p + 2));
             int16_t r = scale_y(mega2(p + 4));
             uint8_t border_mode;
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
+            {
+                draw_set_color(rip_fill_ink(s));
                 draw_circle(cx, cy, r, true);
             }
             if (rip_begin_filled_border(s, &border_mode)) {
@@ -4630,8 +4813,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             int16_t x1 = mega2(p + 4),  y1 = scale_y1(mega2(p + 6));
             int16_t r  = scale_y(mega2(p + 8));
             uint8_t border_mode;
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
+            {
+                draw_set_color(rip_fill_ink(s));
                 draw_rounded_rect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, r, true);
             }
             if (rip_begin_filled_border(s, &border_mode)) {
@@ -4720,42 +4903,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         break;
 
     /* -- Copy region (v2.0+) --------------------------------------------- */
-    /* DLL command table entry 8: ',' = RIP_COPY_REGION (10 args: XY*10) */
-    case ',': /* RIP_COPY_REGION -- sx0:XY sy0:XY sx1:XY sy1:XY dx:XY dy:XY
-               *                   dx1:XY dy1:XY p4x:XY p4y:XY
-               *
-               * The trailing pair is NOT reserved.  Slot 8 (RVA 0x01D5C2)
-               * loads all ten arguments and passes FIVE pairs through the
-               * coordinate transform at 0x10031084 -- (a0,a1) (a2,a3)
-               * (a4,a5) (a6,a7) and (a8,a9) -- so the driver treats the
-               * last two as a coordinate pair like the rest, not as
-               * padding.  This comment called them 'res:2 res:2'.
-               *
-               * WHAT they mean is NOT established.  Five pairs for a
-               * region copy could be source rect, destination rect and an
-               * anchor, but that is a guess and guessing is what
-               * 14-divergence-register.md exists to prevent.  Recorded
-               * rather than invented; no shipped scene sends '|,' at all,
-               * so nothing observable depends on it today.  See 14.7. */
-        if (len >= 20) {
-            int16_t sx0 = mega2(p),      sy0 = scale_y(mega2(p + 2));
-            int16_t sx1 = mega2(p + 4),  sy1 = scale_y1(mega2(p + 6));
-            int16_t dx0 = mega2(p + 8),  dy0 = scale_y(mega2(p + 10));
-            int16_t rw  = sx1 - sx0 + 1, rh  = sy1 - sy0 + 1;
-            int16_t dw = rw, dh = rh;
-            if (len >= 16) {
-                int16_t dx1 = mega2(p + 12);
-                int16_t dy1 = scale_y1(mega2(p + 14));
-                if (!(dx1 == 0 && dy1 == 0)) {
-                    if (dx0 > dx1) { int16_t t = dx0; dx0 = dx1; dx1 = t; }
-                    if (dy0 > dy1) { int16_t t = dy0; dy0 = dy1; dy1 = t; }
-                    dw = (int16_t)(dx1 - dx0 + 1);
-                    dh = (int16_t)(dy1 - dy0 + 1);
-                }
-            }
-            rip_copy_screen_region_scaled(s, sx0, sy0, rw, rh,
-                                          dx0, dy0, dw, dh, DRAW_MODE_COPY);
-        }
+    /* D-31: conjugate-radius ellipse family, shared DLL helper 0x00FA70.
+     * Five pairs mean centre, axis endpoints, start ray and end ray. */
+    case ',': /* RIP_AFFINE_ARC -- cx:XY cy:XY ax:XY ay:XY bx:XY by:XY sx:XY sy:XY ex:XY ey:XY */
+        if (len >= 20) rip_draw_affine_oval(s, p, 1, false);
         break;
 
     /* Dispatch slot 9, argc 5: XY, XY, XY, XY, mega2.  The handler at RVA
@@ -5002,75 +5153,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* DLL binary: 0x60 (backtick) = RIP_COMPOSITE_ICON (11 args: XY x 10, 1) */
-    case 0x60: /* RIP_COMPOSITE_ICON -- 5 src/dst rect pairs (XY x 10) + mode:1 */
-        /* Multi-region screen compositing: 5 rect pairs blit source regions
-         * to destination regions using the specified raster op.  Historical
-         * docs disagree on whether later entries are 12-byte rect records or
-         * 8-byte point pairs; accept complete rect records and use the first
-         * rect size for trailing point pairs. */
-        if (len >= 12) {
-            int offset = 0;
-            int pairs = 0;
-            int mode_pos = (len >= 41) ? 40 : len;
-            uint8_t mode = (len >= 41) ? (uint8_t)mega_digit(p[40])
-                                       : s->write_mode;
-            int16_t cx0 = mega2(p),      cy0 = scale_y(mega2(p + 2));
-            int16_t cx1 = mega2(p + 4),  cy1 = scale_y1(mega2(p + 6));
-            int16_t cw  = cx1 - cx0 + 1, ch  = cy1 - cy0 + 1;
-            if (mode > DRAW_MODE_NOT)
-                mode = DRAW_MODE_COPY;
-            while (offset + 12 <= mode_pos && pairs < 5) {
-                int16_t sx0 = mega2(p + offset);
-                int16_t sy0 = scale_y(mega2(p + offset + 2));
-                int16_t sx1 = mega2(p + offset + 4);
-                int16_t sy1 = scale_y1(mega2(p + offset + 6));
-                int16_t dx = mega2(p + offset + 8);
-                int16_t dy = scale_y(mega2(p + offset + 10));
-                int16_t sw = (int16_t)(sx1 - sx0 + 1);
-                int16_t sh = (int16_t)(sy1 - sy0 + 1);
-                rip_copy_screen_region_scaled(s, sx0, sy0, sw, sh,
-                                              dx, dy, sw, sh, mode);
-                cw = sw;
-                ch = sh;
-                offset += 12;
-                pairs++;
-            }
-            while (offset + 8 <= mode_pos && pairs < 5 && cw > 0 && ch > 0) {
-                int16_t sx = mega2(p + offset);
-                int16_t sy = scale_y(mega2(p + offset + 2));
-                int16_t dx = mega2(p + offset + 4);
-                int16_t dy = scale_y(mega2(p + offset + 6));
-                rip_copy_screen_region_scaled(s, sx, sy, cw, ch,
-                                              dx, dy, cw, ch, mode);
-                offset += 8;
-                pairs++;
-            }
-        }
+    case 0x60: /* RIP_AFFINE_CHORD -- cx:XY cy:XY ax:XY ay:XY bx:XY by:XY sx:XY sy:XY ex:XY ey:XY fill:1 */
+        if (len >= 21) rip_draw_affine_oval(s, p, 3, mega_digit(p[20]) != 0);
         break;
 
-    /* DLL binary: '{' = RIP_ANIMATION_FRAME (6 args: XY x 6 = 3 vertex pairs) */
-    case '{': /* RIP_ANIMATION_FRAME -- 3 coordinate pairs */
-        /* Draws filled polygon interior AND outline in one operation
-         * (DLL calls GDI Polygon + Polyline in sequence).
-         * With 3 points this is a filled+outlined triangle. */
-        if (len >= 12) {
-            int16_t pts[6];
-            uint8_t border_mode;
-            pts[0] = mega2(p);     pts[1] = scale_y(mega2(p + 2));
-            pts[2] = mega2(p + 4); pts[3] = scale_y(mega2(p + 6));
-            pts[4] = mega2(p + 8); pts[5] = scale_y(mega2(p + 10));
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
-                draw_polygon(pts, 3, true);
-            }
-            if (rip_begin_filled_border(s, &border_mode)) {
-                draw_polygon(pts, 3, false);
-                rip_end_filled_border(s, border_mode);
-            } else {
-                draw_set_color(s->palette[s->draw_color & 0x0F]);
-            }
-        }
+    case '{': /* RIP_FILLED_AFFINE_OVAL -- cx:XY cy:XY ax:XY ay:XY bx:XY by:XY */
+        if (len >= 12) rip_draw_affine_oval(s, p, 0, true);
         break;
 
     /* ── Kill mouse fields in region (Level 0) ───────────────── */
@@ -5095,8 +5183,8 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             if (kx0 > kx1) { int16_t t = kx0; kx0 = kx1; kx1 = t; }
             if (ky0 > ky1) { int16_t t = ky0; ky0 = ky1; ky1 = t; }
 
-            if (s->fill_pattern != 0) {
-                draw_set_color(s->palette[s->fill_color & 0x0F]);
+            {
+                draw_set_color(rip_fill_ink(s));
                 draw_rect(kx0, ky0, (int16_t)(kx1 - kx0 + 1),
                           (int16_t)(ky1 - ky0 + 1), true);
             }
@@ -5205,88 +5293,12 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
         }
         break;
 
-    /* ── Stamp icon from slot (v2.0+) ───────────────────────── */
-    /* DLL command table entry 10: '.' = RIP_STAMP_ICON (6 args: XY×6). */
-    case '.': /* RIP_STAMP_ICON — slot:2 x:2 y:2 w:2 h:2 flags:2 */
-        if (len >= 12) {
-            uint16_t slot = (uint16_t)mega2(p);
-            int16_t dx = mega2(p + 2);
-            int16_t dy = scale_y(mega2(p + 4));
-            int16_t dw = 0;
-            int16_t dh = 0;
-            rip_icon_t icon;
-            bool have_icon = false;
-
-            if (len >= 10) {
-                dw = mega2(p + 6);
-                dh = scale_y(mega2(p + 8));
-            }
-
-            if (slot < RIP_ICON_SLOT_MAX && s->icon_slot_valid[slot]) {
-                icon = s->icon_slots[slot];
-                have_icon = true;
-            } else if (s->clipboard.valid && s->clipboard.data) {
-                icon.pixels = s->clipboard.data;
-                icon.width = (uint16_t)s->clipboard.width;
-                icon.height = (uint16_t)s->clipboard.height;
-                have_icon = true;
-            }
-
-            if (have_icon) {
-                rip_draw_icon_pixels(s, dx, dy, icon.pixels,
-                                     icon.width, icon.height,
-                                     dw, dh, s->write_mode);
-            }
-        }
+    case '.': /* RIP_AFFINE_OVAL -- cx:XY cy:XY ax:XY ay:XY bx:XY by:XY */
+        if (len >= 12) rip_draw_affine_oval(s, p, 0, false);
         break;
 
-    /* ── Extended mouse region (v2.0+) ──────────────────────── */
-    /* DLL command table entry 11: ':' = RIP_MOUSE_REGION_EXT. */
-    case ':': /* RIP_MOUSE_REGION_EXT — five (x,y) pairs + one digit.
-               *
-               * Slot 11 records  XY×10, mega1  -> 21 characters, and the
-               * handler (RVA 0x01DD70) loads args[0..10] and coordinate-maps
-               * exactly five consecutive pairs:
-               *
-               *     0x10031084(ctx, &args[0], &args[1])
-               *     0x10031084(ctx, &args[2], &args[3])
-               *     0x10031084(ctx, &args[4], &args[5])
-               *     0x10031084(ctx, &args[6], &args[7])
-               *     0x10031084(ctx, &args[8], &args[9])
-               *
-               * So this is a five-vertex region, not a rectangle carrying a
-               * hotkey and flags.  RIPlib had two defects here (D-14): it
-               * required 22 characters, so every valid 21-character command was
-               * dropped in full, and it read args[4] and args[5] -- which the
-               * record types as coordinates and the handler maps as a pair --
-               * as a hotkey and a flag byte.
-               *
-               * rip_mouse_region_t has no home for a vertex list, so the region
-               * registers as the bounding box of the five vertices: a
-               * conservative over-approximation for hit-testing, rather than a
-               * rectangle invented from two of the coordinates. */
-        if (len >= 21 && s->num_mouse_regions < RIP_MAX_MOUSE_REGIONS) {
-            rip_mouse_region_t *r = &s->mouse_regions[s->num_mouse_regions];
-            int16_t minx = mega2(p),               maxx = minx;
-            int16_t miny = scale_y(mega2(p + 2)),  maxy = miny;
-            int i;
-            for (i = 1; i < 5; i++) {
-                int16_t vx = mega2(p + i * 4);
-                int16_t vy = scale_y(mega2(p + i * 4 + 2));
-                if (vx < minx) minx = vx;
-                if (vx > maxx) maxx = vx;
-                if (vy < miny) miny = vy;
-                if (vy > maxy) maxy = vy;
-            }
-            memset(r, 0, sizeof(*r));
-            r->x0     = minx;
-            r->y0     = miny;
-            r->x1     = maxx;
-            r->y1     = maxy;
-            r->flags  = (uint8_t)mega_digit(p[20]) | RIP_MF_ACTIVE;
-            r->active = true;
-            s->num_mouse_regions++;
-        }
+    case ':': /* RIP_AFFINE_PIE -- cx:XY cy:XY ax:XY ay:XY bx:XY by:XY sx:XY sy:XY ex:XY ey:XY fill:1 */
+        if (len >= 21) rip_draw_affine_oval(s, p, 2, mega_digit(p[20]) != 0);
         break;
 
     /* ── Extended button (v2.0+) ─────────────────────────────── */

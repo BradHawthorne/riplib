@@ -18,13 +18,17 @@
 #include "rip_icons.h"
 #include "riplib_platform.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Maximum mouse regions (RIPscrip spec: 128) */
 #define RIP_MAX_MOUSE_REGIONS 128
 
 /* Maximum clipboard size (640×400 = 256000 bytes, stored in PSRAM) */
 #define RIP_CLIPBOARD_MAX     (640 * 400)
 
-/* Numbered icon slots used by v2.0 SAVE_ICON / STAMP_ICON. */
+/* Numbered icon slots used by RIPlib extensions |3J SAVE_ICON / |3. STAMP_ICON. */
 #define RIP_ICON_SLOT_MAX     36
 
 /* Maximum text block lines */
@@ -153,6 +157,26 @@ struct rip_state_s;
 typedef struct rip_state_s rip_state_t;
 
 typedef void (*rip_url_handler_t)(const char *url, int len);
+
+/* |3ESC requests a host-owned file transfer. No transfer, file access or
+ * protocol bytes are initiated by RIPlib. The callback receives untrusted
+ * data valid only for the duration of the call. Also available for polling
+ * in block_transfer; pending stays set until the host clears it. */
+typedef struct {
+    uint8_t direction;      /* 0=download, 1=upload */
+    uint8_t protocol;       /* 0..10 except 9, per driver */
+    uint16_t file_type;     /* 0..6 */
+    uint16_t flags;
+    uint16_t reserved;
+    char filename[256];
+    bool pending;
+} rip_block_transfer_t;
+typedef void (*rip_transfer_handler_t)(void *user, const rip_block_transfer_t *request);
+void rip_set_transfer_handler(rip_state_t *s, rip_transfer_handler_t handler, void *user);
+
+/* Send the command registered by |2R when the host/user requests a remote
+ * redraw. Parsing |2R itself sends nothing. False means no command set. */
+bool rip_request_refresh(rip_state_t *s);
 
 /* Register (or clear, with NULL) the URL handler for this session.
  * Call after rip_init_first(), which zeroes the state. */
@@ -693,13 +717,21 @@ struct rip_state_s {
         int16_t vp_x0, vp_y0, vp_x1, vp_y1;
     } state_stack[8];
     uint8_t state_stack_depth;
+
+    /* Driver-backed host services (D-32). Directory is a single host/resource
+     * namespace, not a process working directory or an unrestricted path. */
+    char host_directory[13];
+    char refresh_command[1024];
+    rip_block_transfer_t block_transfer;
+    rip_transfer_handler_t transfer_handler;
+    void *transfer_user;
 };
 
 #define RIP_STATE_STACK_MAX 8
 
 /* Map a BGI fill style (0=EMPTY .. 12=USER) to the card-native fill
  * pattern index used by drawing.c::fill_span().  Returns -1 for EMPTY
- * (caller must skip the fill entirely). */
+ * (caller must paint a solid background-color fill). */
 int8_t rip_bgi_fill_to_card(uint8_t bgi_style);
 
 /* Boot-time init — call ONCE at power-on.
@@ -802,3 +834,7 @@ void rip_apply_palette(void);
  * is multi-session a real scenario worth a breaking API change?) is
  * tracked as `design/decisions.md` candidate C-004.
  */
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

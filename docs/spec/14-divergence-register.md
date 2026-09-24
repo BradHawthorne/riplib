@@ -37,12 +37,20 @@ and check the parser against the record with:
 
      python scripts/dll-conformance.py    <path>/RIPSCRIP.DLL -v
 
-That last one is the standing check.  It covers four classes -- read
-offsets, length gates, radix selection and coverage -- each of which was
+That last one is the standing check.  It covers dispatch accounting,
+read offsets, string tails, length gates, radix selection and coverage.
+The semantic checks were
 first hit as a single bug and only afterwards turned into a check, at
 which point every one of them found more of the same.  It exits non-zero
 on a defect, so it can gate a build, and it lists the deliberate
 tolerances in 14.3.3 by name rather than passing them silently.
+
+2026-09-24 FIX STATUS (D-31..33): the backtick length/offset defects
+are fixed. Tracing the geometry helper also corrected comma, period,
+colon and brace. Both missing ESC keys now have handlers, and refresh
+stores a host command. Coverage is 117/117 distinct DLL keys; this is
+not a claim of full terminal behavior or pixel parity. See the current
+audit report at ../crosswalk-audit.md for exact validation and limits.
 
 and reproduce section 14.2's comparison -- both projects against the
 driver, command by command -- with:
@@ -359,17 +367,13 @@ rather than a slogan.
      from two to four, which rejects truncation below anything real
      content sends.  See D-20.
 
-14.3.4  MODES ACCEPTED BUT NOT PERFORMED
+14.3.4  COPY AND SCROLL MODES — RESOLVED D-33
 
-     '|1G' RIP_Scroll validates its mode field 0..6 as the driver does
-     and performs the block move, which is common to all seven modes.
-     Modes 1..6 additionally run post-scroll effect routines that are
-     not implemented.  A scene using them scrolls correctly and loses
-     the effect.  See D-14.
-
-     '|1g' RIP_CopyBlit accepts modes 0..5 per the driver; RIPlib's
-     raster ops stop at DRAW_MODE_NOT (4), so mode 5 is accepted and
-     drawn as COPY.
+     Both moves use SRCCOPY. The mode selects how to fill exposed source
+     pixels, not a raster operation: 0 leave, 1 foreground, 2 background,
+     3 fill color, 4 fill brush, 5 black, and scroll-only 6 sampled source
+     color. All are implemented, excluding overlap with the destination.
+     The former mode-5 COPY fallback description is withdrawn.
 
 14.3.5  '|Y' TEXT DIRECTIONS 2 AND 3
 
@@ -510,40 +514,36 @@ rather than a slogan.
      source ports, and create/delete refusing a protected port.  The
      bit assignment above is the same one.  See D-22.
 
-14.3.7  APPROXIMATED HIT AREAS
+14.3.7  WITHDRAWN MOUSE-REGION CLAIM
 
-     '|:' RIP_MOUSE_REGION_EXT defines a five-vertex region.
-     rip_mouse_region_t holds a rectangle, so RIPlib registers the
-     BOUNDING BOX of the five vertices: a conservative
-     over-approximation for hit-testing rather than a rectangle invented
-     from two of the coordinates.  See D-14.
+     D-14 inferred five vertices from five coordinate pairs. D-31 traced
+     the callee: colon is an affine elliptical pie. RIPlib now draws it
+     and creates no mouse region. This is not a hit-area approximation.
 
-14.3.8  COMMANDS NOT IMPLEMENTED
+14.3.8  COMMAND COVERAGE AND REMAINING SEMANTIC LIMITS
 
-     '|`' -- slot 83, argc 11 (XY x10 + mega1).  Its handler (RVA
-     0x01D963) is structurally identical to '|:' RIP_MOUSE_REGION_EXT:
-     the same call sequence, five consecutive coordinate-pair maps, then
-     SetBkMode.  It is evidently a sibling of that command, but it
-     carries no name in the export table and no shipped scene uses it,
-     so its semantics cannot be established.  Recorded rather than
-     guessed.
-
-     Level 2 '|2C' RIP_PortCopy, '|2R' and the Switch* family ARE
-     implemented; see D-17.
+     D-32 implements '|2<ESC>' (SwitchDirectory) and '|3<ESC>'
+     (EnterBlockMode) as validated host-service state/callbacks. D-31
+     replaces backtick's wrong screen-compositing behavior with a chord.
+     All 117 distinct driver keys have source handlers. Host execution,
+     encoded-stream decoding, and duplicate '|3D' selection are separate
+     unresolved contracts, not established by handler coverage.
+     See ../crosswalk-audit.md for the precise remaining boundaries.
 
 14.3.9  RIPlib-ORIGINAL COMMANDS
 
-     TWENTY commands RIPlib documents have no dispatch entry at all.
-     This section previously named four of them, which understated the
-     extension surface fivefold; the full set is below, obtained by
-     subtracting the driver's letter set per level from the letters the
-     spec chapters document.
+     TWENTY-FOUR source handlers have no dispatch entry in this image.
+     D-31 moves stamp slots to '|3.', adding one to D-30's 23.
+     D-30 derives its count from actual source cases, rather than the older
+     twenty-item documentation list, which included an unimplemented
+     '|1S' and omitted '|21', '|27', '|29' and '|3J'.  Absence from this
+     DLL does not prove absence from every historical protocol version.
 
           level 0    '|^'  '|~'
-          level 1    '|1N' '|1O' '|1Q' '|1S' '|1V' '|1X' '|1Z'
-          level 2    '|20' '|22' '|23' '|24' '|25' '|26' '|28'
-                     '|2c' '|2F'
-          level 3    '|3&' '|3-'
+          level 1    '|1N' '|1O' '|1Q' '|1V' '|1X' '|1Z'
+          level 2    '|20' '|21' '|22' '|23' '|24' '|25' '|26' '|27'
+                     '|28' '|29' '|2c' '|2F'
+          level 3    '|3&' '|3-' '|3J' '|3.'
 
      The driver's own letters, for comparison:
 
@@ -578,14 +578,14 @@ rather than a slogan.
      documents in the same repository disagreeing is exactly the class
      of defect that survives review by prose alone.
 
-     None of the twenty displaces a driver command: every one of those
+     None of the twenty-four displaces a driver command: each of those
      letters is absent from its level's set, so a stream written for
      the driver cannot collide with a RIPlib extension.  They are
      documented as extensions in 11-dll-deviations.md DEV.4.
 
-     Verify this list with scripts/check-spec-examples.py, which
-     reports every documented command whose letter has no dispatch
-     entry rather than passing it silently.
+     Regenerate the source inventory with dll-conformance.py's
+     --crosswalk option; docs/riptel-crosswalk.md lists every source
+     handler, every DLL row and the pinned bbs-land reference inventory.
 
 
 14.3.10  COMMANDS THE DRIVER ACCEPTS AND IGNORES

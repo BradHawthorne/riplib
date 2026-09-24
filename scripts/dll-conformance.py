@@ -41,11 +41,16 @@ Usage:
 """
 import argparse
 import collections
+import contextlib
 import hashlib
+import html
+import importlib.util
+import io
 import os
 import re
 import struct
 import sys
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -107,42 +112,47 @@ def _blocks(src_text):
             (mark["l1"], mark["l0"]),
             (mark["l0"], 10 ** 9))
 
-# Switch-block line ranges in ripscrip.c.  Levels 1, 2 and 3 all sit at the
-# same indentation, so a handler's level is decided by which block it is in,
-# not by how far it is indented.
-BLOCK_L3, BLOCK_L1, BLOCK_L0 = _blocks(open(SRC, encoding="latin-1").read())
-
-
 def level_of(slot):
     """Level 0 runs to slot 84.  Handler ADDRESS regions confirm it: the
     sustained move into the Level 1 region happens at slot 85, not 84."""
     return 0 if slot <= 84 else 1 if slot <= 109 else 2 if slot <= 121 else 3
 
 
-def read_table(d, secs):
+def dispatch_rows(d, secs):
+    """Retain every row, including ESC, duplicate keys and continuations."""
     def rva2off(r):
         for va, vs, rp, rs in secs:
             if va <= r < va + max(vs, rs):
                 return r - va + rp
 
     base = rva2off(0x080820)
+    if base is None or base + 129 * 40 > len(d):
+        raise SystemExit("incomplete dispatch table: expected 129 records")
+    rows = []
+    for i in range(129):
+        raw = d[base + i * 40:base + (i + 1) * 40]
+        types = list(raw[20:38])
+        if 0 in types:
+            types = types[:types.index(0)]
+        rows.append(dict(slot=i, level=level_of(i), letter=raw[15],
+                         handler=struct.unpack_from("<I", raw, 1)[0],
+                         argc=struct.unpack_from("<i", raw, 16)[0],
+                         radix=struct.unpack_from("<H", raw, 38)[0] & 3,
+                         types=types))
+    return rows
+
+
+def read_table(d, secs):
     by_handler = {}
     named = {}
     meta = {}
-    for i in range(129):
-        raw = d[base + i * 40: base + (i + 1) * 40]
-        letter = raw[15]
-        argc = struct.unpack_from("<i", raw, 16)[0]
-        rva = struct.unpack_from("<I", raw, 1)[0]
-        radix = struct.unpack_from("<H", raw, 0x26)[0] & 3
-        widths = []
-        for b in raw[20:38]:
-            if b == 0:
-                break
-            widths.append(2 if b in (0xFF, 0xFE) else b)
+    for row in dispatch_rows(d, secs):
+        i, letter, argc = row["slot"], row["letter"], row["argc"]
+        rva, radix = row["handler"], row["radix"]
+        widths = [2 if b in (0xFF, 0xFE) else b for b in row["types"]]
         if argc > 0 and widths:
             by_handler.setdefault(rva, []).append(widths)
-        if 0x20 <= letter < 0x7F:
+        if letter != 0:
             key = (level_of(i), chr(letter))
             named.setdefault(key, rva)
             meta.setdefault(key, (i, argc, radix))
@@ -150,46 +160,96 @@ def read_table(d, secs):
     return sigs, meta
 
 
+def spell(key):
+    level, ch = key
+    return "|%s%s" % (level or "", ch if ch.isprintable() else "<0x%02X>" % ord(ch))
+
+
+def check_dispatch_accounting(rows, meta, verbose):
+    """Every nonzero letter must survive indexing; every zero row has an owner."""
+    named = [r for r in rows if r["letter"]]
+    keys = {(r["level"], chr(r["letter"])) for r in named}
+    bad = 0
+    for key in sorted(keys ^ set(meta)):
+        print("  ! %s missing or extraneous in indexed dispatch table" % spell(key))
+        bad += 1
+    for row in rows:
+        if row["letter"] == 0 and not any(
+                r["handler"] == row["handler"] and r["level"] == row["level"]
+                for r in named):
+            print("  ! continuation slot %d has no named handler" % row["slot"])
+            bad += 1
+    print("    %d rows: %d named rows, %d continuations, %d distinct keys, "
+          "%d duplicate named row(s)" %
+          (len(rows), len(named), len(rows) - len(named), len(keys), len(named) - len(keys)))
+    return bad
+
+
 # ── RIPlib source ────────────────────────────────────────────────────────
-def level_at(ln):
-    if BLOCK_L3[0] < ln < BLOCK_L3[1]:
-        return 3
-    if BLOCK_L1[0] < ln < BLOCK_L1[1]:
-        return 1
-    if ln > BLOCK_L0[0]:
-        return 0
-    return None
+QUOTED = r'"(?:\\.|[^"\\])*"' + r"|'(?:\\.|[^'\\])*'"
+C_LEXEME = re.compile(QUOTED + r"|/\*.*?\*/|//[^\n]*", re.S)
+BODY_TOKEN = re.compile(
+    r"\bcase\s+('(?:\\.|[^'\\])*'|0x[0-9a-fA-F]+|[0-9]+)\s*:"
+    r"|\bdefault\s*:|\bcase\b|"
+    + QUOTED + r"|[{}]")
 
 
-def handler_bodies(lines, stop_at_break=True):
-    """(level, letter, first-line-index, body text) for each case label."""
-    for i, line in enumerate(lines, 1):
-        m = re.match(r"\s+case '(.)':", line)
-        if not m:
-            continue
-        lvl = level_at(i)
-        if lvl is None:
-            continue
-        body = []
-        for j in range(i - 1, min(i + 120, len(lines))):
-            ln = lines[j]
-            if j > i - 1 and re.match(r"\s+case '.':", ln):
+def handler_bodies(lines):
+    """Read all direct cases in the three command switches, without a cap.
+
+    C brace depth, not indentation or an early break, determines the end.
+    Preserve line numbers while removing comments; quoted braces and nested
+    switch labels cannot terminate a command.  Fail closed on an unfamiliar
+    dispatch layout instead of silently dropping coverage (D-29).
+    """
+    source = "\n".join(lines)
+    blocks = _blocks(source)
+    clean = C_LEXEME.sub(
+        lambda m: re.sub(r"[^\n]", " ", m.group())
+        if m.group().startswith(("/*", "//")) else m.group(), source)
+    switches = list(re.finditer(
+        r"^\s*switch\s*\(s->cmd_char\)\s*\{", clean, re.M))
+    if len(switches) != 3:
+        raise SystemExit("expected 3 command switches, found %d" % len(switches))
+    seen_levels = set()
+    for switch in switches:
+        line = clean.count("\n", 0, switch.end()) + 1
+        levels = [lvl for lvl, (start, end) in zip((3, 1, 0), blocks)
+                  if start < line < end]
+        if len(levels) != 1 or levels[0] in seen_levels:
+            raise SystemExit("cannot classify command switch at line %d" % line)
+        lvl = levels[0]
+        seen_levels.add(lvl)
+        depth, current = 1, None
+        seen_commands = set()
+        for token in BODY_TOKEN.finditer(clean, switch.end()):
+            value = token.group()
+            if value == "{":
+                depth += 1
+            elif value == "}":
+                depth -= 1
+            boundary = depth == 0 or (depth == 1 and
+                        (token.group(1) is not None or value.startswith("default")))
+            if boundary and current is not None:
+                ch, start = current
+                yield lvl, ch, clean.count("\n", 0, start) + 1, clean[start:token.start()]
+                current = None
+            if depth == 0:
                 break
-            body.append(ln)
-            # Stop at the case's OWN terminating break, not at an early exit
-            # inside a guard.  Matching any bare `break;` truncated the body
-            # at the first guard, hiding everything after it -- a two-line
-            # protection guard added to '|v' silently removed its `len >= 8`
-            # gate from the gate check, and the only reason the other
-            # eighteen guards did not do the same is that they happen to be
-            # written on one line.  A checker that depends on the formatting
-            # of the code it checks will lose coverage without saying so, so
-            # require the break to be at the case body's own indent level.
-            if stop_at_break and re.match(r"\s{8}break;\s*$", ln):
-                break
-        txt = re.sub(r"/\*.*?\*/", "", "\n".join(body), flags=re.S)
-        txt = re.sub(r"/\*.*", "", txt, flags=re.S)
-        yield lvl, m.group(1), i, txt
+            if depth == 1 and value == "case":
+                raise SystemExit("unsupported command case at line %d" %
+                                 (clean.count("\n", 0, token.start()) + 1))
+            if depth == 1 and token.group(1) is not None:
+                literal = token.group(1)
+                if literal.startswith("'") and len(literal) != 3:
+                    raise SystemExit("unsupported command character %s" % literal)
+                ch = literal[1] if literal.startswith("'") else chr(int(literal, 0))
+                if ch in seen_commands:
+                    raise SystemExit("duplicate command case %r at level %d" % (ch, lvl))
+                seen_commands.add(ch)
+                current = ch, token.start()
+        else:
+            raise SystemExit("unterminated command switch at line %d" % line)
 
 
 def boundaries(widths):
@@ -297,7 +357,7 @@ def check_string_tails(sigs, lines, verbose):
     is silent -- a filename that no host can match, a URL pointing elsewhere.
     """
     bad = checked = 0
-    for lvl, ch, _, txt in handler_bodies(lines, stop_at_break=False):
+    for lvl, ch, _, txt in handler_bodies(lines):
         key = (lvl, ch)
         if key not in sigs or not sigs[key]:
             continue
@@ -344,15 +404,25 @@ def check_radix(sigs, meta, lines, verbose):
     return bad
 
 
+def level2_defines(text):
+    """Printable and numeric opcodes, including ESC; never drop a define."""
+    out = {}
+    for name, char, number in re.findall(
+            r"#define\s+(RIP2_CMD_\w+)\s+(?:'(.)'|(0x[0-9a-fA-F]+|[0-9]+))", text):
+        out[name] = char if char else chr(int(number, 0))
+    return out
+
+
 def check_coverage(sigs, meta, lines, verbose):
     """Account for every dispatch entry, so a clean result has a known scope."""
     impl = set()
     for lvl, ch, _, _ in handler_bodies(lines):
         impl.add((lvl, ch))
+    print("    %d complete source handlers (levels 0/1/3; no line cap)" % len(impl))
+    print("    level 2 bodies and called helpers are outside these source checks")
     l2 = set()
     if os.path.exists(HDR2) and os.path.exists(SRC2):
-        names = dict(re.findall(r"#define\s+(RIP2_CMD_\w+)\s+'(.)'",
-                                open(HDR2, encoding="latin-1").read()))
+        names = level2_defines(Path(HDR2).read_text(encoding="latin-1"))
         body2 = open(SRC2, encoding="latin-1").read()
         for m in re.finditer(r"case\s+(RIP2_CMD_\w+)\s*:", body2):
             if m.group(1) in names:
@@ -360,7 +430,7 @@ def check_coverage(sigs, meta, lines, verbose):
     buckets = collections.Counter()
     missing = []
     for key, (slot, argc, _) in sorted(meta.items()):
-        tag = "|%s%s" % (key[0] or "", key[1])
+        tag = spell(key)
         if key[0] == 2 and key[1] in l2:
             buckets["level 2 (ripscrip2.c)"] += 1
         elif key in impl:
@@ -376,32 +446,282 @@ def check_coverage(sigs, meta, lines, verbose):
     return 0        # informational: an unimplemented command is not a defect
 
 
+def source_inventory(lines):
+    """Map all direct command cases to source paths and one-based lines."""
+    inventory = {(lvl, ch): ("src/ripscrip.c", line)
+                 for lvl, ch, line, _ in handler_bodies(lines)}
+    names = level2_defines(Path(HDR2).read_text(encoding="latin-1"))
+    source = Path(SRC2).read_text(encoding="latin-1")
+    clean = C_LEXEME.sub(lambda m: re.sub(r"[^\n]", " ", m.group())
+                        if m.group().startswith(("/*", "//")) else m.group(), source)
+    switch = re.search(r"\bswitch\s*\(cmd\)\s*\{", clean)
+    if not switch:
+        raise SystemExit("cannot locate Level 2 command switch")
+    depth = 1
+    tokens = re.compile(r"\bcase\s+(RIP2_CMD_\w+)\s*:|\bcase\b|" + QUOTED + r"|[{}]")
+    for token in tokens.finditer(clean, switch.end()):
+        if token.group() == "{":
+            depth += 1
+        elif token.group() == "}":
+            depth -= 1
+        if depth == 0:
+            break
+        if depth == 1 and token.group() == "case":
+            raise SystemExit("unrecognised Level 2 command label")
+        if depth == 1 and token.group(1):
+            name = token.group(1)
+            if name not in names or (2, names[name]) in inventory:
+                raise SystemExit("unknown or duplicate Level 2 command: " + name)
+            inventory[(2, names[name])] = ("src/ripscrip2.c", clean.count("\n", 0, token.start()) + 1)
+    else:
+        raise SystemExit("unterminated Level 2 command switch")
+    return inventory
+
+
+def crosswalk_markdown(rows, inventory, image, corpus, checks, reference=None, revision=None):
+    """A row-complete inventory; presence never implies behavioural parity."""
+    named = collections.defaultdict(list)
+    for row in rows:
+        if row["letter"]:
+            named[(row["level"], chr(row["letter"]))].append(row)
+    missing, extra = set(named) - set(inventory), set(inventory) - set(named)
+    reference_entries, reference_by_key = [], {}
+    reference_url = ""
+    if reference:
+        spec = importlib.util.spec_from_file_location("ref_compare", Path(HERE) / "ref-compare.py")
+        compare = importlib.util.module_from_spec(spec)
+        # This repository tracks historical .pyc files; don't rewrite them.
+        old_bytecode = sys.dont_write_bytecode
+        try:
+            sys.dont_write_bytecode = True
+            spec.loader.exec_module(compare)
+        finally:
+            sys.dont_write_bytecode = old_bytecode
+        reference_entries = compare.reference_rows(reference)
+        for entry in reference_entries:
+            if entry["key"] is not None:
+                if entry["key"] in reference_by_key:
+                    raise SystemExit("duplicate reference command: %r" % (entry["key"],))
+                reference_by_key[entry["key"]] = entry
+        if revision:
+            if not re.fullmatch(r"[0-9a-f]{40}", revision):
+                raise SystemExit("reference revision must be a full 40-digit Git commit")
+            reference_url = ("https://github.com/bbs-land/remote-imaging-protocol/blob/" + revision +
+                             "/version/3.0/ripscrip/9.0-command-reference.md")
+
+    def reference_status(key):
+        entry = reference_by_key.get(key)
+        if not entry:
+            return "Not listed by opcode"
+        args = entry["arguments"]
+        widths = compare.widths_from(args)
+        if "..." in args or "…" in args:
+            return "Elided / variable list; not compared"
+        if key not in named:
+            return "No DLL opcode to compare"
+        candidates = [r for r in rows if r["level"] == key[0] and
+                      any(r["handler"] == n["handler"] for n in named[key])]
+        if not widths or not any(r["argc"] > 0 and r["types"] for r in candidates):
+            return "No comparable fixed numeric list"
+        for row in candidates:
+            dw = ["n" if t in (254, 255) else str(t) for t in row["types"]]
+            if row["argc"] > 0 and len(dw) == len(widths) and all(
+                    compare.compatible(a, b) for a, b in zip(widths, dw)):
+                return "Numeric shape agrees"
+        return "**Numeric shape differs**"
+
+    def reference_cell(key):
+        entry = reference_by_key.get(key)
+        if not entry:
+            return "Not listed by opcode"
+        label = cell(entry["symbol"])
+        if reference_url:
+            label = "[%s](%s#L%d)" % (label, reference_url, entry["line"])
+        return label + "; " + code(entry["arguments"]) + "; " + reference_status(key)
+    uses = collections.Counter()
+    files = []
+    if corpus:
+        files = sorted(p for p in Path(corpus).rglob("*") if p.suffix.lower() == ".rip")
+        if not files:
+            raise SystemExit("no RIP corpus scenes found: " + corpus)
+        # Match corpus-scan.py's lexical census, not a parser or execution trace.
+        for path in files:
+            for line in path.read_text(encoding="latin-1").splitlines():
+                if line.startswith("!|"):
+                    for chunk in line[2:].split("|"):
+                        if chunk:
+                            key = (int(chunk[0]), chunk[1]) if chunk[0] in "123" and len(chunk) > 1 else (0, chunk[0])
+                            uses[key] += 1
+
+    def cell(value):
+        return html.escape(str(value)).replace("|", "&#124;")
+
+    def code(value):
+        return "<code>%s</code>" % cell(value)
+
+    def location(key):
+        if key not in inventory:
+            return "**Missing handler**"
+        path, line = inventory[key]
+        source_line = Path(ROOT, path).read_text(encoding="latin-1").splitlines()[line - 1]
+        name = re.search(r"\b(?:RIP2_CMD_|RIP_)[A-Za-z0-9_]+", source_line)
+        return "[Present%s](../%s#L%d)" % (": " + name.group() if name else "", path, line)
+
+    out = ["# RIPlib / RIPtel / bbs-land command crosswalk" if reference else
+           "# RIPlib versus RIPtel command crosswalk", "",
+           "Generated by `scripts/dll-conformance.py <RIPSCRIP.DLL> -v --corpus <RIPtel-dir> "
+           "--crosswalk docs/riptel-crosswalk.md`" +
+           (" with `--reference <9.0-command-reference.md> --reference-revision %s`." % revision if reference else "."), "",
+           "Scope: the RIPSCRIP.DLL shipped with the local RIPtel 3.1 installation, "
+           "not the entire RIPtel terminal application. The DLL self-reports 3.00.04. "
+           "Its MD5 is `%s`; %d bytes." % (hashlib.md5(image).hexdigest(), len(image)), "",
+           "Level assignment follows the documented slot runs 0–84 / 85–109 / 110–121 / 122–128; "
+           "levels are inferred, not stored in the records. See [binary provenance](spec/13-dll-command-table.md).", "",
+           "**Present means a source handler exists. It does not mean equivalent rendering, "
+           "parameter handling, host behavior, or test coverage.** No live RIPtel-versus-RIPlib "
+           "pixel or callback comparison was performed.", "",
+           "[Audit conclusions and upstream conflict triage](crosswalk-audit.md).", "",
+           "| Measure | Count |", "|---|---:|",
+           "| DLL dispatch rows, none omitted | %d |" % len(rows),
+           "| Distinct nonzero command keys, including ESC | %d |" % len(named),
+           "| Continuation signature rows | %d |" % sum(r["letter"] == 0 for r in rows),
+           "| Additional named rows with a duplicate key | %d |" % (sum(map(len, named.values())) - len(named)),
+           "| DLL command keys with a RIPlib handler | %d |" % len(set(named) & set(inventory)),
+           "| DLL command keys missing a RIPlib handler | %d |" % len(missing),
+           "| RIPlib command keys absent from this DLL | %d |" % len(extra), "",
+           "## Findings and limits", "",
+           "- Missing source handlers: %s." % (", ".join(code(spell(k)) for k in sorted(missing)) or "none"),
+           "- Command identities and behavioral fixes are evaluated separately from this "
+           "inventory. See the [audit report](crosswalk-audit.md) and "
+           "[D-31 through D-33](spec/12-dll-provenance.md) for driver geometry fixtures, "
+           "host-service contracts, fill and move semantics, and their validation limits.",
+           "- `|3D` occurs twice, at slots 122 and 125, with different handlers. "
+           "RIPlib implements the slot-122 delay interpretation; the other handler is not "
+           "established as equivalent. [D-4](spec/12-dll-provenance.md).",
+           "- Host-mediated operations and deliberate extensions/tolerances are documented "
+           "in the [divergence register](spec/14-divergence-register.md). "
+           "Handler coverage does not close those separate behavioral questions.",
+           "- The static offset/gate/radix checks cover subsets of levels 0/1/3. "
+           "Level 2 bodies, helper implementations, computed offsets, and pixel parity "
+           "are outside those checks. The tables below inventory those handlers without "
+           "claiming they passed these checks.", "",
+           "## Current mechanical checks", "", "```text", checks.rstrip(), "```", ""]
+    if reference:
+        out += ["## bbs-land reference audit", "",
+                "Reference commit: `%s`. File SHA-256: `%s`." %
+                (revision or "not supplied", hashlib.sha256(reference.read_bytes()).hexdigest()), "",
+                "All %d inventory rows retained: %d keyed opcodes and %d names without "
+                "assigned opcodes. The latter cannot be matched by guessing. Level 9 and "
+                "the three ESC spellings remain visible." %
+                (len(reference_entries), len(reference_by_key), len(reference_entries) - len(reference_by_key)), "",
+                "| Reference versus DLL | Keys |", "|---|---:|"]
+        for status, count in sorted(collections.Counter(reference_status(k) for k in reference_by_key).items()):
+            out.append("| %s | %d |" % (status, count))
+        out += ["", "The comparison checks numeric field shape, allowing `XY`/`CM` "
+                "to match literal width 2 at default settings. Bare trailing text is "
+                "outside the numeric record; agreement does not validate its placement "
+                "or meaning. Variable/elided lists are explicitly unverified. Multiple "
+                "DLL signatures are considered. This is documentation agreement, not "
+                "an executable bbs-land implementation test.", ""]
+    if corpus:
+        out += ["Corpus census: %d scenes, %d lexical command instances, %d distinct "
+                "keys. Counts split raw `!|` lines like `corpus-scan.py`; they do not "
+                "evaluate preprocessing, escapes, or execution. Duplicate DLL rows repeat "
+                "the same opcode count and must not be summed." % (len(files), sum(uses.values()), len(uses)), ""]
+    else:
+        out += ["Corpus counts were not measured.", ""]
+    out += ["## Every DLL dispatch row", "",
+            "Types are raw record widths; `XY` and `color` are configurable-width fields. "
+            "Zero numeric arguments can still carry text. Continuations are associated by "
+            "handler address within a level, not by adjacency.", "",
+            "| Slot | Command / owner | Handler RVA | argc | Types | RIPlib | Corpus uses |" + (" bbs-land |" if reference else ""),
+            "|---:|---|---|---:|---|---|---:|" + ("---|" if reference else "")]
+    for row in rows:
+        owners = ([(row["level"], chr(row["letter"]))] if row["letter"] else
+                  [k for k, group in named.items() if k[0] == row["level"] and
+                   any(r["handler"] == row["handler"] for r in group)])
+        label = ", ".join(code(spell(k)) for k in owners)
+        if not row["letter"]:
+            label += " (continuation)"
+        elif len(named[owners[0]]) > 1:
+            label += " (duplicate key; see finding)"
+        types = ", ".join({255: "XY", 254: "color"}.get(t, str(t)) for t in row["types"]) or "—"
+        out.append("| %d | %s | %s | %d | %s | %s | %s |" % (
+            row["slot"], label, code("0x%06x" % (row["handler"] - 0x10000000)),
+            row["argc"], types, ", ".join(location(k) for k in owners) or "Unresolved owner",
+            ", ".join(str(uses[k]) for k in owners) if corpus else "unmeasured") +
+            (" " + "; ".join(reference_cell(k) for k in owners) + " |" if reference else ""))
+    out += ["", "## RIPlib handlers absent from this DLL", "",
+            "These are additions relative to this image; absence here does not establish "
+            "their status in other historical RIPscrip releases.", "",
+            "| Command | RIPlib source | Corpus uses |" + (" bbs-land |" if reference else ""),
+            "|---|---|---:|" + ("---|" if reference else "")]
+    for key in sorted(extra):
+        out.append("| %s | %s | %s |" % (code(spell(key)), location(key), str(uses[key]) if corpus else "unmeasured") +
+                   (" " + reference_cell(key) + " |" if reference else ""))
+    if reference:
+        out += ["", "## Reference opcodes absent from this DLL", "",
+                "| Command | Reference | RIPlib |", "|---|---|---|"]
+        for key in sorted(set(reference_by_key) - set(named)):
+            out.append("| %s | %s | %s |" % (code(spell(key)), reference_cell(key), location(key)))
+        out += ["", "## Reference names without assigned opcodes", "",
+                "No opcode match or implementation claim is made for these rows.", "",
+                "| Name | Reference line |", "|---|---:|"]
+        for entry in reference_entries:
+            if entry["key"] is None:
+                out.append("| %s | %d |" % (cell(entry["symbol"]), entry["line"]))
+    out += ["", "## RIPlib source fingerprints", "", "SHA-256 of the audited source files, with CRLF normalized to LF:", "",
+            "| File | SHA-256 |", "|---|---|"]
+    for path in sorted(list((Path(ROOT) / "src").glob("*.c")) +
+                       list((Path(ROOT) / "src").glob("*.h")) +
+                       list((Path(ROOT) / "include").glob("*.h"))):
+        out.append("| %s | %s |" % (Path(path).relative_to(ROOT).as_posix(),
+                                   hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest()))
+    return "\n".join(out) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dll")
     ap.add_argument("--verbose", "-v", action="store_true")
+    ap.add_argument("--crosswalk", type=Path, help="write complete Markdown command crosswalk")
+    ap.add_argument("--corpus", help="optional RIPtel directory for lexical corpus counts")
+    ap.add_argument("--reference", type=Path, help="bbs-land 3.0 command reference for the crosswalk")
+    ap.add_argument("--reference-revision", help="full bbs-land Git commit used for evidence links")
     a = ap.parse_args()
 
     d, secs = load(a.dll)
     sigs, meta = read_table(d, secs)
+    rows = dispatch_rows(d, secs)
     lines = open(SRC, encoding="latin-1").read().split("\n")
 
     defects = 0
-    for name, fn in (("read offsets", lambda: check_offsets(sigs, lines, a.verbose)),
+    reports = []
+    for name, fn in (("dispatch accounting", lambda: check_dispatch_accounting(rows, meta, a.verbose)),
+                     ("read offsets", lambda: check_offsets(sigs, lines, a.verbose)),
                      ("string tails", lambda: check_string_tails(sigs, lines, a.verbose)),
                      ("length gates", lambda: check_gates(sigs, lines, a.verbose)),
                      ("radix selection", lambda: check_radix(sigs, meta, lines, a.verbose)),
                      ("coverage", lambda: check_coverage(sigs, meta, lines, a.verbose))):
-        print("%s:" % name)
-        defects += fn()
+        with contextlib.redirect_stdout(io.StringIO()) as captured:
+            print("%s:" % name)
+            defects += fn()
+        report = captured.getvalue()
+        print(report, end="")
+        reports.append(report)
 
     if TOLERATED_GATES or TOLERATED_READS:
         print("\ntolerances (corpus-backed, see 14-divergence-register.md):")
         for k, v in TOLERATED_GATES.items():
             print("    %-5s %s" % (k, v))
 
-    print("\n%s" % ("OK: no conformance defects." if not defects
-                    else "FAIL: %d defect(s)." % defects))
+    status = "OK: no conformance defects." if not defects else "FAIL: %d defect(s)." % defects
+    print("\n" + status)
+    if a.crosswalk:
+        a.crosswalk.write_text(crosswalk_markdown(rows, source_inventory(lines), d,
+                                                a.corpus, "".join(reports) + status,
+                                                a.reference, a.reference_revision), encoding="utf-8")
+        print("wrote " + str(a.crosswalk))
     return 1 if defects else 0
 
 

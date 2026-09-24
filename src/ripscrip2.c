@@ -49,6 +49,9 @@
 
 extern void palette_write_rgb565(uint8_t index, uint16_t rgb565);
 extern void riplib_host_tx(const char *buf, int len);
+/* Shared string handling lives with the parser's unescape/variable helpers. */
+extern void rip_switch_directory(rip_state_t *s, const char *raw, int len);
+extern void rip_set_refresh_command(rip_state_t *s, const char *raw, int len);
 
 #define RIP2_PI_F 3.14159265358979323846f
 
@@ -1114,19 +1117,21 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         break;
     }
 
-    /* ── !|2R -- Host-triggered screen refresh ──────────────────── */
-    case RIP2_CMD_SET_REFRESH: {
-        /* Dispatch slot 117 (RVA 0x046bd9), argc 1, mega4.  RIPlib read this
-         * as a zero-argument command.  The reserved field is consumed so the
-         * frame stays in sync and recorded for capability queries; the
-         * driver does not otherwise act on it. */
+    case RIP2_CMD_SWITCH_DIRECTORY: /* RIP_SwitchDirectory -- res:4 directory */
         if (raw_len >= 4)
-            rs->refresh_res = (uint32_t)(mega1(raw + 0) * 46656 +
+            rip_switch_directory(rs, raw + 4, raw_len - 4);
+        break;
+
+    /* ── !|2R -- Register the host refresh command ─────────────── */
+    case RIP2_CMD_SET_REFRESH: {
+        /* Slot 117 ignores the mega4 but assigns its STRING through
+         * refreshAssignCommand (0x03E43C). Empty/$OFF$ removes the binding. */
+        if (raw_len < 4) break;
+        rs->refresh_res = (uint32_t)(mega1(raw + 0) * 46656 +
                                          mega1(raw + 1) * 1296 +
                                          mega1(raw + 2) * 36 +
                                          mega1(raw + 3));
-        /* Mark all rows dirty for refresh — platform-specific */
-        draw_mark_all_dirty();
+        rip_set_refresh_command(rs, raw + 4, raw_len - 4);
         break;
     }
 

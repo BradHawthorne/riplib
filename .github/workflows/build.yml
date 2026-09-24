@@ -27,6 +27,19 @@ jobs:
     - name: Test
       run: ctest --test-dir build --output-on-failure -C ${{ matrix.build_type }}
 
+    - name: Install and exercise a C++ consumer
+      run: |
+        cmake --install build --config ${{ matrix.build_type }} --prefix "${{ github.workspace }}/build-install"
+        cmake -S tests/consumer -B build-consumer-installed -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_PREFIX_PATH="${{ github.workspace }}/build-install"
+        cmake --build build-consumer-installed --config ${{ matrix.build_type }}
+        ctest --test-dir build-consumer-installed --output-on-failure -C ${{ matrix.build_type }}
+
+    - name: Exercise a C++ consumer vendoring the source
+      run: |
+        cmake -S tests/consumer -B build-consumer-vendor -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DRIPLIB_SOURCE_DIR="${{ github.workspace }}"
+        cmake --build build-consumer-vendor --config ${{ matrix.build_type }}
+        ctest --test-dir build-consumer-vendor --output-on-failure -C ${{ matrix.build_type }}
+
   sanitizers:
     runs-on: ubuntu-latest
     steps:
@@ -53,13 +66,14 @@ jobs:
       run: |
         # Do NOT put -fsanitize=fuzzer in global CMAKE_C_FLAGS: it injects a
         # main() that collides with CMake's compiler-probe test program and
-        # breaks configure.  The fuzzer flag is scoped to the fuzz_parser
-        # target in tests/CMakeLists.txt; here we only enable the option.
+        # breaks configure. tests/CMakeLists.txt instruments riplib with
+        # fuzzer-no-link and links the fuzz_parser entry point with fuzzer.
         cmake -B build-fuzz \
           -DCMAKE_C_COMPILER=clang \
           -DRIPLIB_BUILD_TESTS=ON -DRIPLIB_BUILD_FUZZ=ON
         cmake --build build-fuzz --target fuzz_parser
-        ./build-fuzz/tests/fuzz_parser -max_total_time=30 -rss_limit_mb=2048
+        python3 scripts/fuzz-seeds.py build-fuzz/corpus
+        UBSAN_OPTIONS=halt_on_error=1 ./build-fuzz/tests/fuzz_parser build-fuzz/corpus -max_total_time=30 -rss_limit_mb=2048
 
   coverage:
     runs-on: ubuntu-latest

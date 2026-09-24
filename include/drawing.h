@@ -26,6 +26,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ── Dirty-row callback ──────────────────────────────────────────── *
  * Optional hook: called by every draw_* function that modifies pixels,
  * with the Y range [y_min, y_max] of affected rows (inclusive).
@@ -159,3 +163,7 @@ uint8_t draw_get_pixel(int16_t x, int16_t y);
 void draw_text(int16_t x, int16_t y, const char *str, int len,
                const uint8_t *font, uint8_t font_height,
                uint8_t fg, uint8_t bg);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

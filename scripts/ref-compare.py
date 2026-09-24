@@ -152,9 +152,9 @@ def load_riplib2():
     """
     letters = {}
     for line in HDR2.read_text(encoding="latin-1").splitlines():
-        m = re.match(r"#define\s+(RIP2_CMD_\w+)\s+'(.)'", line)
+        m = re.match(r"#define\s+(RIP2_CMD_\w+)\s+(?:'(.)'|(0x[0-9a-fA-F]+|[0-9]+))", line)
         if m:
-            letters[m.group(1)] = m.group(2)
+            letters[m.group(1)] = m.group(2) or chr(int(m.group(3), 0))
 
     lines = SRC2.read_text(encoding="latin-1").splitlines()
     out = {}
@@ -231,24 +231,39 @@ def load_riplib():
 
 # ---------------------------------------------------------------- reference
 
+def reference_rows(path):
+    """Retain unlinked, ESC and level-9 rows, and explicitly unassigned names."""
+    rows = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.startswith("| "):
+            continue
+        c = [x.strip() for x in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if len(c) < 6 or not re.match(r"^\d+(?:\s|$)", c[1]):
+            continue
+        level = int(re.match(r"\d+", c[1]).group())
+        sym = re.match(r"\[([^]]+)\]", c[0])
+        token = re.match(r"`([^`]+)`", c[2])
+        cmd = token.group(1) if token else None
+        if cmd and cmd.lower() == "<esc>":
+            cmd = "\x1b"
+        key = (level, cmd) if cmd and len(cmd) == 1 else None
+        if key is None and c[2] != "-":
+            raise SystemExit("unrecognised reference opcode at line %d: %s" % (number, c[2]))
+        rows.append(dict(key=key, symbol=sym.group(1) if sym else c[0],
+                         arguments=c[3].replace("`", ""), line=number))
+    if not rows:
+        raise SystemExit("no reference command rows found")
+    return rows
+
+
 def load_reference(path):
     out = {}
-    for line in path.read_text(encoding="utf-8").split("\n"):
-        if not line.startswith("| ["):
-            continue
-        c = [x.strip() for x in line.split("|")[1:-1]]
-        if len(c) < 4:
-            continue
-        sym = re.match(r"\[([A-Z_0-9]+)\]", c[0])
-        cmd = re.sub(r"\(\\?\*\)|`", "", c[2]).strip()
-        if not sym or c[1] not in "0123" or len(cmd) != 1:
-            continue
-        args = c[3].replace("`", "")
-        # An elided list ("c1:2 c2:2 ... c16:2") yields only the pairs
-        # literally written, which once reported '|Q' as a 32-vs-6
-        # divergence where the reference in fact agrees.  Flag, don't count.
-        elided = "..." in args or "…" in args
-        out[(int(c[1]), cmd)] = (widths_from(args), elided)
+    for row in reference_rows(path):
+        key, args = row["key"], row["arguments"]
+        if key is not None:
+            if key in out:
+                raise SystemExit("duplicate reference opcode: %r" % (key,))
+            out[key] = (widths_from(args), "..." in args or "…" in args)
     return out
 
 

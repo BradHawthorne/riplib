@@ -121,6 +121,10 @@ option(RIPLIB_BUILD_TESTS "Build test suite" OFF)
 option(RIPLIB_BUILD_FUZZ "Build libFuzzer harness (requires clang + -fsanitize=fuzzer)" OFF)
 option(RIPLIB_INSTALL "Generate install() rules and package config" ON)
 
+if(RIPLIB_BUILD_FUZZ AND NOT (RIPLIB_BUILD_TESTS AND BUILD_TESTING))
+    message(FATAL_ERROR "RIPLIB_BUILD_FUZZ requires RIPLIB_BUILD_TESTS=ON and BUILD_TESTING=ON")
+endif()
+
 if(RIPLIB_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()

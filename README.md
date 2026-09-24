@@ -78,6 +78,12 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 
 ### Aligned to the shipping driver (v2.0.0)
 
+The [three-way command crosswalk](docs/riptel-crosswalk.md) compares the
+current RIPlib handlers, RIPtel's shipping DLL, and a pinned bbs-land
+reference. The [audit fixes and evidence](docs/crosswalk-audit.md) cover
+all 117 driver keys, corrected ellipse/fill/move behavior, and the remaining
+semantic limits. Handler coverage does not establish pixel parity.
+
 RIPlib's command set is checked against the RIPscrip driver TeleGrafix
 shipped, rather than against the published specifications alone. In v2.0.0
 that moved **thirteen Level-0 commands** to different meanings — see
@@ -329,9 +335,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The suite ships 330 individual checks plus two behavioural suites:
+The suite includes rendering, parser, compatibility, and audit checks:
 - `test_drawing` — 41 rendering primitives, fonts, and edge-case checks.
-- `test_ripscrip` — 283 FSM transitions, dispatched commands, mouse
+- `test_ripscrip` — 328 FSM transitions, dispatched commands, mouse
   hit-testing, variable expansion, host callbacks, port system.
 - `test_compat` — 6 fixture replays with FNV-1a frame-hash lockdown so
   pixel-level regressions show up immediately.
@@ -339,6 +345,8 @@ The suite ships 330 individual checks plus two behavioural suites:
   asserting no crash, no wedged FSM and no drawing outside the framebuffer,
   and reporting painted pixels, distinct colours and pending asset requests.
   Reports SKIP unless `-DRIPLIB_CORPUS_DIR` points at an installation.
+- `test_dll_conformance` — 13 instrument regressions, including numeric
+  opcodes, complete handlers, continuation rows, and negative reinjections.
 - `test_fuzz_seeded` — fixed-seed mutation fuzzer over the command layer,
   including long payloads with `\` continuations, against a guard-banded
   framebuffer. Takes an iteration count; ctest runs 20,000.

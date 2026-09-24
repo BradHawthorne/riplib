@@ -13,6 +13,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > deliberately held at 2.0.1 while this work continues. Where an entry
 > refers to "2.0.2" it means the group of changes under that heading.
 
+## [Unreleased] — crosswalk corrections, 2026-09-24
+
+Driver-derived fixes from the [RIPlib/RIPtel/bbs-land audit](docs/crosswalk-audit.md).
+No new version has been tagged or published.
+
+### Fixed
+
+- Correct the five affine ellipse commands: comma, period, colon, backtick,
+  and brace. Backtick now requires 21 characters and reads its fill digit at
+  offset 20. Geometry has 52 fixtures produced by executing the pinned DLL
+  helper; this does not assert complete GDI pixel parity.
+- Implement Level 2 ESC logical-directory selection and Level 3 ESC block
+  transfer requests through stored host state and an optional callback.
+- Make `|2R` define a refresh command, transmitted only when the host calls
+  `rip_request_refresh()`, rather than immediately marking scanlines dirty.
+- Apply background ink for empty fills across filled primitives; use the fill
+  brush for filled Bezier and compound polygons. Compound fills no longer
+  inherit the pen's dash or thickness.
+- Make CopyBlit and Scroll use COPY and their mode-selected exposed-source
+  fills, preserving overlap. Handle inverted/exclusive scroll bounds and
+  sample mode 6 before moving pixels.
+- Repair audit extraction/accounting for long and nested handlers, numeric
+  labels, ESC macros, continuation rows, and duplicate dispatch keys.
+
+- Add missing C linkage guards to six public headers so C++ consumers link.
+- Prevent overflow in tiled-icon loop counters and out-of-range affine
+  intersection conversions; remove the obsolete internal scaled-copy helper.
+- Instrument the library in fuzz builds and test installed/vendored C++
+  consumers across the CI platform matrix.
+
+### Migration
+
+- Change RIPlib-specific stamp-slot commands from `|.` to `|3.`. Period now
+  draws the driver's ellipse outline; `|3J` continues to save icon slots.
+- Rebuild embedders against the matching library and headers: host-service
+  fields extend the public `rip_state_t`. The released version macros remain
+  unchanged until a release is prepared.
+
+### Validation
+
+- 328 parser tests, all six CTest groups on Windows and Linux ASan/UBSan,
+  35 vendor scenes, 14 audit-tool tests, and an RP2350 ARM archive build.
+- Twelve tests fail against the isolated pre-fix runtime and pass with the
+  changes. Static conformance reports zero defects; 58 driver/source/corpus
+  claims hold. The audit report retains exact corpus changes and remaining
+  host/rendering uncertainties.
+
 ## [2.0.3] — unreleased
 
 Patch release. Resolves the three argument layouts 2.0.2 recorded as

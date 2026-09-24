@@ -185,15 +185,13 @@ void rip_blit_pixels_tiled(rip_state_t *s,
 
     draw_save_clip(&saved_clip);
     draw_set_clip(x0, y0, x1, y1);
-    for (int16_t y = y0; y <= y1; y = (int16_t)(y + src_h)) {
-        for (int16_t x = x0; x <= x1; x = (int16_t)(x + src_w)) {
-            rip_blit_pixels(s, x, y, pixels, src_w, src_h,
+    /* Keep iteration outside int16_t: the final increment can pass 32767
+     * even though each tile origin fits. Narrowing it would wrap forever. */
+    for (int32_t y = y0; y <= y1; y += src_h) {
+        for (int32_t x = x0; x <= x1; x += src_w) {
+            rip_blit_pixels(s, (int16_t)x, (int16_t)y, pixels, src_w, src_h,
                             (int16_t)src_w, (int16_t)src_h, write_mode);
-            if (src_w == 0)
-                break;
         }
-        if (src_h == 0)
-            break;
     }
     draw_restore_clip(&saved_clip);
 }
@@ -277,38 +275,4 @@ void rip_draw_icon_pixels(rip_state_t *s,
 
     rip_blit_pixels(s, bx0, by0, pixels, src_w, src_h, dst_w, dst_h,
                     write_mode);
-}
-
-void rip_copy_screen_region_scaled(rip_state_t *s,
-                                          int16_t sx, int16_t sy,
-                                          int16_t sw, int16_t sh,
-                                          int16_t dx, int16_t dy,
-                                          int16_t dw, int16_t dh,
-                                          uint8_t write_mode) {
-    size_t bytes;
-    uint8_t *scratch;
-
-    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
-        return;
-    if (write_mode > DRAW_MODE_NOT)
-        write_mode = DRAW_MODE_COPY;
-
-    if (sw == dw && sh == dh && write_mode == DRAW_MODE_COPY) {
-        draw_copy_rect(sx, sy, dx, dy, sw, sh);
-        return;
-    }
-
-    bytes = (size_t)(uint16_t)sw * (size_t)(uint16_t)sh;
-    if (bytes == 0)
-        return;
-    if (bytes > RIP_CLIPBOARD_MAX)   /* cap oversized transient, matching the clipboard paths (C-014) */
-        return;
-
-    scratch = (uint8_t *)malloc(bytes);
-    if (!scratch)
-        return;
-    draw_save_region(sx, sy, sw, sh, scratch);
-    rip_blit_pixels(s, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
-                    dw, dh, write_mode);
-    free(scratch);
 }

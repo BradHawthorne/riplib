@@ -23,6 +23,7 @@ Usage:
 """
 import argparse
 import hashlib
+import importlib.util
 import os
 import re
 import struct
@@ -30,6 +31,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+_spec = importlib.util.spec_from_file_location("conformance", os.path.join(HERE, "dll-conformance.py"))
+CONFORMANCE = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(CONFORMANCE)
 SRC = os.path.join(ROOT, "src", "ripscrip.c")
 SRC2 = os.path.join(ROOT, "src", "ripscrip2.c")
 
@@ -190,19 +194,10 @@ def source():
 
 
 def case_body(text, letter, lo, hi):
-    """Body of `case '<letter>':` whose line number falls in [lo, hi)."""
-    lines = text.split("\n")
-    for i, l in enumerate(lines, 1):
-        if not re.match(r"\s+case '%s':" % re.escape(letter), l):
-            continue
-        if not (lo < i < hi):
-            continue
-        body = []
-        for j in range(i - 1, min(i + 120, len(lines))):
-            if j > i - 1 and re.match(r"\s+case '.':", lines[j]):
-                break
-            body.append(lines[j])
-        return "\n".join(body)
+    """Complete body, including numeric labels and nested control flow."""
+    for level, ch, line, body in CONFORMANCE.handler_bodies(text.splitlines()):
+        if ch == letter and lo < line < hi:
+            return text.splitlines()[line-1] + "\n" + body
     return None
 
 
@@ -417,6 +412,65 @@ def main():
             check(name, not bad_pat.search(text), "checked for port_flags & 0x04/0x08")
         else:
             check(name, bool(re.search(pat, text)), "pattern %r" % pat)
+
+    # ---- D-31..33: handler-derived geometry and host/fill contracts -------
+    def instructions(start, end):
+        if not have_cs:
+            return None
+        off = rva2off(start)
+        md = Cs(CS_ARCH_X86, CS_MODE_32)
+        return list(md.disasm(d[off:off + end - start], IB + start))
+
+    for slot, mode in ((8, 1), (10, 0), (11, 2), (83, 3), (84, 0)):
+        start = table[slot][1]
+        end = min(r for _, r, _, _, _ in table if r > start)
+        ins = instructions(start, end)
+        calls = [] if ins is None else [i for i, op in enumerate(ins)
+                 if op.mnemonic == "call" and op.op_str == "0x1000fa70"]
+        # Last argument pushed is the helper's first argument, the closure mode.
+        got = []
+        for i in calls:
+            push = next((op for op in reversed(ins[:i]) if op.mnemonic == "push"), None)
+            value = push.op_str if push else None
+            if value == "edi":
+                writes = [op for op in ins[:i] if op.mnemonic in ("mov", "xor", "lea", "pop", "add", "sub")
+                          and op.op_str.split(',')[0] == "edi"]
+                value = "0" if writes and writes[-1].mnemonic == "xor" and writes[-1].op_str == "edi, edi" else None
+            got.append(value)
+        check("slot %d calls ellipse generator with closure %d" % (slot, mode),
+              None if ins is None else got == [str(mode)], str(got))
+
+    for name, start, end, callee in (
+            ("refresh assigns a command string", 0x46BD9, 0x46C64, "0x1003e43c"),
+            ("SwitchDirectory names its host service", 0x46F66, 0x46FC0, None),
+            ("EnterBlockMode names its host service", 0x24B4E, 0x24C60, None)):
+        ins = instructions(start, end)
+        if callee:
+            found = ins is not None and any(i.mnemonic == "call" and i.op_str == callee for i in ins)
+        else:
+            expected = "RIP_SwitchDirectory" if start == 0x46F66 else "RIP_EnterBlockMode"
+            strings = [cstr(d, rva2off, int(i.op_str, 16)) for i in ins or []
+                       if i.mnemonic == "push" and i.op_str.startswith("0x")]
+            found = any(expected in s for s in strings if s)
+        check(name, None if ins is None else found, "bounded disassembly")
+
+    off = rva2off(0x7AFD8)
+    check("EMPTY brush rows are zero; SOLID rows are 255",
+          struct.unpack_from('<16H', d, off) == (0,)*8 + (255,)*8, "brush table 0x7AFD8")
+    for cmd, start, end in (("|1g", 0xB7A4, 0xB9CF), ("|1G", 0xD7E0, 0xD9DD)):
+        ins = instructions(start, end)
+        check(cmd + " move requests SRCCOPY, not mode-selected ROP",
+              None if ins is None else any(i.mnemonic == "push" and i.op_str == "0xcc0020" for i in ins),
+              "SRCCOPY immediate before blit")
+    for ch, pat in ((",", r"rip_draw_affine_oval\(s,p,1,false\)"),
+                    (".", r"rip_draw_affine_oval\(s,p,0,false\)"),
+                    (":", r"rip_draw_affine_oval\(s,p,2,"),
+                    ("`", r"rip_draw_affine_oval\(s,p,3,"),
+                    ("{", r"rip_draw_affine_oval\(s,p,0,true\)")):
+        body = case_body(src, ch, *BLOCK[0])
+        check("|" + ch + " uses affine geometry, without host side effects",
+              None if body is None else bool(re.search(pat, re.sub(r"\s+", "", body))) and
+              not re.search(r"draw_copy_rect|num_mouse_regions|rip_icon_lookup", body), pat)
 
     # ---- report ----------------------------------------------------------
     ok = sum(1 for _, r, _ in results if r is True)

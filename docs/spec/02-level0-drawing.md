@@ -157,7 +157,7 @@ BGI fill patterns:
 
      ID   Name            Description
      --   -----------     ----------------------------------
-     0    EMPTY_FILL      No fill (background only)
+     0    EMPTY_FILL      Solid background-color fill
      1    SOLID_FILL      Solid fill
      2    LINE_FILL       Horizontal lines (---)
      3    LTSLASH_FILL    Light forward slash (///)
@@ -422,8 +422,8 @@ Draws a circle outline using the midpoint circle algorithm.
      Arguments:    cx:2 cy:2 radius:2
      Format:       !|G<cx><cy><r>|
 
-Draws a filled circle. If fill pattern is non-empty, fills with
-fill color first, then draws outline in draw color.
+Draws a circle with the current fill brush (background color for EMPTY).
+When borders are enabled, outlines it in the drawing color.
 
      Attributes: [DC] [FC] [FP] [WM] [CL]
 
@@ -465,8 +465,8 @@ from the 3 o'clock position (standard math convention).
      Arguments:    cx:2 cy:2 rx:2 ry:2
      Format:       !|o<cx><cy><rx><ry>|
 
-Draws a filled ellipse (full 360°). If fill pattern is non-empty,
-fills with fill color, then draws outline in draw color.
+Draws a filled ellipse (full 360°) with the current fill brush (background
+color for EMPTY). When borders are enabled, outlines it in drawing color.
 
      Attributes: [DC] [FC] [FP] [WM] [CL]
 
@@ -510,9 +510,9 @@ in extended command sets. ry is Y-scaled, rx is not.
      Format:       !|I<cx><cy><sa><ea><r>|
 
 Draws a pie sector (arc + two radial lines from center to arc
-endpoints). If fill pattern is non-empty, fills the sector with
-fill color using scanline-based angle+distance testing (FPU),
-then draws outline in draw color.
+endpoints) using the current fill brush (background color for EMPTY),
+with scanline-based angle+distance testing (FPU). When borders are
+enabled, outlines it in drawing color.
 
      v3.1 NOTE: The fill algorithm uses per-pixel atan2f angle
      testing instead of flood fill. This eliminates the pixel-gap

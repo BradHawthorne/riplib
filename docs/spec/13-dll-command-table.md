@@ -72,9 +72,11 @@ It is not identical with the 80/25/19/5 reported by the original
 reconstruction, so treat the level column as provisional and the
 letter/handler/arity columns as the actual evidence.
 
-Record counts exceed distinct-letter counts because of the
-continuation rows described in 12.11 - level 0 carries eleven, and
-levels 1 to 3 one apiece for their ESC form.
+Record counts exceed distinct command keys because level 0 carries
+eleven continuation rows and level 3 names '|3D' twice with different
+handlers.  ESC is a nonzero command byte at levels 1, 2 and 3, NOT a
+continuation.  Thus 129 rows comprise 118 named rows / 117 distinct
+keys plus 11 continuation rows.  See D-30 and the generated crosswalk.
 
 A HANDLER ADDRESS BAND was tried first and rejected.  It agrees with
 the slot runs on 128 of 129 records and disagrees on exactly one:

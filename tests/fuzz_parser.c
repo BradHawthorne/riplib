@@ -3,9 +3,9 @@
  *
  * This target is OPTIONAL.  Build with:
  *
- *   cmake -B build-fuzz -DRIPLIB_BUILD_FUZZ=ON \
+ *   cmake -B build-fuzz -DRIPLIB_BUILD_TESTS=ON -DRIPLIB_BUILD_FUZZ=ON \
  *         -DCMAKE_C_COMPILER=clang \
- *         -DCMAKE_C_FLAGS="-fsanitize=fuzzer,address,undefined -g -O1"
+ *         -DCMAKE_C_FLAGS="-fsanitize=fuzzer-no-link,address,undefined -g -O1"
  *   cmake --build build-fuzz
  *   ./build-fuzz/tests/fuzz_parser -max_total_time=60
  *

@@ -44,3 +44,7 @@ design/bbs-land-alignment.md
 
 # Assistant tooling for working on this repo, not part of the library.
 .claude/
+
+# Generated Python bytecode.
+__pycache__/
+*.py[cod]
