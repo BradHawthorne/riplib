@@ -255,3 +255,28 @@ This pass changes no wire field widths and preserves legacy service aliases.
 The public session structure grows, so consumers must rebuild. Exact fonts,
 GDI edges, clipboard screen capture, independent window surfaces and full
 host-macro execution remain explicit integration/rendering boundaries.
+
+## Raster value iteration (D-38)
+
+Native-size image restores now obey the active viewport for every existing
+drawing raster operation. Tile boxes intersect that viewport, retain the
+original tile phase and skip invisible tiles. Clipboard captures initialize
+offscreen padding, Level 2 shares that implementation, and scaled port-copy
+scratch images are initialized before capture. Unrepresentable clipboard
+dimensions are rejected without damaging the previous clipboard.
+
+Six regressions cover pixels, source stride, empty clips, extreme origins,
+dirty rows, tile phase, reused capture bytes, metadata and wire-level scaled
+port copies. The first five fail against 7f773bd. There are now 341 parser
+tests and 43 drawing tests. Windows GCC/MSVC and Linux Clang ASan/UBSan pass
+all six CTest groups. All 35 corpus scene metrics are identical to 7f773bd;
+67 driver/source predicates and all nine coverage floors still pass. GCC
+static analysis and the RP2350 archive build pass. A further 100,000 seeded
+mutations pass under sanitizers.
+
+No syntax or public session layout changes in this iteration. Exact icon
+clipboard screen capture remains open: static driver tracing finds an
+exclusive source rectangle passed to a helper that allocates inclusive
+dimensions, then selects a scaling path. That needs an executable rectangle
+and copy-call oracle before changing capture dimensions. See D-38 and
+[iteration-state.md](iteration-state.md) for the evidence and next experiment.

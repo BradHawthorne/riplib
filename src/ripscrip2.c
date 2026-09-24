@@ -43,6 +43,7 @@
 #include "riplib_platform.h"
 #include "drawing.h"
 #include "rip_meganum.h"
+#include "rip_clipboard.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -108,36 +109,6 @@ static uint8_t rip2_nearest_palette_index(const ripscrip2_state_t *s,
     return (uint8_t)best_idx;
 }
 
-static bool rip2_clipboard_alloc(rip_state_t *rs) {
-    if (!rs)
-        return false;
-    if (!rs->clipboard.data) {
-        rs->clipboard.data = (uint8_t *)psram_arena_alloc(&rs->psram_arena,
-                                                          RIP_CLIPBOARD_MAX);
-    }
-    return rs->clipboard.data != NULL;
-}
-
-static bool rip2_clipboard_capture(rip_state_t *rs,
-                                   int16_t x, int16_t y,
-                                   int16_t w, int16_t h) {
-    size_t bytes;
-
-    if (!rs || w <= 0 || h <= 0)
-        return false;
-    bytes = (size_t)(uint16_t)w * (size_t)(uint16_t)h;
-    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
-        return false;
-    if (!rip2_clipboard_alloc(rs))
-        return false;
-
-    draw_save_region(x, y, w, h, rs->clipboard.data);
-    rs->clipboard.width = w;
-    rs->clipboard.height = h;
-    rs->clipboard.valid = true;
-    return true;
-}
-
 static void rip2_blit_pixels(rip_state_t *rs,
                              int16_t dx, int16_t dy,
                              const uint8_t *pixels,
@@ -193,7 +164,9 @@ static void rip2_copy_scaled(rip_state_t *rs,
     bytes = (size_t)(uint16_t)sw * (size_t)(uint16_t)sh;
     if (bytes == 0)
         return;
-    scratch = (uint8_t *)malloc(bytes);
+    /* Source rectangles may cross the framebuffer edge. The capture
+     * leaves those cells untouched, so initialize them before scaling. */
+    scratch = (uint8_t *)calloc(bytes, 1);
     if (!scratch)
         return;
 
@@ -1226,7 +1199,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 int16_t y = scale_y(params[2]);
                 int16_t w = params[3];
                 int16_t h = scale_y(params[4]);
-                (void)rip2_clipboard_capture(rs, x, y, w, h);
+                (void)rip_clipboard_capture(rs, x, y, w, h);
             } else if (op == 2 && param_count >= 3 &&
                        rs->clipboard.valid && rs->clipboard.data) {
                 int16_t x = params[1];

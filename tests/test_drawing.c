@@ -259,6 +259,59 @@ static void test_restore_region_preserves_stride_under_clipping(void) {
         FAIL("restore_region misaligned clipped source rows");
 }
 
+static void test_restore_region_obeys_viewport(void) {
+    uint8_t src[36];
+    TEST("restore_region clips all ROPs with source stride");
+    for (int i = 0; i < 36; i++) src[i] = (uint8_t)(i + 1);
+    for (int mode = DRAW_MODE_COPY; mode <= DRAW_MODE_NOT; mode++) {
+        clear_to(0xA5);
+        draw_set_clip(11, 12, 13, 14);
+        draw_set_write_mode((uint8_t)mode);
+        draw_set_dirty_callback(record_dirty);
+        draw_restore_region(10, 10, 6, 6, src);
+        draw_set_dirty_callback(NULL);
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                uint8_t expected = 0xA5;
+                if (x >= 11 && x <= 13 && y >= 12 && y <= 14) {
+                    uint8_t value = src[(y - 10) * 6 + x - 10];
+                    switch (mode) {
+                    case DRAW_MODE_COPY: expected = value; break;
+                    case DRAW_MODE_XOR: expected ^= value; break;
+                    case DRAW_MODE_OR: expected |= value; break;
+                    case DRAW_MODE_AND: expected &= value; break;
+                    case DRAW_MODE_NOT: expected = (uint8_t)~expected; break;
+                    }
+                }
+                if (fb[y * W + x] != expected) {
+                    FAIL("viewport, raster operation or source offset differs"); return;
+                }
+            }
+        }
+        if (dirty_calls != 1 || dirty_y0 != 12 || dirty_y1 != 14) {
+            FAIL("dirty rows extend outside the actual write"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_restore_region_empty_and_extreme(void) {
+    static const uint8_t src[4] = {1, 2, 3, 4};
+    TEST("restore_region rejects empty clips and extreme origins");
+    clear();
+    draw_set_dirty_callback(record_dirty);
+    draw_set_clip(W + 1, 0, W + 2, H - 1);
+    draw_restore_region(0, 0, 2, 2, src);
+    draw_reset_clip();
+    draw_restore_region(INT16_MIN, 0, 2, 2, src);
+    draw_restore_region(0, INT16_MIN, 2, 2, src);
+    draw_restore_region(INT16_MAX, 0, 2, 2, src);
+    draw_restore_region(0, INT16_MAX, 2, 2, src);
+    draw_set_dirty_callback(NULL);
+    if (dirty_calls == 0 && fb[0] == 0) PASS();
+    else FAIL("an invisible blit wrote pixels or marked rows dirty");
+}
+
 static void test_dirty_callback_clamps_rows(void) {
     TEST("dirty callback rows are clamped to framebuffer");
     clear();
@@ -789,6 +842,8 @@ int main(void) {
     test_save_region_offscreen_noop();
     test_save_region_preserves_stride_under_clipping();
     test_restore_region_preserves_stride_under_clipping();
+    test_restore_region_obeys_viewport();
+    test_restore_region_empty_and_extreme();
     test_dirty_callback_clamps_rows();
     test_invalid_init_disables_writes();
     test_clip();

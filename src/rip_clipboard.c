@@ -33,7 +33,8 @@ bool rip_clipboard_store_pixels(rip_state_t *s,
                                        uint16_t height) {
     size_t bytes;
 
-    if (!s || !pixels || width == 0 || height == 0)
+    if (!s || !pixels || width == 0 || height == 0 ||
+        width > INT16_MAX || height > INT16_MAX)
         return false;
 
     bytes = (size_t)width * (size_t)height;
@@ -63,6 +64,9 @@ bool rip_clipboard_capture(rip_state_t *s,
     if (!rip_clipboard_alloc(s))
         return false;
 
+    /* draw_save_region preserves cells outside the framebuffer. A new
+     * capture must not inherit those cells from an earlier clipboard. */
+    memset(s->clipboard.data, 0, bytes);
     draw_save_region(x, y, width, height, s->clipboard.data);
     s->clipboard.width = width;
     s->clipboard.height = height;
@@ -179,16 +183,24 @@ void rip_blit_pixels_tiled(rip_state_t *s,
                                   uint16_t src_w, uint16_t src_h,
                                   uint8_t write_mode) {
     draw_clip_state_t saved_clip;
+    int16_t cx0, cy0, cx1, cy1;
 
     if (!pixels || src_w == 0 || src_h == 0 || x1 < x0 || y1 < y0)
         return;
 
     draw_save_clip(&saved_clip);
-    draw_set_clip(x0, y0, x1, y1);
-    /* Keep iteration outside int16_t: the final increment can pass 32767
-     * even though each tile origin fits. Narrowing it would wrap forever. */
-    for (int32_t y = y0; y <= y1; y += src_h) {
-        for (int32_t x = x0; x <= x1; x += src_w) {
+    cx0 = x0 > saved_clip.x0 ? x0 : saved_clip.x0;
+    cy0 = y0 > saved_clip.y0 ? y0 : saved_clip.y0;
+    cx1 = x1 < saved_clip.x1 ? x1 : saved_clip.x1;
+    cy1 = y1 < saved_clip.y1 ? y1 : saved_clip.y1;
+    if (cx0 > cx1 || cy0 > cy1) return;
+    draw_set_clip(cx0, cy0, cx1, cy1);
+    /* Skip invisible tiles while preserving the original tile phase. Wide
+     * counters also prevent the final increment from wrapping at 32767. */
+    int32_t first_x = x0 + ((int32_t)cx0 - x0) / src_w * src_w;
+    int32_t first_y = y0 + ((int32_t)cy0 - y0) / src_h * src_h;
+    for (int32_t y = first_y; y <= cy1; y += src_h) {
+        for (int32_t x = first_x; x <= cx1; x += src_w) {
             rip_blit_pixels(s, (int16_t)x, (int16_t)y, pixels, src_w, src_h,
                             (int16_t)src_w, (int16_t)src_h, write_mode);
         }

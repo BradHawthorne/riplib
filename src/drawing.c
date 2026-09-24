@@ -1043,43 +1043,33 @@ void draw_save_region(int16_t x, int16_t y, int16_t w, int16_t h,
 
 void draw_restore_region(int16_t x, int16_t y, int16_t w, int16_t h,
                          const uint8_t *src) {
-    int16_t dst_x = x;
-    int16_t dst_y = y;
-    int16_t copy_w = w;
-    int16_t copy_h = h;
-    int16_t src_x_off = 0;
-    int16_t src_y_off = 0;
-    int16_t src_stride = w;
+    int32_t left = x, top = y;
+    int32_t right = (int32_t)x + w, bottom = (int32_t)y + h;
 
     if (!draw_ready() || !src || w <= 0 || h <= 0) return;
-    if (dst_x < 0) {
-        src_x_off = (int16_t)(-dst_x);
-        copy_w += dst_x;
-        dst_x = 0;
-    }
-    if (dst_y < 0) {
-        src_y_off = (int16_t)(-dst_y);
-        copy_h += dst_y;
-        dst_y = 0;
-    }
-    if (dst_x + copy_w > g_width)  copy_w = (int16_t)(g_width - dst_x);
-    if (dst_y + copy_h > g_height) copy_h = (int16_t)(g_height - dst_y);
-    if (copy_w <= 0 || copy_h <= 0) return;
-    if (g_write_mode == DRAW_MODE_COPY) {
-        for (int16_t r = 0; r < copy_h; r++) {
-            size_t src_off = (size_t)(r + src_y_off) * (size_t)src_stride + (size_t)src_x_off;
-            memcpy(&g_fb[(dst_y + r) * g_pitch + dst_x], &src[src_off], (size_t)copy_w);
-        }
-    } else {
-        for (int16_t r = 0; r < copy_h; r++) {
-            size_t src_off = (size_t)(r + src_y_off) * (size_t)src_stride + (size_t)src_x_off;
-            uint8_t *dst_row = &g_fb[(dst_y + r) * g_pitch + dst_x];
-            const uint8_t *src_row = &src[src_off];
-            for (int16_t c = 0; c < copy_w; c++)
+    /* Intersect without normalizing: an inverted clip means empty. Keep
+     * endpoints wide until clipped, and retain the original source stride. */
+    if (left < g_clip_x0) left = g_clip_x0;
+    if (top < g_clip_y0) top = g_clip_y0;
+    if (right > (int32_t)g_clip_x1 + 1) right = (int32_t)g_clip_x1 + 1;
+    if (bottom > (int32_t)g_clip_y1 + 1) bottom = (int32_t)g_clip_y1 + 1;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > g_width) right = g_width;
+    if (bottom > g_height) bottom = g_height;
+    if (left >= right || top >= bottom) return;
+    for (int32_t row = top; row < bottom; row++) {
+        size_t src_off = (size_t)(row - y) * (size_t)w + (size_t)(left - x);
+        uint8_t *dst_row = &g_fb[row * g_pitch + left];
+        const uint8_t *src_row = &src[src_off];
+        if (g_write_mode == DRAW_MODE_COPY) {
+            memcpy(dst_row, src_row, (size_t)(right - left));
+        } else {
+            for (int32_t c = 0; c < right - left; c++)
                 dst_row[c] = apply_write_mode(dst_row[c], src_row[c]);
         }
     }
-    mark_dirty(dst_y, (int16_t)(dst_y + copy_h - 1));
+    mark_dirty((int16_t)top, (int16_t)(bottom - 1));
 }
 
 uint8_t draw_get_pixel(int16_t x, int16_t y) {

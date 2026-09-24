@@ -101,6 +101,98 @@ static void feed_upload_bytes(rip_state_t *s, const uint8_t *data, size_t len) {
         rip_file_upload_byte_state(s, data[i]);
 }
 
+static void test_tiled_blit_intersects_viewport(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t pixels[6] = {1, 2, 3, 4, 5, 6};
+    TEST("tiled blit intersects viewport without moving tile phase");
+    init_fixture(&s, &ctx);
+    draw_set_clip(3, 3, 6, 6);
+    rip_blit_pixels_tiled(&s, 1, 1, 8, 8, pixels, 3, 2, DRAW_MODE_COPY);
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            uint8_t expected = (x >= 3 && x <= 6 && y >= 3 && y <= 6)
+                ? pixels[((y - 1) % 2) * 3 + (x - 1) % 3] : 0;
+            if (fb[y * W + x] != expected) {
+                FAIL("tile escaped viewport or its phase changed"); return;
+            }
+        }
+    }
+    rip_blit_pixels_tiled(&s, 20, 20, 25, 25, pixels, 3, 2, DRAW_MODE_COPY);
+    if (fb[20 * W + 20] || draw_get_clip_x0() != 3 ||
+        draw_get_clip_y0() != 3 || draw_get_clip_x1() != 6 ||
+        draw_get_clip_y1() != 6) {
+        FAIL("disjoint tile wrote pixels or lost viewport"); return;
+    }
+    PASS();
+}
+
+static void test_clipboard_capture_clears_padding(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t old[9] = {9,9,9,9,9,9,9,9,9};
+    static const uint8_t expected[9] = {0,0,0,0,1,2,0,3,4};
+    TEST("clipboard capture clears offscreen padding on reuse");
+    init_fixture(&s, &ctx);
+    fb[0] = 1; fb[1] = 2; fb[W] = 3; fb[W + 1] = 4;
+    if (!rip_clipboard_store_pixels(&s, old, 3, 3) ||
+        !rip_clipboard_capture(&s, -1, -1, 3, 3) ||
+        memcmp(s.clipboard.data, expected, sizeof(expected))) {
+        FAIL("offscreen cells retained bytes from the old capture"); return;
+    }
+    /* The Level 2 extension must use the same capture contract. */
+    (void)rip_clipboard_store_pixels(&s, old, 3, 3);
+    {
+        const int16_t params[5] = {1, -1, -1, 3, 3};
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_CLIPBOARD,
+                         "", 0, params, 5);
+    }
+    if (memcmp(s.clipboard.data, expected, sizeof(expected))) {
+        FAIL("Level 2 capture retained old padding"); return;
+    }
+    if (!rip_clipboard_capture(&s, W, H, 3, 3)) {
+        FAIL("offscreen capture failed"); return;
+    }
+    for (int i = 0; i < 9; i++) {
+        if (s.clipboard.data[i]) { FAIL("offscreen capture was not blank"); return; }
+    }
+    PASS();
+}
+
+static void test_clipboard_rejects_unrepresentable_dimensions(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t pixels[32768] = {7};
+    TEST("clipboard rejects dimensions its metadata cannot represent");
+    init_fixture(&s, &ctx);
+    if (!rip_clipboard_store_pixels(&s, pixels, 1, 1) ||
+        rip_clipboard_store_pixels(&s, pixels, 32768, 1) ||
+        rip_clipboard_store_pixels(&s, pixels, 1, 32768) ||
+        !s.clipboard.valid || s.clipboard.width != 1 ||
+        s.clipboard.height != 1 || s.clipboard.data[0] != 7) {
+        FAIL("invalid dimensions were accepted or destroyed the old image"); return;
+    }
+    PASS();
+}
+
+static void test_scaled_port_copy_blanks_offscreen_source(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t expected[8] = {5,5,6,6,0,0,0,0};
+    TEST("scaled port copy blanks source pixels beyond framebuffer");
+    init_fixture(&s, &ctx);
+    memset(fb, 0xA7, sizeof(fb));
+    fb[638] = 5; fb[639] = 6;
+    /* Source (638,0)..(641,0); destination (10,10)..(17,10).
+     * The source's right half is offscreen; logical y=10 becomes 11. */
+    feed_script(&s, &ctx, "!|2C" "0HQ00HT00" "00A0A0H0A" "000000|");
+    if (memcmp(&fb[11 * W + 10], expected, sizeof(expected)) ||
+        fb[11 * W + 9] != 0xA7 || fb[11 * W + 18] != 0xA7) {
+        FAIL("scaled copy exposed scratch bytes or changed its extent"); return;
+    }
+    PASS();
+}
+
 static void test_preproc_gt_handling(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -6654,6 +6746,10 @@ int main(void) {
     test_write_icon_replaces_cached_name();
     test_runtime_icon_supersedes_flash();
     test_tiled_icon_coordinates_do_not_wrap();
+    test_tiled_blit_intersects_viewport();
+    test_clipboard_capture_clears_padding();
+    test_clipboard_rejects_unrepresentable_dimensions();
+    test_scaled_port_copy_blanks_offscreen_source();
     test_clipboard_op_5_capture_op_6_paste();
     test_save_icon_slot_out_of_range_is_noop();
     test_stamp_icon_unset_slot_falls_back_to_clipboard();

@@ -1,8 +1,39 @@
-CURRENT CORRECTION (2026-09-24, D-34..37): historical claims below
+CURRENT CORRECTION (2026-09-24, D-34..38): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
 are now implemented. See ../crosswalk-audit.md for current boundaries.
+
+D-38 CLIPPED RASTER VALUES AND CAPTURE INITIALIZATION (2026-09-24).
+
+     Evidence class: source inspection and executable pixel/buffer tests,
+     not a claim of Windows GDI pixel parity. Native-size blits used
+     draw_restore_region, which ignored the viewport that scaled blits
+     obeyed. Tile rendering also replaced the viewport with its own box.
+     Restore now intersects the viewport and framebuffer with wide endpoint
+     arithmetic, retains source stride, and reports only modified dirty rows.
+     Tiling intersects both clips, preserves phase, and skips invisible tiles.
+
+     draw_save_region intentionally leaves offscreen destination cells alone.
+     Clipboard reuse and a malloc-backed port-copy scratch buffer therefore
+     exposed stale/uninitialized cells. Capture now initializes its buffer;
+     Level 2 uses that shared helper, and scaled port copies use zeroed
+     scratch storage. Store rejects widths/heights above INT16_MAX before
+     changing the existing image. The public save-region contract is intact.
+
+     Five new regressions fail against 7f773bd and pass with the correction.
+     A sixth exercises partial-offscreen scaled port copying through its wire
+     command. All 35 scene metrics are unchanged. This changes no wire syntax
+     or public structure layout. Generic NOT still means invert destination.
+
+     Open driver boundary, established by static disassembly: 1I calls
+     show_bmp_file at 4A410, then clipBoardGetImage at 02866 when requested.
+     The former returns right=x+width, bottom=y+height (4A53F..4A591); the
+     latter allocates right-left+1, bottom-top+1 (02880..02894). PortCopy at
+     134D0 compares these unequal extents and selects its scaled path.
+     Actual GDI output from that path has NOT been executed or compared.
+     RIPlib still caches the source icon. A rectangle/copy-call oracle is
+     the next instrument; do not silently call this exact capture parity.
 
 D-34 LITERAL PREFIXES AND SESSION RADIX (2026-09-24).
 
