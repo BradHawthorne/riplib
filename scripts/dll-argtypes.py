@@ -17,6 +17,7 @@ command whose widths are all literal never needs rewriting.
 Usage:
     python scripts/dll-argtypes.py <path>/Ripscrip.dll [--c]
 """
+from dll_record import dispatch_level
 import argparse
 import hashlib
 import struct
@@ -27,16 +28,7 @@ TABLE_RVA = 0x080820
 ENTRY_SIZE = 40
 ENTRY_COUNT = 129
 
-# Level is inferred from the handler address band, matching segment 13.
-def level_of(slot):
-    if slot <= 83:
-        return 0
-    if slot <= 109:
-        return 1
-    if slot <= 121:
-        return 2
-    return 3
-
+# Level is read from each record's literal prefix, matching segment 13.
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -82,7 +74,7 @@ def main():
             continue
         if 0xFF not in types and 0xFE not in types:
             continue                       # all literal widths: never rewritten
-        rows.append((chr(letter), level_of(i), types))
+        rows.append((chr(letter), dispatch_level(raw), types))
 
     if not args.c:
         for ch, lvl, types in rows:

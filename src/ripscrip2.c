@@ -42,6 +42,7 @@
 #include "ripscrip2.h"
 #include "riplib_platform.h"
 #include "drawing.h"
+#include "rip_meganum.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -206,30 +207,10 @@ static void rip2_copy_scaled(rip_state_t *rs,
  * MegaNum helpers (local -- not exported from ripscrip.c)
  * ===================================================================== */
 
-static inline int mega_dig(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'A' && ch <= 'Z') return ch - 'A' + 10;
-    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 10;
-    return 0;
-}
-
-/* 1-digit MegaNum: single base-36 character, value 0-35 */
-static inline int mega1(const char *p) {
-    return mega_dig(p[0]);
-}
-
-/* 2-digit MegaNum: two base-36 characters, value 0-1295 */
-static inline int mega2l(const char *p) {
-    return mega_dig(p[0]) * 36 + mega_dig(p[1]);
-}
-
-/* Four-digit MegaNum.  Needed because several Level 2 records type a field
- * as mega4, and reading only its first two digits takes the HIGH half --
- * the opposite of the low-order bits a flags word actually carries. */
-static inline long mega4l(const char *p) {
-    return ((long)mega_dig(p[0]) * 46656L) + ((long)mega_dig(p[1]) * 1296L)
-         + ((long)mega_dig(p[2]) * 36L)    + (long)mega_dig(p[3]);
-}
+/* Level 2 has no fixed-radix exceptions in the shipped dispatch table. */
+#define mega1(p) ((int)rip_mega_decode((p),1,rs->mega_base==64 ? 64 : 36))
+#define mega2l(p) ((int)rip_mega_decode((p),2,rs->mega_base==64 ? 64 : 36))
+#define mega4l(p) ((long)rip_mega_decode((p),4,rs->mega_base==64 ? 64 : 36))
 
 /* Scale RIPscrip EGA Y-coordinate (0-349) to card display Y (0-399).
  * MUST match ripscrip.c::scale_y so the same EGA coord lands on the
@@ -476,6 +457,7 @@ static bool rip_port_create(rip_state_t *rs, uint8_t idx,
     memset(p, 0, sizeof(*p));
     port_set_defaults(p);
     p->allocated = true;
+    if (rs->port_query[idx].text) rs->port_query[idx].text[0] = '\0';
 
     /* Scale EGA (640x350) viewport to card (640x400) pixel coords */
     clamp_ega_rect(&x0, &y0, &x1, &y1);
@@ -541,6 +523,7 @@ static bool rip_port_destroy(rip_state_t *rs, uint8_t idx, bool force)
     memset(p, 0, sizeof(*p));
 
     /* If the destroyed port was active, fall back to port 0 */
+    if (rs->port_query[idx].text) rs->port_query[idx].text[0] = '\0';
     if (rs->active_port == idx) {
         rs->active_port = 0;
         port_load_state(rs, 0);

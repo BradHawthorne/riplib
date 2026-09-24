@@ -81,7 +81,7 @@ Host-mediated operations such as real filesystem transfer, Zmodem/RAF storage, O
 The [three-way command crosswalk](docs/riptel-crosswalk.md) compares the
 current RIPlib handlers, RIPtel's shipping DLL, and a pinned bbs-land
 reference. The [audit fixes and evidence](docs/crosswalk-audit.md) cover
-all 117 driver keys, corrected ellipse/fill/move behavior, and the remaining
+all 118 driver keys, corrected ellipse/fill/move behavior, and the remaining
 semantic limits. Handler coverage does not establish pixel parity.
 
 RIPlib's command set is checked against the RIPscrip driver TeleGrafix

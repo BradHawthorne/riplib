@@ -52,10 +52,19 @@
  * names.  This TU uses the historical short names; the aliases are kept
  * here (C-016) rather than in the shared header so that header does not
  * leak unprefixed macros (mega2/…) into every file that includes it. */
-#define mega_digit rip_mega_digit
-#define mega2      rip_mega2
-#define mega3      rip_mega3
-#define mega4      rip_mega4    /* extracted MegaNum decoder (C-002 step 3) */
+/* The driver record fixes J/N to base 36 and D/d/h/y to base 64.
+ * Every other command follows this session's selected base. */
+static unsigned rip_command_base(const rip_state_t *s) {
+    if (!s->is_level1 && !s->is_level2 && !s->is_level3 && !s->is_level9) {
+        if (s->cmd_char=='J' || s->cmd_char=='N') return 36;
+        if (s->cmd_char=='D' || s->cmd_char=='d' || s->cmd_char=='h' || s->cmd_char=='y') return 64;
+    }
+    return s->mega_base==64 ? 64 : 36;
+}
+#define mega_digit(ch) ((int)(rip_command_base(s)==64 ? rip_mega_digit64(ch) : rip_mega_digit(ch)))
+#define mega2(p) ((int16_t)rip_mega_decode((p),2,rip_command_base(s)))
+#define mega3(p) ((int32_t)rip_mega_decode((p),3,rip_command_base(s)))
+#define mega4(p) ((int32_t)rip_mega_decode((p),4,rip_command_base(s)))
 /* Base-64 forms, for the four commands the dispatch table marks as always
  * base 64 ('|D', '|d', '|h', '|y').  Never use these on any other command,
  * and never use the base-36 forms on these -- see rip_meganum.h and D-12. */
@@ -84,8 +93,8 @@ extern uint16_t palette_read_rgb565(uint8_t index);
  * codes are digit counts, never string markers -- '|1e' and '|1i' both sum
  * to exactly the 24-character payloads the corpus sends, which settles it.
  * See D-16. */
-#define RIP_GOTOURL_RESERVED  8   /* |3G: slot 126, one 8-digit field       */
-#define RIP_REGVAR_RESERVED  14   /* |3R: slot 127, mega4 + mega2 + 8 digits */
+#define RIP_GOTOURL_RESERVED  8   /* |9G: slot 126, one 8-digit field       */
+#define RIP_REGVAR_RESERVED  14   /* |9R: slot 127, mega4 + mega2 + 8 digits */
 #define RIP_READSCENE_RESERVED 8  /* |1R: slot 104, mega2 + 6 digits         */
 
 /* Reset the per-frame command-level prefix flags.  Used by the FSM at
@@ -95,6 +104,7 @@ static inline void clear_levels(rip_state_t *s) {
     s->is_level1 = false;
     s->is_level2 = false;
     s->is_level3 = false;
+    s->is_level9 = false;
 }
 
 /* L15: write both s->vp_* and ports[active_port].vp_*.  The port table
@@ -1032,6 +1042,12 @@ void rip_init_first(rip_state_t *s) {
     s->coordinate_res = 0;
     s->color_mode = 0;
     s->color_bits = 0;
+    s->mega_base = 36;
+    s->host_command[0] = '\0';
+    s->goto_url[0] = '\0';
+    s->block_transfer.pending = false;
+    s->encoded_stream_type = 0;
+    s->encoded_stream_len = 0;
     s->filled_borders_enabled = true;
 
     /* v3.1: application variables and overflow pagination */
@@ -1093,6 +1109,9 @@ void rip_init_first(rip_state_t *s) {
         p0->alpha        = 35;    /* fully opaque */
     }
     s->active_port = 0;
+    s->defined_text_windows=1;
+    s->query_hover_field=-1;
+
 }
 
 /* Protocol-switch activation.
@@ -1159,6 +1178,11 @@ void rip_session_reset(rip_state_t *s) {
     memset(s->query_var_name,  0, sizeof(s->query_var_name));
     memset(s->query_response,  0, sizeof(s->query_response));
     s->query_response_len = 0;
+    memset(s->deferred_query,0,sizeof(s->deferred_query));
+    memset(s->port_query,0,sizeof(s->port_query));
+    memset(s->text_query,0,sizeof(s->text_query));
+    s->defined_text_windows=1;
+    s->query_hover_field=-1;
 
     /* Clear clipboard — pixel data was in the arena, now invalid. */
     s->clipboard.data  = NULL;
@@ -1181,6 +1205,13 @@ void rip_session_reset(rip_state_t *s) {
     memset(s->user_var_names, 0, sizeof(s->user_var_names));
     memset(s->user_var_values, 0, sizeof(s->user_var_values));
     s->user_var_count = 0;
+
+    s->mega_base = 36;
+    s->host_command[0] = '\0';
+    s->goto_url[0] = '\0';
+    s->block_transfer.pending = false;
+    s->encoded_stream_type = 0;
+    s->encoded_stream_len = 0;
 
     /* Reset scene/protocol mode metadata for the next BBS session. */
     s->header_type = 0;
@@ -1303,23 +1334,23 @@ void rip_session_reset(rip_state_t *s) {
  *
  * Previous mapping (bgi_style-1) was incorrect — BGI 2 LINE is supposed
  * to be horizontal lines but mapped to the 50% checker.  This table maps
- * each BGI style to the closest visually-matching built-in pattern.
+ * each BGI style to its exact driver bitmap (D-36).
  *
  * Exposed via include/ripscrip.h so tests and ripscrip2.c can share it. */
 int8_t rip_bgi_fill_to_card(uint8_t bgi_style) {
     switch (bgi_style) {
         case 0:  return -1;  /* EMPTY  — solid brush in background ink */
         case 1:  return 0;   /* SOLID  → solid */
-        case 2:  return 4;   /* LINE   → horizontal */
-        case 3:  return 7;   /* LTSLASH→ light diagonal (sparse /) */
-        case 4:  return 3;   /* SLASH  → diagonal / */
-        case 5:  return 2;   /* BKSLASH→ diagonal \ */
-        case 6:  return 2;   /* LTBKSLASH→ diagonal \ (no lighter variant) */
-        case 7:  return 6;   /* HATCH  → cross-hatch */
-        case 8:  return 1;   /* XHATCH → 50% checker (closest dense X feel) */
-        case 9:  return 8;   /* INTERLEAVE → CC/33 interleave */
-        case 10: return 9;   /* WIDE_DOT */
-        case 11: return 10;  /* CLOSE_DOT */
+        case 2: return 12;
+        case 3: return 13;
+        case 4: return 14;
+        case 5: return 15;
+        case 6: return 16;
+        case 7: return 17;
+        case 8: return 18;
+        case 9: return 19;
+        case 10: return 20;
+        case 11: return 21;
         case 12: return 11;  /* USER → user_pattern */
         default: return 0;   /* unknown → solid */
     }
@@ -1417,7 +1448,7 @@ static bool rip_url_scheme_allowed(const char *u, int len);
 
 /* Validate and store a GotoURL argument, after expanding $VARIABLE$.
  *
- * '|3G' is one of the twelve entries that reach the driver's interpolation
+ * '|9G' is one of the twelve entries that reach the driver's interpolation
  * scanner (D-28), so the URL it receives is the EXPANDED one.  RIPlib checked
  * the raw text, which meant a URL assembled from a variable was judged on the
  * unexpanded string.
@@ -1667,7 +1698,35 @@ static void rip_tw_putchar(rip_state_t *s, uint8_t ch) {
  * ══════════════════════════════════════════════════════════════════ */
 
 void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked) {
-    if (!s || !clicked) return;
+    if (!s) return;
+    int hovered=-1;
+    for (int i=(int)s->num_mouse_regions-1;i>=0;--i) {
+        rip_mouse_region_t *r=&s->mouse_regions[i];
+        if ((r->flags & RIP_MF_ACTIVE) && ((r->flags & RIP_MF_TOGGLE) || r->active) && x>=r->x0 && x<=r->x1 && y>=r->y0 && y<=r->y1) {
+            hovered=i; break;
+        }
+    }
+    if (hovered!=s->query_hover_field) {
+        if (s->query_hover_field>=0) (void)rip_trigger_query(s,6,0);
+        s->query_hover_field=(int16_t)hovered;
+        if (hovered>=0) (void)rip_trigger_query(s,5,0);
+    }
+    if (!clicked) return;
+    if (hovered < 0) {
+    for (int i=0;i<RIP_MAX_PORTS;++i) {
+        const rip_port_t *p=&s->ports[i];
+        if (p->allocated && x>=p->vp_x0 && x<=p->vp_x1 && y>=p->vp_y0 && y<=p->vp_y1)
+            (void)rip_trigger_query(s,3,(uint8_t)i);
+    }
+    if (s->tw_active && x>=s->tw_x0 && x<=s->tw_x1 && y>=scale_y(s->tw_y0) && y<=scale_y(s->tw_y1)) {
+        (void)rip_trigger_query(s,4,s->rip2_state.cur_text_window_slot);
+    }
+    if (x>=s->vp_x0 && x<=s->vp_x1 && y>=s->vp_y0 && y<=s->vp_y1)
+        (void)rip_trigger_query(s,1,0);
+    if (s->tw_active && x>=s->tw_x0 && x<=s->tw_x1 && y>=scale_y(s->tw_y0) && y<=scale_y(s->tw_y1)) {
+        (void)rip_trigger_query(s,2,0);
+    }
+    }
 
     for (int i = (int)s->num_mouse_regions - 1; i >= 0; i--) {
         rip_mouse_region_t *r = &s->mouse_regions[i];
@@ -2221,7 +2280,7 @@ void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
         comp_set_cursor(c, 0, 0);
 }
 
-/* Scheme allow-list for '|3G' RIP_GotoURL.
+/* Scheme allow-list for '|9G' RIP_GotoURL.
  *
  * Only http:// and https:// are permitted.  This is a categorical refusal
  * rather than a policy knob: javascript:, data:, file:, vbscript: and the
@@ -2487,7 +2546,7 @@ static const rip_argtypes_t rip_argtypes[] = {
  * default path untouched: when the negotiated widths are already 2 this is
  * never called.
  *
- * LOSSY ONLY ABOVE 1295, the largest value two digits can hold.  That bound
+ * Values above base^2-1 are clamped (1295 in base 36, 4095 in base 64).  That bound
  * is acceptable specifically for RIPlib: it renders into a fixed 640x400
  * device space and deliberately does not apply a world-to-device transform
  * (see D-1), so a coordinate above 1295 is off-screen whatever width
@@ -2500,7 +2559,8 @@ static const rip_argtypes_t rip_argtypes[] = {
 static int rip_normalise_widths(const rip_state_t *s, char *buf, int len,
                                 char letter, uint8_t level)
 {
-    static const char DIG[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    static const char DIG[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#&";
+    unsigned base = rip_command_base(s);
     const rip_argtypes_t *e = NULL;
     int coord_w, color_w, i, si = 0, oi = 0;
 
@@ -2564,11 +2624,11 @@ static int rip_normalise_widths(const rip_state_t *s, char *buf, int len,
         {
             int32_t v = 0;
             for (k = 0; k < w; k++)
-                v = v * 36 + mega_digit(buf[si + k]);
+                v = v * (int32_t)base + mega_digit(buf[si + k]);
             si += w;
-            if (v > 1295) v = 1295;            /* two-digit ceiling */
-            buf[oi++] = DIG[(v / 36) % 36];
-            buf[oi++] = DIG[v % 36];
+            if (v > (int32_t)(base*base-1)) v = (int32_t)(base*base-1);
+            buf[oi++] = DIG[(v / base) % base];
+            buf[oi++] = DIG[v % base];
         }
     }
 
@@ -2578,45 +2638,202 @@ static int rip_normalise_widths(const rip_state_t *s, char *buf, int len,
     return oi;
 }
 
-static void execute_rip_command(rip_state_t *s, void *ctx) {
-    comp_context_t *c = (comp_context_t *)ctx;
-    const char *p = s->cmd_buf;
-    int len = s->cmd_len;
-
-    /* Negotiated argument widths (D-11).  Handlers below read fixed 2-digit
-     * fields at fixed offsets, so when '|n' or '|M' has selected any other
-     * width the payload is rewritten to 2-digit form first and the handlers
-     * never see the difference.  With the default widths this is skipped
-     * entirely, so the common path is unchanged. */
-    if (s->coordinate_size != 0 && s->coordinate_size != 2) {
-        uint8_t lvl = s->is_level3 ? 3 : s->is_level2 ? 2 : s->is_level1 ? 1 : 0;
-        int nlen = rip_normalise_widths(s, s->cmd_buf, len, s->cmd_char, lvl);
-        if (nlen >= 0) {
-            len = nlen;
-            s->cmd_len = (uint16_t)nlen;
-            s->coord_size_unsupported = false;   /* handled after all */
+static int rip_query_expand(rip_state_t *s,const char *text,int len,char *out,int cap) {
+    int n=0, depth=0;
+    bool active[17]={true}, branch[16]={false};
+    for (int i=0;i<len && n<cap;++i) {
+        if(i+1<len && text[i]=='<' && text[i+1]=='<') {
+            int end=i+2;
+            while(end+1<len && !(text[end]=='>' && text[end+1]=='>')) ++end;
+            if(end+1>=len) return 0;
+            int width=end-i-2;
+            const char *d=text+i+2;
+            if(width>3 && (d[0]=='I'||d[0]=='i') && (d[1]=='F'||d[1]=='f') && d[2]==' ') {
+                char expr[1024];
+                if(depth>=16 || width-3>=(int)sizeof(expr)) return 0;
+                memcpy(expr,d+3,(size_t)width-3); expr[width-3]='\0';
+                branch[depth]=active[depth] && rip_eval_if_expr(s,expr);
+                active[depth+1]=branch[depth]; ++depth;
+            } else if(width==4 && (d[0]=='E'||d[0]=='e') && (d[1]=='L'||d[1]=='l') &&
+                      (d[2]=='S'||d[2]=='s') && (d[3]=='E'||d[3]=='e')) {
+                if(!depth) return 0;
+                active[depth]=active[depth-1] && !branch[depth-1];
+            } else if(width==5 && (d[0]=='E'||d[0]=='e') && (d[1]=='N'||d[1]=='n') &&
+                      (d[2]=='D'||d[2]=='d') && (d[3]=='I'||d[3]=='i') && (d[4]=='F'||d[4]=='f')) {
+                if(!depth) return 0;
+                --depth;
+            } else if(active[depth]) return 0;
+            i=end+1; continue;
         }
+        if(!active[depth]) continue;
+        if (text[i]=='$') {
+            int end=i+1;
+            while(end<len && text[end]!='$') ++end;
+            if(end<len) {
+                char value[1024]; int width=end-i+1;
+                int got=rip_expand_variables(s,text+i,width,value,sizeof(value));
+                if (!(got==width && memcmp(value,text+i,(size_t)width)==0)) {
+                    if(got>cap-n) got=cap-n;
+                    memcpy(out+n,value,(size_t)got); n+=got;
+                }
+                i=end; continue;
+            }
+        }
+        if(text[i]=='\\' && i+1<len) { out[n++]=text[++i]; continue; }
+        if(text[i]=='^' && i+1<len) {
+            unsigned char ch=(unsigned char)text[++i];
+            out[n++]=(char)(ch=='?' ? 127 : ch & 31); continue;
+        }
+        out[n++]=text[i];
+    }
+    return depth ? 0 : n;
+}
+
+static void rip_send_query(rip_state_t *s, const char *vname, int vlen) {
+    char resp[1024];
+    int rlen = 0;
+
+    /* $APPn$ — return stored application variable, or request input */
+    if (vlen == 6 && vname[0] == '$' && vname[1] == 'A' &&
+        vname[2] == 'P' && vname[3] == 'P' &&
+        vname[4] >= '0' && vname[4] <= '9' && vname[5] == '$') {
+        int idx = vname[4] - '0';
+        rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
+        if (rlen == 0 && rip_query_prompt_begin(s, vname, vlen)) {
+            /* Do not push a response to the BBS yet */
+            rlen = -1;  /* sentinel: skip riplib_host_tx below */
+        } else {
+            memcpy(resp, s->app_vars[idx], (size_t)rlen);
+        }
+
+    /* $OVERFLOW(RESET)$ — reset to first page */
+    } else if (vlen >= 17 &&
+        memcmp(vname, "$OVERFLOW(RESET)$", 17) == 0) {
+        s->rip2_state.overflow_page = 0;
+        rlen = 0;
+
+    /* $OVERFLOW(NEXT)$ — advance one page */
+    } else if (vlen >= 16 &&
+        memcmp(vname, "$OVERFLOW(NEXT)$", 16) == 0) {
+        if (s->rip2_state.overflow_page + 1 < s->rip2_state.overflow_total)
+            s->rip2_state.overflow_page++;
+        rlen = 0;
+
+    /* $OVERFLOW(PREV)$ — back one page */
+    } else if (vlen >= 16 &&
+        memcmp(vname, "$OVERFLOW(PREV)$", 16) == 0) {
+        if (s->rip2_state.overflow_page > 0)
+            s->rip2_state.overflow_page--;
+        rlen = 0;
+
+    /* $OVERFLOW$ — return "page/total" string */
+    } else if (vlen >= 10 &&
+        memcmp(vname, "$OVERFLOW$", 10) == 0) {
+        rlen = snprintf(resp, sizeof(resp), "%u/%u",
+                       s->rip2_state.overflow_page + 1,
+                       s->rip2_state.overflow_total);
+        if (rlen < 0) rlen = 0;
+
+    /* Fix SV-1/S1: $FILEDEL$ — intentionally not implemented.
+     * Remote file deletion is a security vulnerability. Log and ignore. */
+    } else if (vlen >= 10 &&
+        memcmp(vname, "$FILEDEL$", 9) == 0) {
+        /* Received $FILEDEL$ — silently ignore, do not delete anything */
+        rlen = 0;
+
+    /* Fix SV-2/S2: $GOTOURL$ — RIPlib never launches a process or
+     * opens a URL itself.  Since 2026-08-12 this route is routed
+     * through the SAME opt-in path as '|9G', so the two ways a
+     * stream can ask for a URL behave identically instead of one
+     * being a dead end and the other not:
+     *   - same scheme allow-list (http/https only),
+     *   - same control-character rejection,
+     *   - stored in s->goto_url,
+     *   - handler invoked ONLY if the embedder registered one.
+     * The response to the stream stays zero-length either way, so
+     * a hostile host learns nothing about whether a handler
+     * exists. */
+    } else if (vlen >= 10 &&
+        memcmp(vname, "$GOTOURL$", 9) == 0) {
+        const char *u = vname + 9;
+        int ulen = vlen - 9;
+        if (ulen > 0 && ulen < (int)sizeof(s->goto_url)) {
+            int ok = 1;
+            for (int i = 0; i < ulen; i++) {
+                if ((unsigned char)u[i] < 0x21 ||
+                    (unsigned char)u[i] > 0x7E) { ok = 0; break; }
+            }
+            if (ok && rip_url_scheme_allowed(u, ulen)) {
+                memcpy(s->goto_url, u, (size_t)ulen);
+                s->goto_url[ulen] = '\0';
+                if (s->url_handler)
+                    s->url_handler(s->goto_url, ulen);
+            }
+        }
+        rlen = 0;
+
+    } else {
+        rlen=rip_query_expand(s,vname,vlen,resp,sizeof(resp));
     }
 
-    /* Mark that RIP commands have drawn — prevents ANSI ESC[2J fallback
-     * from clearing the framebuffer after the menu is rendered. */
-    s->rip_has_drawn = true;
+    /* rlen == -1 means query_pending was set; don't respond to BBS yet. */
+    if (rlen > 0)
+        riplib_host_tx(resp, rlen);
+}
 
-    /* Apply current drawing state */
-    apply_draw_state(s);
+static rip_query_slot_t *rip_query_slot(rip_state_t *s, unsigned mode, unsigned slot) {
+    if (mode==3) return slot<36 ? &s->port_query[slot] : NULL;
+    if (mode==4) return slot<36 ? &s->text_query[slot] : NULL;
+    if (mode==1 || mode==2) return &s->deferred_query[mode-1];
+    if (mode==5 || mode==6) return &s->deferred_query[mode-3];
+    return NULL;
+}
 
-    if (s->is_level3) {
-        /* Level 3 commands (prefixed with '3').
-         *
-         * IMPLEMENTED 2026-08-12.  This block previously discarded every
-         * Level 3 command on the grounds that the letters were "not publicly
-         * documented".  They are now recovered from the driver's own dispatch
-         * table (docs/spec/13-dll-command-table.md), with argument widths from
-         * each entry's type bytes and field meanings from each handler's
-         * validation diagnostics.  Discarding them silently meant a stream
-         * using any of the five rendered nothing with no diagnosis. */
-        switch (s->cmd_char) {
+bool rip_trigger_query(rip_state_t *s, uint8_t mode, uint8_t slot) {
+    rip_query_slot_t *q;
+    if (!s) return false;
+    if (mode==3 && (slot>=RIP_MAX_PORTS || !s->ports[slot].allocated)) return false;
+    q=rip_query_slot(s,mode,slot);
+    if (!q || !q->text || !q->text[0]) return false;
+    rip_send_query(s,q->text,(int)strlen(q->text));
+    return true;
+}
 
+static void rip_define_query(rip_state_t *s, unsigned mode, unsigned slot,
+                             const char *text, int len) {
+    rip_query_slot_t *q;
+    if (len<=0 || len>=(int)sizeof(s->cmd_buf)) return;
+    if (mode==0) { rip_send_query(s,text,len); return; }
+    q=rip_query_slot(s,mode,slot);
+    if (!q) return;
+    if (mode==3 && (!s->ports[slot].allocated ||
+        (s->ports[slot].flags & RIP_PORT_FLAG_PROTECTED))) return;
+    if (mode==4 && (!(s->defined_text_windows & (UINT64_C(1)<<slot)) ||
+        (s->rip2_state.protected_text_window & (UINT64_C(1)<<slot)))) return;
+    if (len==5 && text[0]=='$' && (text[1]=='O'||text[1]=='o') &&
+        (text[2]=='F'||text[2]=='f') && (text[3]=='F'||text[3]=='f') && text[4]=='$') {
+        if (q->text) q->text[0]='\0';
+        return;
+    }
+    if (q->capacity<(unsigned)len+1) {
+        char *next=(char *)psram_arena_alloc(&s->psram_arena,(uint32_t)len+1);
+        if (!next) return;
+        q->text=next; q->capacity=(uint16_t)(len+1);
+    }
+    memcpy(q->text,text,(size_t)len); q->text[len]='\0';
+}
+
+void rip_set_host_command_handler(rip_state_t *s, rip_host_command_handler_t handler, void *user) {
+    if (!s) return;
+    s->host_command_handler=handler;
+    s->host_command_user=user;
+}
+
+/* Level 9 commands */
+static void rip_execute_service(rip_state_t *s) {
+    const char *p=s->cmd_buf;
+    int len=s->cmd_len;
+    switch (s->cmd_char) {
         case 0x1B: /* RIP_EnterBlockMode -- direction:1 protocol:1 type:2 flags:2 res:2 filename */
             if (len >= 8)
                 rip_enter_block_mode(s, mega_digit(p[0]), mega_digit(p[1]),
@@ -2648,10 +2865,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
         case 'U': /* RIP_BeginEncodedStream — type:2 length:4
                    * Handler RVA 0x0252C0.  "Illegal type parameter 1".
-                   * The encoded-stream payload format is not recovered, so
-                   * RIPlib records the announcement rather than attempting to
-                   * decode a stream it cannot interpret. */
-            if (len >= 6) {
+                   * This driver handler validates type <= 1 and resets cursor
+                   * state; it does not read length or decode a payload. The
+                   * announcement fields remain available for host inspection. */
+            if (len >= 6 && (!s->is_level9 || mega2(p) <= 1)) {
                 s->encoded_stream_type = (uint16_t)mega2(p);
                 s->encoded_stream_len  = (uint32_t)mega4(p + 2);
             }
@@ -2672,6 +2889,71 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 int nlen = len - RIP_REGVAR_RESERVED;
                 (void)rip_user_var_set(s, nm, nlen, "", 0);
             }
+            break;
+
+        case 'D': /* RIP_HOST_COMMAND -- res:4 text:string */
+            if (len >= 4) {
+                int n=unescape_text(p+4,len-4,s->host_command,sizeof(s->host_command)-1);
+                s->host_command[n]='\0';
+                /* Driver 0x024AF4 delegates to its host-command engine.
+                 * Keep expressions intact for the embedder's corresponding engine. */
+                if (n && s->host_command_handler)
+                    s->host_command_handler(s->host_command_user,s->host_command,n);
+            }
+            break;
+        default: break;
+    }
+}
+
+static void execute_rip_command(rip_state_t *s, void *ctx) {
+    comp_context_t *c = (comp_context_t *)ctx;
+    const char *p = s->cmd_buf;
+    int len = s->cmd_len;
+
+    /* Negotiated argument widths (D-11).  Handlers below read fixed 2-digit
+     * fields at fixed offsets, so when '|n' or '|M' has selected any other
+     * width the payload is rewritten to 2-digit form first and the handlers
+     * never see the difference.  With the default widths this is skipped
+     * entirely, so the common path is unchanged. */
+    if ((s->coordinate_size != 0 && s->coordinate_size != 2) ||
+        (s->color_mode != 0 && s->color_bits > 8)) {
+        uint8_t lvl = s->is_level9 ? 9 : s->is_level3 ? 3 : s->is_level2 ? 2 : s->is_level1 ? 1 : 0;
+        int nlen = rip_normalise_widths(s, s->cmd_buf, len, s->cmd_char, lvl);
+        if (nlen >= 0) {
+            len = nlen;
+            s->cmd_len = (uint16_t)nlen;
+            s->coord_size_unsupported = false;   /* handled after all */
+        }
+    }
+
+    /* Mark that RIP commands have drawn — prevents ANSI ESC[2J fallback
+     * from clearing the framebuffer after the menu is rendered. */
+    s->rip_has_drawn = true;
+
+    /* Apply current drawing state */
+    apply_draw_state(s);
+
+    if (s->is_level9) {
+        rip_execute_service(s);
+        return;
+    }
+    if (s->is_level3) {
+        /* Level 3 commands (prefixed with '3').
+         *
+         * IMPLEMENTED 2026-08-12.  This block previously discarded every
+         * Level 3 command on the grounds that the letters were "not publicly
+         * documented".  They are now recovered from the driver's own dispatch
+         * table (docs/spec/13-dll-command-table.md), with argument widths from
+         * each entry's type bytes and field meanings from each handler's
+         * validation diagnostics.  Discarding them silently meant a stream
+         * using any of the five rendered nothing with no diagnosis. */
+        switch (s->cmd_char) {
+
+        case 0x1B:
+        case 'G':
+        case 'U':
+        case 'R': /* Legacy RIPlib level-3 aliases for the driver level-9 commands. */
+            rip_execute_service(s);
             break;
 
         case 'e': /* RIP_BAUD_EMULATION — rate:2
@@ -2706,21 +2988,10 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
         case 'D': /* RIP_DELAY — ticks:4, in sixtieths of a second.
                    *
-                   * RESOLVED 2026-08-12.  Two slots carry 'D' (122 and 125).
-                   * Slot 122 (RVA 0x038BD2) is a five-instruction thunk that
-                   * passes arg[0] straight to 0x100282CA, which busy-waits on
-                   * WINMM!timeGetTime.  Its arithmetic fixes the unit beyond
-                   * doubt: it splits the count into chunks of 3900, waits
-                   * 0xFDE8 = 65000 ms per chunk (3900/60 = 65 s), then waits
-                   * remainder * 1000 / 60 ms.  So the field is 1/60 s ticks.
-                   *
-                   * Slot 125 (RVA 0x024AF4) is a different command: it copies
-                   * a TEXT parameter into a 256-byte buffer, looks it up, and
-                   * on a result of 2 calls RIP_Suspend (0x10006C01, which
-                   * names itself).  It never touches the decoded argument
-                   * array, so it does not match its own argc=1/mega4 row —
-                   * the dispatch rule selecting between the duplicate rows remains
-                   * unresolved. RIPlib implements slot 122 only. See D-30.
+                   * D-34 corrects the old duplicate-key interpretation: slot 122
+                   * is |3D (delay); slot 125 is |9D (host command). The driver
+                   * splits the count into 3900-tick/65000-ms chunks, then
+                   * remainder * 1000 / 60 ms.
                    *
                    * RIPlib does NOT busy-wait.  A rendering library that
                    * blocks the caller for up to 65 seconds a chunk is
@@ -2738,7 +3009,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
          * where the driver's dispatch table assigns the skewed-oval family
          * instead.  The two capabilities are kept here rather than dropped;
          * neither letter appears among the driver's Level 3 commands
-         * (D, e, ESC, G, R, U), so nothing in the protocol is displaced. */
+         * (D, e), so nothing in the protocol is displaced. */
         case '&': /* icon display style -- x0:2 y0:2 x1:2 y1:2 style:2 align:2 scale:2 */
             if (len >= 14) {
                 int16_t x0 = mega2(p),     y0 = scale_y(mega2(p + 2));
@@ -3237,7 +3508,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             break;
 
         /* ── Icon loading ──────────────────────────────────────── */
-        case 'I': /* RIP_LOAD_ICON -- x:XY y:XY mode:1 res:1 clipboard:1
+        case 'I': /* RIP_LOAD_ICON -- x:XY y:XY res:1 mode:1 clipboard:1
                    *                 stretch:1 res:1 filename
                    *
                    * args[5] is named STRETCH here because that is what the
@@ -3255,23 +3526,11 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                  * mode.  RIPlib read mega2(p+4), which spans the driver's
                  * args[2] and args[3] and agrees only while args[3] is 0.
                  * The filename offset (9) was already correct. */
-                uint8_t mode = (uint8_t)mega_digit(p[4]);
+                /* CD5A selects the ROP from args[3], loaded into ESI at CB55. */
+                uint8_t mode = (uint8_t)mega_digit(p[5]);
                 bool copy_to_clipboard = (mega_digit(p[6]) != 0);
-                /* args[5] -- p[7] -- IS NOT RESERVED.  It is a stretch flag
-                 * and the handler bounds it:
-                 *     cmp dword [ebp-0x10],1
-                 *     jbe ok
-                 *     push "Invalid stretch parameter"
-                 * so above one the driver reports and draws NOTHING.  This
-                 * comment used to call p[7] reserved "meaning not
-                 * recovered", which was true only in the sense that nobody
-                 * had looked.  Found 2026-08-14 disassembling slot 97.
-                 *
-                 * The stretch behaviour itself is not implemented -- RIPlib
-                 * blits at native size -- but refusing what the driver
-                 * refuses costs nothing and keeps a malformed icon command
-                 * from drawing where the driver would not.  args[3] at p[5]
-                 * and args[6] at p[8] remain genuinely unexamined. */
+                /* args[5] is the boolean stretch flag, bounded at CB69.
+                 * args[6] is unused by this handler. D-35. */
                 if (mega_digit(p[7]) > 1)
                     break;
                 int fname_start = 9;
@@ -3285,9 +3544,19 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
                     rip_icon_t icon;
                     if (rip_icon_lookup(&s->icon_state, path, fname_len, &icon)) {
-                        rip_draw_icon_pixels(s, ix, iy, icon.pixels,
-                                             icon.width, icon.height,
-                                             0, 0, mode);
+                        if (mega_digit(p[7])) {
+                            /* 49340 -> 31084 scales native dimensions by
+                             * device/logical resolution: here 640/640,400/350. */
+                            int32_t h = (int32_t)icon.height * 8 / 7;
+                            if (icon.width <= INT16_MAX && h <= INT16_MAX)
+                                rip_blit_pixels(s, ix, iy, icon.pixels,
+                                                icon.width, icon.height,
+                                                (int16_t)icon.width, (int16_t)h, mode);
+                        } else {
+                            rip_draw_icon_pixels(s, ix, iy, icon.pixels,
+                                                 icon.width, icon.height,
+                                                 0, 0, mode);
+                        }
                         if (copy_to_clipboard)
                             (void)rip_clipboard_store_pixels(s, icon.pixels,
                                                              icon.width,
@@ -4009,135 +4278,9 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                     * prefix: it has no dispatch entry at all, so that width
                     * is RIPlib's own convention rather than a record to
                     * conform to. */
-            if (len >= 4) {
-                const char *vname = p + 4;
-                int vlen = len - 4;
-                char resp[64];
-                int rlen = 0;
-
-                /* $APPn$ — return stored application variable, or request input */
-                if (vlen >= 6 && vname[0] == '$' && vname[1] == 'A' &&
-                    vname[2] == 'P' && vname[3] == 'P' &&
-                    vname[4] >= '0' && vname[4] <= '9' && vname[5] == '$') {
-                    int idx = vname[4] - '0';
-                    rlen = (int)rip_strnlen(s->app_vars[idx], sizeof(s->app_vars[0]));
-                    if (rlen == 0 && rip_query_prompt_begin(s, vname, vlen)) {
-                        /* Do not push a response to the BBS yet */
-                        rlen = -1;  /* sentinel: skip riplib_host_tx below */
-                    } else {
-                        memcpy(resp, s->app_vars[idx], (size_t)rlen);
-                    }
-
-                /* $OVERFLOW(RESET)$ — reset to first page */
-                } else if (vlen >= 18 &&
-                    memcmp(vname, "$OVERFLOW(RESET)$", 17) == 0) {
-                    s->rip2_state.overflow_page = 0;
-                    rlen = 0;
-
-                /* $OVERFLOW(NEXT)$ — advance one page */
-                } else if (vlen >= 17 &&
-                    memcmp(vname, "$OVERFLOW(NEXT)$", 16) == 0) {
-                    if (s->rip2_state.overflow_page + 1 < s->rip2_state.overflow_total)
-                        s->rip2_state.overflow_page++;
-                    rlen = 0;
-
-                /* $OVERFLOW(PREV)$ — back one page */
-                } else if (vlen >= 17 &&
-                    memcmp(vname, "$OVERFLOW(PREV)$", 16) == 0) {
-                    if (s->rip2_state.overflow_page > 0)
-                        s->rip2_state.overflow_page--;
-                    rlen = 0;
-
-                /* $OVERFLOW$ — return "page/total" string */
-                } else if (vlen >= 11 &&
-                    memcmp(vname, "$OVERFLOW$", 10) == 0) {
-                    rlen = snprintf(resp, sizeof(resp), "%u/%u",
-                                   s->rip2_state.overflow_page + 1,
-                                   s->rip2_state.overflow_total);
-                    if (rlen < 0) rlen = 0;
-
-                /* Fix SV-1/S1: $FILEDEL$ — intentionally not implemented.
-                 * Remote file deletion is a security vulnerability. Log and ignore. */
-                } else if (vlen >= 10 &&
-                    memcmp(vname, "$FILEDEL$", 9) == 0) {
-                    /* Received $FILEDEL$ — silently ignore, do not delete anything */
-                    rlen = 0;
-
-                /* Fix SV-2/S2: $GOTOURL$ — RIPlib never launches a process or
-                 * opens a URL itself.  Since 2026-08-12 this route is routed
-                 * through the SAME opt-in path as '|3G', so the two ways a
-                 * stream can ask for a URL behave identically instead of one
-                 * being a dead end and the other not:
-                 *   - same scheme allow-list (http/https only),
-                 *   - same control-character rejection,
-                 *   - stored in s->goto_url,
-                 *   - handler invoked ONLY if the embedder registered one.
-                 * The response to the stream stays zero-length either way, so
-                 * a hostile host learns nothing about whether a handler
-                 * exists. */
-                } else if (vlen >= 10 &&
-                    memcmp(vname, "$GOTOURL$", 9) == 0) {
-                    const char *u = vname + 9;
-                    int ulen = vlen - 9;
-                    if (ulen > 0 && ulen < (int)sizeof(s->goto_url)) {
-                        int ok = 1;
-                        for (int i = 0; i < ulen; i++) {
-                            if ((unsigned char)u[i] < 0x21 ||
-                                (unsigned char)u[i] > 0x7E) { ok = 0; break; }
-                        }
-                        if (ok && rip_url_scheme_allowed(u, ulen)) {
-                            memcpy(s->goto_url, u, (size_t)ulen);
-                            s->goto_url[ulen] = '\0';
-                            if (s->url_handler)
-                                s->url_handler(s->goto_url, ulen);
-                        }
-                    }
-                    rlen = 0;
-
-                } else {
-                    char key[RIP_USER_VAR_NAME_MAX + 1];
-                    if (rip_var_name_copy(vname, vlen, key, sizeof(key))) {
-                        int uidx = rip_user_var_find(s, key, (int)strlen(key));
-                        if (uidx >= 0) {
-                            rlen = (int)rip_strnlen(s->user_var_values[uidx],
-                                                    sizeof(s->user_var_values[uidx]));
-                            if (rlen > (int)sizeof(resp))
-                                rlen = (int)sizeof(resp);
-                            memcpy(resp, s->user_var_values[uidx], (size_t)rlen);
-                        } else {
-                            /* UNDEFINED variable: say nothing.  Do NOT prompt.
-                             *
-                             * This branch used to call
-                             * rip_query_prompt_begin(), asking the host to
-                             * put up an input form for any name it did not
-                             * recognise.  With the offset bug above that
-                             * never fired; correcting the offset fired it
-                             * eighty times across eleven corpus scenes.
-                             *
-                             * It is wrong independently of the harness.  The
-                             * names shipped content actually queries --
-                             * $DTW$, $COMPAT$, $SBAROFF$ -- are CAPABILITY
-                             * queries, and the driver carries "DTW",
-                             * "COMPAT" and "SBAROFF" as known strings.  A
-                             * terminal answers those from its own state; it
-                             * does not interrupt the user to ask what DTW
-                             * should be.
-                             *
-                             * RIPlib implements none of them, so it has
-                             * nothing to say and says nothing.  Prompting is
-                             * reserved for variables the STREAM defined,
-                             * which is the '$APPn$' path above. */
-                            rlen = 0;
-                        }
-                    } else {
-                        rlen = 0;
-                    }
-                }
-
-                /* rlen == -1 means query_pending was set; don't respond to BBS yet. */
-                if (rlen > 0)
-                    riplib_host_tx(resp, rlen);
-            }
+            if (len >= 4 && p[0]>='0' && p[0]<='6')
+                rip_define_query(s,(unsigned)mega_digit(p[0]),
+                                 (unsigned)mega_digit(p[1]),p+4,len-4);
             break;
 
         default:
@@ -4349,6 +4492,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
              * full-screen window. */
             s->tw_active = (s->tw_x0 != 0 || s->tw_y0 != 0 ||
                             s->tw_x1 != 639 || s->tw_y1 != 349);
+            s->defined_text_windows |= UINT64_C(1) << s->rip2_state.cur_text_window_slot;
         }
         break;
     case 'v': /* RIP_VIEWPORT
@@ -5408,6 +5552,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             s->tw_cur_x = s->tw_x0;
             s->tw_cur_y = scale_y(s->tw_y0);
             s->tw_active = true;
+            s->defined_text_windows |= UINT64_C(1) << s->rip2_state.cur_text_window_slot;
         }
         break;
 
@@ -5810,6 +5955,9 @@ reprocess:
             } else if (ch == '2') {
                 s->is_level2 = true;
                 s->state = RIP_ST_LEVEL2_LETTER;
+            } else if (ch == '9') {
+                s->is_level9 = true;
+                s->state = RIP_ST_LEVEL3_LETTER;
             } else if (ch == '3') {
                 s->is_level3 = true;
                 s->state = RIP_ST_LEVEL3_LETTER;
@@ -6044,16 +6192,17 @@ reprocess:
         break;
 
     /* ── State 13: LEVEL3_LETTER ────────────────────────────────
-     * After '3' prefix — waiting for Level 3 sub-command letter.
-     * DLL has 5 Level 3 commands; letters not fully documented.
+     * Shared state after '3' or '9'; separate flags retain the literal prefix.
      * ─────────────────────────────────────────────────────────── */
     case RIP_ST_LEVEL3_LETTER:
         if (ch == '\r' || ch == '\n') {
             s->last_char = ch;
             s->is_level3 = false;
+            s->is_level9 = false;
             s->state = RIP_ST_IDLE;
         } else if (ch == '|') {
             s->is_level3 = false;
+            s->is_level9 = false;
             s->state = RIP_ST_COMMAND;
         } else {
             s->cmd_char = (char)ch;
@@ -6108,6 +6257,14 @@ reprocess:
  * untouched, which is what preproc_finalize_directive() now guarantees
  * by emitting anything it does not recognise verbatim.  See D-26. */
 void rip_process(rip_state_t *s, void *ctx, uint8_t ch) {
+    /* Deferred query templates are evaluated at the event, not receipt.
+     * Keep their <<IF>> text intact while respecting an outer suppression. */
+    if (!rip_preproc_is_suppressing(s) && s->preproc_state==0 &&
+        s->is_level1 && s->cmd_char==0x1B && s->cmd_len>=4 &&
+        (s->state==RIP_ST_ARG_COLLECT || s->state==RIP_ST_LINE_CONT)) {
+        rip_dispatch_byte(s,ctx,ch);
+        return;
+    }
     /* E4: <<IF>>/<<ELSE>>/<<ENDIF>> stream-level pre-processor.
      * Evaluated before all other IDLE-state logic so that suppressed
      * content (preproc_suppress==true) is swallowed before it can

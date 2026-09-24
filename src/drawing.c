@@ -62,6 +62,20 @@ static const uint8_t fill_patterns[11][8] = {
     {0x80,0x00,0x08,0x00,0x80,0x00,0x08,0x00}, /* 9: wide dot (BGI 10) */
     {0xAA,0x00,0xAA,0x00,0xAA,0x00,0xAA,0x00}, /* 10: close dot (BGI 11) */
 };
+/* Driver brush table at RVA 0x7AFD8, BGI 2..11 (D-36).
+ * Generic card patterns 0..11 retain their existing public meanings. */
+static const uint8_t rip_fill_patterns[10][8] = {
+    {0xFF,0xFF,0x00,0x00,0xFF,0xFF,0x00,0x00},
+    {0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80},
+    {0xE0,0xC1,0x83,0x07,0x0E,0x1C,0x38,0x70},
+    {0xF0,0x78,0x3C,0x1E,0x0F,0x87,0xC3,0xE1},
+    {0xA5,0xD2,0x69,0xB4,0x5A,0x2D,0x96,0x4B},
+    {0xFF,0x88,0x88,0x88,0xFF,0x88,0x88,0x88},
+    {0x81,0x42,0x24,0x18,0x18,0x24,0x42,0x81},
+    {0xCC,0x33,0xCC,0x33,0xCC,0x33,0xCC,0x33},
+    {0x80,0x00,0x08,0x00,0x80,0x00,0x08,0x00},
+    {0x88,0x00,0x22,0x00,0x88,0x00,0x22,0x00},
+};
 static uint8_t user_pattern[8] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
 /* ── Dirty-row callback ──────────────────────────────────────────── */
@@ -360,6 +374,8 @@ static void fill_span(int16_t x, int16_t y, int16_t len) {
     /* Pattern + write mode path */
     const uint8_t *pat = (g_fill_pattern >= 1 && g_fill_pattern <= 10)
                          ? fill_patterns[g_fill_pattern]
+                         : (g_fill_pattern >= 12 && g_fill_pattern <= 21)
+                         ? rip_fill_patterns[g_fill_pattern - 12]
                          : (g_fill_pattern == 11) ? user_pattern
                          : fill_patterns[0];
     uint8_t pat_row = pat[y & 7];
@@ -863,7 +879,9 @@ void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
     if (g_fill_pattern != 0 && fill != g_fill_color) {
         const uint8_t *pat = (g_fill_pattern >= 1 && g_fill_pattern <= 10)
                              ? fill_patterns[g_fill_pattern]
-                             : (g_fill_pattern == 11) ? user_pattern
+                             : (g_fill_pattern >= 12 && g_fill_pattern <= 21)
+                         ? rip_fill_patterns[g_fill_pattern - 12]
+                         : (g_fill_pattern == 11) ? user_pattern
                              : NULL;
         if (pat) {
             for (int16_t py = dirty_y0; py <= dirty_y1; py++) {

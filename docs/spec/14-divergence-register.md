@@ -1,3 +1,9 @@
+CURRENT CORRECTION (2026-09-24, D-34..37): historical claims below
+about 117 keys, a duplicate |3D, or service commands at level 3 are
+superseded. Prefix bytes prove 118 distinct keys; services use level 9.
+Global radix, icon stretch/ROP, exact brush masks and query protection
+are now implemented. See ../crosswalk-audit.md for current boundaries.
+
 =====================================================================
 14.  DIVERGENCE REGISTER
 =====================================================================
@@ -48,7 +54,7 @@ tolerances in 14.3.3 by name rather than passing them silently.
 2026-09-24 FIX STATUS (D-31..33): the backtick length/offset defects
 are fixed. Tracing the geometry helper also corrected comma, period,
 colon and brace. Both missing ESC keys now have handlers, and refresh
-stores a host command. Coverage is 117/117 distinct DLL keys; this is
+stores a host command. Coverage is 118/118 distinct DLL keys (D-34 corrects the prefixes); this is
 not a claim of full terminal behavior or pixel parity. See the current
 audit report at ../crosswalk-audit.md for exact validation and limits.
 
@@ -493,11 +499,10 @@ rather than a slogan.
      after -- 91237 foreground pixels either way, checked rather than
      assumed.
 
-     ONE IS STILL NOT GUARDED.  '|1ESC' rip_query: its diagnostics --
-     "Port is protected - can't define query", "Text window is
-     protected - can't define query" -- are about DEFINING a query
-     rather than answering one, and which of RIPlib's query paths that
-     corresponds to has not been established.
+     D-37 closes the query-definition gap: mode 3 checks the target
+     port's protection and existence; mode 4 checks the target text
+     window. Modes 1..6 store expressions for later events; $OFF$ clears
+     them. This replaces the former immediate-only query behavior.
      Everything starts unprotected, so the guards are inert until a
      stream opts in -- which is why turning them on changed nothing for
      the 35 corpus scenes or the 315 assertions.  The driver reports a
@@ -522,12 +527,13 @@ rather than a slogan.
 
 14.3.8  COMMAND COVERAGE AND REMAINING SEMANTIC LIMITS
 
-     D-32 implements '|2<ESC>' (SwitchDirectory) and '|3<ESC>'
+     D-32 implements '|2<ESC>' (SwitchDirectory) and '|9<ESC>'
      (EnterBlockMode) as validated host-service state/callbacks. D-31
      replaces backtick's wrong screen-compositing behavior with a chord.
-     All 117 distinct driver keys have source handlers. Host execution,
-     encoded-stream decoding, and duplicate '|3D' selection are separate
-     unresolved contracts, not established by handler coverage.
+     All 118 distinct driver keys have source handlers. D-34 corrects
+     the five service prefixes to level 9 (legacy level-3 aliases remain).
+     There is no duplicate key. The 9U driver handler validates a type
+     but has no payload decoder. Host execution is delegated explicitly.
      See ../crosswalk-audit.md for the precise remaining boundaries.
 
 14.3.9  RIPlib-ORIGINAL COMMANDS
@@ -905,9 +911,10 @@ AUDIT LOG -- QUEUE COMPLETE.  All nine audited, four findings.
          reports "Invalid stretch parameter" above one, drawing nothing.
          RIPlib called that column reserved, "meaning not recovered",
          which was true only in the sense that nobody had looked.  The
-         refusal is now implemented; stretching itself is not, and
-         RIPlib still blits at native size.  args[3] at p[5] and args[6]
-         at p[8] remain genuinely unexamined.  FIXED.
+         refusal is implemented. D-35 additionally traces the dimension
+         scaling and corrects the ROP to args[3] at p[5]. args[6] is unused
+         by the bounded handler. The earlier FIXED label covered only
+         the value bound, not these semantics.
 
   '|2A' '|2B' '|2E' '|2T' '|2Y'  the second field is not a reserved
          pair but a flags word that WRITES protection state, refuting

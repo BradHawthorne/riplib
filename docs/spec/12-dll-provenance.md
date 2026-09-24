@@ -1,3 +1,88 @@
+CURRENT CORRECTION (2026-09-24, D-34..37): historical claims below
+about 117 keys, a duplicate |3D, or service commands at level 3 are
+superseded. Prefix bytes prove 118 distinct keys; services use level 9.
+Global radix, icon stretch/ROP, exact brush masks and query protection
+are now implemented. See ../crosswalk-audit.md for current boundaries.
+
+D-34 LITERAL PREFIXES AND SESSION RADIX (2026-09-24).
+
+     The old census inferred levels from slot runs. That assumption was
+     shared by every checker, so agreement between them concealed the error.
+     Each 40-byte record actually contains a NUL-terminated prefix at +5;
+     dispatcher RVA 039F63..03A00B compares it. Slots 122/123 carry '3',
+     slots 124..128 carry '9'. There is no duplicate 3D: slot 125 is 9D.
+     All eight table readers now use dll_record.dispatch_level. An adversarial
+     test changes a prefix without moving its slot; documentation checks
+     compare the literal prefix as well as letter, handler, types and arity.
+
+     Canonical 9ESC/9D/9G/9R/9U now dispatch. Existing 3ESC/3G/3R/3U aliases
+     remain accepted; 3D remains delay. 9D stores its host expression and
+     optionally delegates through rip_set_host_command_handler. No shell is
+     invoked. 9U's bounded handler 0252C0..0252F2 reads type, resets cursor
+     state and rejects type >1; it does not read length or decode a payload.
+     Calling that absent decoder an unrecovered format overstated the evidence.
+
+     J/N retain flag-1 base 36; D/d/h/y retain flag-2 base 64. All other
+     numeric decoders now follow the session's selected base, including
+     level 2 and negotiated-width normalization. Disconnect restores 36.
+     Existing wire forms are retained. J10 always selects 36; J1S selects 64.
+
+D-35 LOAD ICON FIELD MEANINGS AND STRETCH (2026-09-24).
+
+     Slot 97's seven fields are XY XY 1 1 1 1 1. The older field-width
+     correction still read the wrong single-digit column as its ROP.
+     Handler CB38..CEF8 loads args[3] into ESI; CD5A selects COPY/XOR/OR/
+     AND/NOT from that register. RIPlib now reads p[5], not p[4]. Filename
+     still starts at 9, clipboard is p[6], boolean stretch p[7], and args[6]
+     is unused in the bounded handler. args[2] participates in the host
+     macro-return branch; RIPlib's direct asset lookup does not emulate it.
+
+     show_bmp_file (4A410) passes stretch to 49340, which calls 31084 to
+     multiply native dimensions by device/logical resolution. RIPlib's
+     fixed 640x400 device over 640x350 logical coordinates therefore leaves
+     width unchanged and computes height*8/7. It does not fill the viewport.
+     Raster-op and seven-to-eight-row tests distinguish both old defects.
+     Existing RIPlib icon-style extensions retain their path when stretch=0.
+     Clipboard caching still stores source pixels, not the driver's screen
+     capture; exact clipboard/GDI compositing is a separate renderer boundary.
+
+D-36 EXACT BUILT-IN BRUSH MASKS (2026-09-24).
+
+     RVA 7AFD8 contains twelve sets of eight WORD rows. EMPTY/SOLID were
+     already recovered; patterns 2..11 were still approximated by generic
+     card patterns. All 80 rows are now copied exactly, using internal IDs
+     12..21 so public card IDs 0..11 keep their meaning. Both filled spans
+     and flood fill select the same masks. A literal 640-bit rendering test
+     and a predicate comparing all 80 source rows with the DLL guard this.
+     Four old tests expected the approximate LINE mask; their background/
+     foreground probes now use rows 6/5 from the actual driver bitmap.
+
+D-37 DEFERRED QUERY DEFINITIONS AND PROTECTION (2026-09-24).
+
+     Handler D3DA..D64C distinguishes immediate mode 0 from definitions
+     1..6. Mode 3 checks port existence/protection at 338BC/33821; mode 4
+     checks text-window existence/protection at E028/27642. The resident
+     helper 13E61..13ED0 recognizes $OFF$. RIPlib now stores definitions
+     without transmission, checks their target slots, clears them on OFF,
+     port replacement/deletion or disconnect, and expands them at the event.
+     Mouse fields suppress resident click queries. Port queries precede
+     text-window queries, then floating viewport/text queries. Entry/exit
+     expressions use modes 5/6. Hosts may trigger additional windows via
+     rip_trigger_query; automatic hit testing retains the existing active
+     text-window model, not a new 36-window compositor.
+
+     Query templates bypass receipt-time preprocessing. Nested conditionals
+     evaluate at the event, quoted operands compare as strings, malformed
+     templates do not transmit partial text, and compound macros/control
+     escapes are handled. Exact-length OVERFLOW queries no longer require
+     an extra character. Unknown host macros remain silent. Full host macro
+     and compressed-prefix emulation are not claimed by this correction.
+
+     The nine new regression functions all fail against baseline 024032a
+     (using inert link stubs only for the two newly introduced public APIs)
+     and pass after correction. Their predicates distinguish presence,
+     field meaning, timing, target protection and observable output.
+
 
 =====================================================================
 ==       SEGMENT 12: BINARY PROVENANCE & EVIDENCE CLASSES          ==

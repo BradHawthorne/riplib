@@ -121,6 +121,12 @@ typedef struct {
     uint8_t  corner_col;        /* Corner color */
 } rip_button_style_t;
 
+/* Deferred RIP_Query text, allocated only when a stream defines it. */
+typedef struct {
+    char *text;
+    uint16_t capacity;
+} rip_query_slot_t;
+
 /* Clipboard for GET_IMAGE/PUT_IMAGE */
 typedef struct {
     uint8_t *data;              /* Pixel data (arena-allocated) */
@@ -128,7 +134,7 @@ typedef struct {
     bool     valid;             /* true if clipboard contains data */
 } rip_clipboard_t;
 
-/* Handler for '|3G' RIP_GotoURL.
+/* Handler for '|9G' RIP_GotoURL.
  *
  * RIPlib NEVER opens a URL or spawns a process itself.  A stream is untrusted
  * input, and a terminal that acts on it directly is a remote-code-execution
@@ -158,7 +164,12 @@ typedef struct rip_state_s rip_state_t;
 
 typedef void (*rip_url_handler_t)(const char *url, int len);
 
-/* |3ESC requests a host-owned file transfer. No transfer, file access or
+/* |9D carries a host-command expression. Stored even without a handler;
+ * RIPlib never executes a shell command. The callback owns host policy. */
+typedef void (*rip_host_command_handler_t)(void *user, const char *text, int len);
+void rip_set_host_command_handler(rip_state_t *s, rip_host_command_handler_t handler, void *user);
+
+/* |9ESC requests a host-owned file transfer. No transfer, file access or
  * protocol bytes are initiated by RIPlib. The callback receives untrusted
  * data valid only for the duration of the call. Also available for polling
  * in block_transfer; pending stays set until the host clears it. */
@@ -391,6 +402,7 @@ struct rip_state_s {
     bool     is_level1;      /* Currently parsing a Level 1 command */
     bool     is_level2;      /* Currently parsing a Level 2 command */
     bool     is_level3;      /* Currently parsing a Level 3 command */
+    bool     is_level9;      /* Driver host/service command prefix */
 
     /* Drawing state */
     int16_t  draw_x, draw_y; /* Current drawing position */
@@ -441,15 +453,18 @@ struct rip_state_s {
 
     /* Level 3 state (added 2026-08-12 with the Level 3 dispatch).
      *
-     * goto_url: the URL from '|3G' RIP_GotoURL, validated but NEVER acted on.
+     * goto_url: the URL from '|9G' RIP_GotoURL, validated but NEVER acted on.
      * RIPlib does not launch URLs or spawn processes -- see the $GOTOURL$
      * policy note in ripscrip.c.  An embedder that wants click-through reads
      * this and applies its own policy.  Empty means "none received". */
     char     goto_url[128];
     /* Opt-in handler; NULL (the default) means the URL is stored only. */
     rip_url_handler_t url_handler;
-    /* '|3U' RIP_BeginEncodedStream announcement. The payload format has not
-     * been recovered, so the announcement is recorded, not decoded. */
+    char host_command[256];
+    rip_host_command_handler_t host_command_handler;
+    void *host_command_user;
+    /* |9U announcement metadata; the inspected driver validates type but
+     * performs no payload decoding. The legacy |3U alias remains accepted. */
     uint16_t encoded_stream_type;
     uint32_t encoded_stream_len;
     /* '|3e' RIP_BAUD_EMULATION — requested playback rate.  The driver
@@ -614,6 +629,11 @@ struct rip_state_s {
      * one byte per call; on the NUL terminator the response is stored
      * in the target user variable and query_pending is cleared.
      * query_response is the staging accumulator. */
+    rip_query_slot_t deferred_query[4]; /* modes 1,2,5,6 */
+    rip_query_slot_t port_query[36];
+    rip_query_slot_t text_query[36];
+    uint64_t defined_text_windows;
+    int16_t query_hover_field;
     bool    query_pending;         /* true while waiting for host response */
     char    query_var_name[32];    /* $APPn$ or generic variable being queried */
     char    query_response[RIP_USER_VAR_VALUE_MAX + 1]; /* incoming response accumulator */
@@ -659,10 +679,8 @@ struct rip_state_s {
      * 2=center).  Stored so subsequent icon-load / PUT_IMAGE calls
      * can honour the BBS-requested presentation. */
     uint8_t image_style;
-    /* MegaNum radix selected by '|J' RIP_SET_BASE_MATH: 36 or 64.  Recorded
-     * for capability queries; the decoders are base 36 unconditionally
-     * because the base-64 digit alphabet has not been recovered.  See
-     * docs/spec/12-dll-provenance.md D-10. */
+    /* Session MegaNum radix selected by |J: 36 or 64. Per-command fixed
+     * radix flags take precedence (D-34). Reset to 36 on disconnect. */
     uint8_t mega_base;
     /* '|2R' RIP_SetRefresh reserved field (slot 117, one mega4). */
     uint32_t refresh_res;
@@ -760,6 +778,11 @@ void rip_process(rip_state_t *s, void *ctx, uint8_t ch);
 /* Stateful host-event helpers for multi-session integrations.  This is
  * the complete reentrant surface: every globals-based wrapper further
  * down has a fully reentrant *_state() form declared here. */
+/* Trigger a stored query on a host event: modes 1..6, slot used by 3/4.
+ * Mouse handling triggers port and current-window queries automatically;
+ * embedders owning additional text windows can trigger mode 4 explicitly. */
+bool rip_trigger_query(rip_state_t *s, uint8_t mode, uint8_t slot);
+
 void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked);
 void rip_file_upload_begin_state(rip_state_t *s, uint8_t name_len);
 void rip_file_upload_byte_state(rip_state_t *s, uint8_t data_byte);

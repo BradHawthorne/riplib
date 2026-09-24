@@ -50,6 +50,7 @@ prose claims about SEMANTICS, only about widths, values and splits.
 
     python scripts/check-spec-examples.py [<path>/RIPSCRIP.DLL]
 """
+from dll_record import dispatch_level
 import argparse
 import pathlib
 import re
@@ -62,10 +63,9 @@ CHAPTERS = ["02-level0-drawing.md", "03-level1-interactive.md",
             "06a-v32-extensions.md"]
 TABLE_RVA, ENTRIES, STRIDE = 0x080820, 129, 40
 
-# Levels are contiguous slot runs, per 13-dll-command-table.md.  A handler
+# Prefixes are read from each record. A handler
 # ADDRESS band was tried and rejected: it misplaces slot 48 ('|N',
 # RIP_SetBorder), whose code sits among the level-1 handlers.
-RUNS = ((0, 0, 84), (1, 85, 109), (2, 110, 121), (3, 122, 128))
 
 # Fields whose width follows a mode set at run time rather than a literal.
 SYMBOLIC = {"XY": 2, "CM": 2}
@@ -116,7 +116,7 @@ def load_driver(dll_path):
             if b == 0:
                 break
             widths.append(2 if b in (0xFF, 0xFE) else b)
-        lvl = next((l for l, lo, hi in RUNS if lo <= i <= hi), None)
+        lvl = dispatch_level(raw)
         if lvl is not None:
             out.setdefault((lvl, chr(letter)), (widths, argc))
     return out

@@ -776,6 +776,16 @@ int rip_expand_variables(rip_state_t *s,
  * the canonical operators in precedence-friendly order (2-char ops
  * first so "5>=5" is parsed as ">=", not "= then >").  Falsy values
  * are empty string and literal "0"; everything else is truthy. */
+static char *rip_expr_operand(char *p) {
+    while (*p == ' ' || *p == '\t') ++p;
+    size_t n = strlen(p);
+    while (n && (p[n-1] == ' ' || p[n-1] == '\t')) p[--n] = '\0';
+    if (n >= 2 && p[0] == '"' && p[n-1] == '"') {
+        p[n-1] = '\0'; ++p;
+    }
+    return p;
+}
+
 bool rip_eval_if_expr(rip_state_t *s, const char *expr) {
     char expanded[128];
     rip_expand_variables(s, expr, (int)strlen(expr), expanded, sizeof(expanded));
@@ -785,7 +795,7 @@ bool rip_eval_if_expr(rip_state_t *s, const char *expr) {
     char *op = strstr(expanded, "!=");
     if (op) {
         *op = '\0';
-        return strcmp(expanded, op + 2) != 0;  /* string inequality */
+        return strcmp(rip_expr_operand(expanded), rip_expr_operand(op + 2)) != 0;  /* string inequality */
     }
     op = strstr(expanded, ">=");
     if (op) {
@@ -800,7 +810,7 @@ bool rip_eval_if_expr(rip_state_t *s, const char *expr) {
     op = strchr(expanded, '=');
     if (op) {
         *op = '\0';
-        return strcmp(expanded, op + 1) == 0;  /* string equality */
+        return strcmp(rip_expr_operand(expanded), rip_expr_operand(op + 1)) == 0;  /* string equality */
     }
     op = strchr(expanded, '>');
     if (op) {

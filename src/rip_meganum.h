@@ -67,7 +67,7 @@ static inline int32_t rip_mega4(const char *p) {
  *
  *      1  always base 36 (restricted digits)   '|J', '|N'
  *      2  always base 64 (extended digits)     '|D', '|d', '|h', '|y'
- *      3  follow the global base from '|J'     the other 96 entries
+ *      3  follow the global base from '|J'     commands with flag value 3
  *
  * '|J' being permanently base 36 is the point of the design: the command
  * that SETS the radix must itself decode unambiguously.
@@ -117,4 +117,13 @@ static inline int32_t rip_mega4_64(const char *p) {
  * unprefixed aliases (mega_digit/mega2/mega3/mega4) are defined locally in
  * src/ripscrip.c — the one TU that uses them — so this shared header does
  * not leak common short macro names into every includer (C-016).  ripscrip2.c
- * uses its own decoders (mega1/mega2l) and does not include this header. */
+ * uses session-aware aliases (mega1/mega2l/mega4l) over this same header. */
+
+/* Decode in the selected command radix. Widths used here fit uint32_t.
+ * No mutable global radix: interleaved terminal sessions stay independent. */
+static inline uint32_t rip_mega_decode(const char *p, unsigned width, unsigned base) {
+    uint32_t value = 0;
+    for (unsigned i=0;i<width;++i)
+        value=value*base+(uint32_t)(base==64 ? rip_mega_digit64(p[i]) : rip_mega_digit(p[i]));
+    return value;
+}

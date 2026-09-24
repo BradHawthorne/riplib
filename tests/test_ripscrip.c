@@ -491,14 +491,14 @@ static void test_bgi_fill_mapping(void) {
     int ok = 1;
     if (rip_bgi_fill_to_card(0)  != -1) ok = 0;  /* EMPTY */
     if (rip_bgi_fill_to_card(1)  !=  0) ok = 0;  /* SOLID */
-    if (rip_bgi_fill_to_card(2)  !=  4) ok = 0;  /* LINE → horizontal */
-    if (rip_bgi_fill_to_card(3)  !=  7) ok = 0;  /* LTSLASH */
-    if (rip_bgi_fill_to_card(4)  !=  3) ok = 0;  /* SLASH */
-    if (rip_bgi_fill_to_card(5)  !=  2) ok = 0;  /* BKSLASH */
-    if (rip_bgi_fill_to_card(7)  !=  6) ok = 0;  /* HATCH */
-    if (rip_bgi_fill_to_card(9)  !=  8) ok = 0;  /* INTERLEAVE */
-    if (rip_bgi_fill_to_card(10) !=  9) ok = 0;  /* WIDE_DOT */
-    if (rip_bgi_fill_to_card(11) != 10) ok = 0;  /* CLOSE_DOT */
+    if (rip_bgi_fill_to_card(2)  != 12) ok = 0;  /* LINE → horizontal */
+    if (rip_bgi_fill_to_card(3)  != 13) ok = 0;  /* LTSLASH */
+    if (rip_bgi_fill_to_card(4)  != 14) ok = 0;  /* SLASH */
+    if (rip_bgi_fill_to_card(5)  != 15) ok = 0;  /* BKSLASH */
+    if (rip_bgi_fill_to_card(7)  != 17) ok = 0;  /* HATCH */
+    if (rip_bgi_fill_to_card(9)  != 19) ok = 0;  /* INTERLEAVE */
+    if (rip_bgi_fill_to_card(10) != 20) ok = 0;  /* WIDE_DOT */
+    if (rip_bgi_fill_to_card(11) != 21) ok = 0;  /* CLOSE_DOT */
     if (rip_bgi_fill_to_card(12) != 11) ok = 0;  /* USER */
     if (ok) PASS(); else FAIL("BGI fill style maps to wrong pattern");
 }
@@ -2502,13 +2502,13 @@ static void test_back_color_visible_in_pattern_fill(void) {
     /* k5: back_color=5 (palette slot 245).
      * S 02 0C: BGI LINE_FILL pattern, fill_color=12 (palette slot 252).
      * B 05 05 0F 0F: bar (5,5)-(15,15).
-     * Pattern 4 (horizontal) row 5 (y&7=5) = 0x00 → all OFF → back_color
-     * Pattern 4 row 6 (y&7=6) = 0xFF → all ON → fill_color */
+     * Driver LINE row 6 (y&7=6) = 0x00 → all OFF → back_color
+     * Driver LINE row 5 (y&7=5) = 0xFF → all ON → fill_color */
     feed_script(&s, &ctx, "!|k5|");
     feed_script(&s, &ctx, "!|S020C|");
     feed_script(&s, &ctx, "!|B05050F0F|");
-    if (draw_get_pixel(10, 5) == 245 &&
-        draw_get_pixel(10, 6) == 252)
+    if (draw_get_pixel(10, 6) == 245 &&
+        draw_get_pixel(10, 5) == 252)
         PASS();
     else
         FAIL("pattern fill did not use back_color for OFF bits");
@@ -2539,7 +2539,7 @@ static void test_back_color_command_propagates_to_draw_layer(void) {
     feed_script(&s, &ctx, "!|S020C|");
     feed_script(&s, &ctx, "!|k3|");      /* back_color = 3 → palette slot 243 */
     feed_script(&s, &ctx, "!|B05050F0F|");
-    if (draw_get_pixel(10, 5) == 243)    /* OFF bit row */
+    if (draw_get_pixel(10, 6) == 243)    /* OFF bit row */
         PASS();
     else
         FAIL("back_color change did not propagate");
@@ -2975,7 +2975,7 @@ static void test_port_switch_restores_pattern_back_color(void) {
     feed_script(&s, &ctx, "!|2s100|");
     feed_script(&s, &ctx, "!|2s000|");
     feed_script(&s, &ctx, "!|B05050F0F|");
-    if (draw_get_pixel(10, 5) == 243)
+    if (draw_get_pixel(10, 6) == 243)
         PASS();
     else
         FAIL("port restore used fill_color as patterned-fill background");
@@ -5678,8 +5678,8 @@ static void test_state_stack_pop_reapplies_fill_style(void) {
     feed_script(&s, &ctx, "!|~|");
     feed_script(&s, &ctx, "!|B05050F0F|");
 
-    if (draw_get_pixel(10, 5) == s.palette[3] &&
-        draw_get_pixel(10, 6) == s.palette[4])
+    if (draw_get_pixel(10, 6) == s.palette[3] &&
+        draw_get_pixel(10, 5) == s.palette[4])
         PASS();
     else
         FAIL("|~ left temporary fill pattern/back color active");
@@ -6311,7 +6311,196 @@ static void test_block_transfer_commands(void) {
     else FAIL("batch download announcement failed");
 }
 
+
+static void test_session_radix_and_fixed_exceptions(void) {
+    rip_state_t a,b; comp_context_t ctx;
+    TEST("session radix reaches all levels and preserves fixed-base commands");
+    init_fixture(&a,&ctx); init_fixture(&b,&ctx);
+    feed_script(&a,&ctx,"!|J1S|f0a0A|N010a|3D000a|");
+    feed_script(&b,&ctx,"!|f0a0A|");
+    if(a.mega_base!=64 || a.world_w!=36 || b.world_w!=10 || rip_take_delay(&a)!=36) {
+        FAIL("radix leaked between sessions or fixed-base decoding changed"); return;
+    }
+    feed_script(&a,&ctx,"!|2P10a000b0A00000000|");
+    if(!a.ports[1].allocated || a.ports[1].vp_x0!=36 || a.ports[1].vp_x1!=37) {
+        FAIL("Level 2 ignored base 64"); return;
+    }
+    feed_script(&a,&ctx,"!|J10|f0a0A|");
+    if(a.mega_base!=36 || a.world_w!=10) { FAIL("J cannot restore base 36"); return; }
+    PASS();
+}
+
+static void test_radix_negotiated_widths(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("base-64 coordinate normalization preserves lowercase digit values");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|J1S|n3000|c0F|X00a000|");
+    if(draw_get_pixel(36,0)!=s.palette[15] || draw_get_pixel(10,0)!=0) { FAIL("width normalization used base 36"); return; }
+    PASS();
+}
+
+static void test_level9_dispatch_and_aliases(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("literal level 9 dispatch is separate from level 3 delay");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|9G00000000https://example.com/nine|3D000a|9D0000literal|");
+    if(strcmp(s.goto_url,"https://example.com/nine") || rip_take_delay(&s)!=10 || tx_len) {
+        FAIL("level 9 routing collided with delay or emitted host text"); return;
+    }
+    feed_script(&s,&ctx,"!|9\x1b" "01020000demo.icn<>|9U010000|");
+    if(!s.block_transfer.pending || strcmp(s.block_transfer.filename,"demo.icn") || s.encoded_stream_type!=1) {
+        FAIL("driver level-9 services were not accepted"); return;
+    }
+    feed_script(&s,&ctx,"!|9U020000|3G00000000https://example.com/alias|");
+    if(s.encoded_stream_type!=1 || strcmp(s.goto_url,"https://example.com/alias")) {
+        FAIL("invalid stream type accepted or old alias broken"); return;
+    }
+    PASS();
+}
+
+static void test_deferred_queries_and_protection(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("query definitions defer output and respect target-slot protection");
+    init_fixture(&s,&ctx);
+    strcpy(s.app_vars[0],"first"); strcpy(s.app_vars[1],"second");
+    feed_script(&s,&ctx,"!|2P100000A0A00000000|1\x1b" "3100$APP0$|");
+    if(tx_len || !s.port_query[1].text) { FAIL("definition sent immediately or was dropped"); return; }
+    s.ports[1].flags |= RIP_PORT_FLAG_PROTECTED;
+    feed_script(&s,&ctx,"!|1\x1b" "3100$APP1$|1\x1b" "3200$APP1$|");
+    if(s.port_query[2].text || !rip_trigger_query(&s,3,1) || tx_len!=5 || memcmp(tx_capture,"first",5)) {
+        FAIL("protected/nonexistent target accepted a query"); return;
+    }
+    tx_reset(); s.rip2_state.protected_text_window=1;
+    feed_script(&s,&ctx,"!|1\x1b" "4000$APP1$|");
+    if(s.text_query[0].text) { FAIL("protected text window accepted query"); return; }
+    s.rip2_state.protected_text_window=0;
+    feed_script(&s,&ctx,"!|1\x1b" "4000$APP1$|");
+    if(tx_len || !rip_trigger_query(&s,4,0) || tx_len!=6 || memcmp(tx_capture,"second",6)) {
+        FAIL("valid text-window query did not defer"); return;
+    }
+    s.ports[1].flags &= (uint8_t)~RIP_PORT_FLAG_PROTECTED;
+    feed_script(&s,&ctx,"!|2p1000000|2P100000A0A00000000|");
+    if(rip_trigger_query(&s,3,1)) { FAIL("recreated port inherited old query"); return; }
+    rip_session_reset(&s);
+    if(rip_trigger_query(&s,3,1) || rip_trigger_query(&s,4,0)) { FAIL("query survived arena reset"); return; }
+    PASS();
+}
+
+static void test_query_templates_and_mouse_events(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("query templates expand on the event and conditionals never leak text");
+    init_fixture(&s,&ctx); strcpy(s.app_vars[0],"old");
+    feed_script(&s,&ctx,"!|1\x1b" "1000Hello $APP0$^m|");
+    strcpy(s.app_vars[0],"new"); rip_mouse_event_state(&s,5,5,true);
+    if(tx_len!=10 || memcmp(tx_capture,"Hello new\r",10)) { FAIL("floating viewport query was not deferred"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "0000<<IF 0>>wrong<<ELSE>>right<<ENDIF>>|");
+    if(tx_len!=5 || memcmp(tx_capture,"right",5)) { FAIL("conditional template leaked markers or false branch"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "0000<<IF 1>>unterminated|");
+    if(tx_len) { FAIL("malformed template sent a partial response"); return; }
+    PASS();
+}
+
+
+static void test_driver_fill_masks(void) {
+    static const uint8_t rows[10][8] = {
+        {255,255,0,0,255,255,0,0}, {1,2,4,8,16,32,64,128},
+        {224,193,131,7,14,28,56,112}, {240,120,60,30,15,135,195,225},
+        {165,210,105,180,90,45,150,75}, {255,136,136,136,255,136,136,136},
+        {129,66,36,24,24,36,66,129}, {204,51,204,51,204,51,204,51},
+        {128,0,8,0,128,0,8,0}, {136,0,34,0,136,0,34,0}
+    };
+    rip_state_t s; comp_context_t ctx;
+    TEST("all ten patterned brushes match the DLL's 640 literal mask bits");
+    init_fixture(&s,&ctx);
+    for (int p=0;p<10;++p) {
+        char wire[32]; snprintf(wire,sizeof(wire),"!|k03|S0%c04|B00000707|","23456789AB"[p]);
+        feed_script(&s,&ctx,wire);
+        for (int y=0;y<8;++y) for (int x=0;x<8;++x) {
+            uint8_t want=s.palette[(rows[p][y] & (0x80>>x)) ? 4 : 3];
+            if(draw_get_pixel((int16_t)x,(int16_t)y)!=want) { FAIL("brush mask differs"); return; }
+        }
+    }
+    PASS();
+}
+
+static void test_load_icon_rop_and_stretch(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("load-icon ROP uses args[3]; stretch scales native logical dimensions");
+    init_fixture(&s,&ctx);
+    uint8_t *pixels=psram_arena_alloc(&s.psram_arena,14);
+    if(!pixels) { FAIL("fixture allocation"); return; }
+    memset(pixels,5,14);
+    if(!rip_icon_cache_pixels(&s.icon_state,"MASK",4,pixels,2,7)) { FAIL("cache fixture"); return; }
+    feed_script(&s,&ctx,"!|1I000010000MASK|"); /* args[2]=1, ROP=COPY */
+    if(draw_get_pixel(0,0)!=5 || draw_get_pixel(0,7)!=0) { FAIL("native icon or ROP field wrong"); return; }
+    feed_script(&s,&ctx,"!|1I000001010MASK|"); /* ROP=XOR, stretch=1 */
+    if(draw_get_pixel(0,0)!=0 || draw_get_pixel(0,7)!=5 || draw_get_pixel(0,8)!=0) {
+        FAIL("XOR or logical stretch wrong"); return;
+    }
+    PASS();
+}
+
+static void test_query_event_order_off_and_quotes(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("queries honor event ordering, quoted expressions, OFF and mouse fields");
+    init_fixture(&s,&ctx); s.tw_active=true;
+    feed_script(&s,&ctx,"!|1\x1b" "3000P|1\x1b" "4000T|1\x1b" "1000V|1\x1b" "2000W|");
+    rip_mouse_event_state(&s,5,5,true);
+    if(tx_len!=4 || memcmp(tx_capture,"PTVW",4)) { FAIL("query order"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "1000$OFF$|");
+    if(rip_trigger_query(&s,1,0)) { FAIL("OFF did not clear definition"); return; }
+    feed_script(&s,&ctx,"!|1\x1b" "1000<<IF $APP0$=\"new\">>yes<<ELSE>>no<<ENDIF>>|");
+    strcpy(s.app_vars[0],"new"); rip_trigger_query(&s,1,0);
+    if(tx_len!=3 || memcmp(tx_capture,"yes",3)) { FAIL("quoted condition evaluated early or incorrectly"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "5000E|1\x1b" "6000L|");
+    s.num_mouse_regions=1;
+    s.mouse_regions[0].x0=0; s.mouse_regions[0].y0=0;
+    s.mouse_regions[0].x1=10; s.mouse_regions[0].y1=10;
+    s.mouse_regions[0].flags=RIP_MF_ACTIVE|RIP_MF_TOGGLE;
+    s.mouse_regions[0].active=true;
+    rip_mouse_event_state(&s,5,5,true);
+    rip_mouse_event_state(&s,20,20,false);
+    if(tx_len!=2 || memcmp(tx_capture,"EL",2)) { FAIL("field click triggered resident queries or hover missed"); return; }
+    tx_reset(); s.rip2_state.overflow_total=3;
+    feed_script(&s,&ctx,"!|1\x1b" "0000$OVERFLOW(NEXT)$|1\x1b" "0000$OVERFLOW$|");
+    if(s.rip2_state.overflow_page!=1 || tx_len!=3 || memcmp(tx_capture,"2/3",3)) {
+        FAIL("exact-length overflow query ignored"); return;
+    }
+    rip_session_reset(&s);
+    if(s.mega_base!=36 || s.host_command[0] || rip_trigger_query(&s,5,0)) { FAIL("session state leaked"); return; }
+    PASS();
+}
+
+static void capture_host_command(void *user, const char *text, int len) {
+    int *calls=(int *)user;
+    if(len==7 && memcmp(text,"$APP0$!",7)==0) ++*calls;
+}
+static void test_host_command_delegation(void) {
+    rip_state_t s; comp_context_t ctx; int calls=0;
+    TEST("9D stores a host expression and delegates only when opted in");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|9D0000$APP0$!|");
+    if(strcmp(s.host_command,"$APP0$!") || tx_len) { FAIL("host expression not preserved"); return; }
+    rip_set_host_command_handler(&s,capture_host_command,&calls);
+    feed_script(&s,&ctx,"!|9D0000$APP0$!|");
+    if(calls!=1 || tx_len) { FAIL("host callback not invoked once"); return; }
+    PASS();
+}
+
 int main(void) {
+    test_driver_fill_masks();
+    test_load_icon_rop_and_stretch();
+    test_query_event_order_off_and_quotes();
+    test_host_command_delegation();
+    test_session_radix_and_fixed_exceptions();
+    test_radix_negotiated_widths();
+    test_level9_dispatch_and_aliases();
+    test_deferred_queries_and_protection();
+    test_query_templates_and_mouse_events();
     test_empty_fill_family();
     test_poly_polygon_brush();
     test_copy_scroll_exposed_modes();

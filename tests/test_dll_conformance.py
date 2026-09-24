@@ -13,6 +13,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 # Keep instrument tests from generating cache files in the source tree.
 sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location(
     "dll_conformance", ROOT / "scripts" / "dll-conformance.py")
 CHECK = importlib.util.module_from_spec(SPEC)
@@ -149,6 +150,7 @@ class HandlerCoverageTests(unittest.TestCase):
         image = bytearray(129 * 40)
         for slot in range(129):
             offset = slot * 40
+            image[offset + 5] = 0 if slot<85 else ord("1") if slot<110 else ord("2") if slot<122 else ord("3") if slot<124 else ord("9")
             image[offset + 15] = 27 if slot in (85, 110, 124) else ord('A')
             struct.pack_into('<I', image, offset + 1, 0x10001000)
             struct.pack_into('<i', image, offset + 16, 1)
@@ -156,7 +158,7 @@ class HandlerCoverageTests(unittest.TestCase):
         sections = [(0x80820, len(image), 0, len(image))]
         rows = CHECK.dispatch_rows(image, sections)
         _, meta = CHECK.read_table(image, sections)
-        for level in (1, 2, 3):
+        for level in (1, 2, 9):
             self.assertIn((level, '\x1b'), meta)
         self.assertEqual(self.run_check(CHECK.check_dispatch_accounting, rows, meta, False)[0], 0)
         # Re-inject the historical printable-only filter: exactly three losses.
@@ -176,6 +178,21 @@ class HandlerCoverageTests(unittest.TestCase):
         self.assertIn('1 duplicate named row(s)', output)
         rows[2]['handler'] = 99
         self.assertEqual(self.run_check(CHECK.check_dispatch_accounting, rows, meta, False)[0], 1)
+
+    def test_prefix_is_read_from_record_not_inferred_from_slot(self):
+        image = bytearray(129 * 40)
+        for slot in range(129):
+            offset = slot * 40
+            image[offset+15] = ord('D')
+            struct.pack_into('<I',image,offset+1,0x10001000)
+        sections = [(0x80820,len(image),0,len(image))]
+        image[5:7] = b'9\0'
+        image[125*40+5:125*40+7] = b'3\0'
+        rows = CHECK.dispatch_rows(image,sections)
+        self.assertEqual((rows[0]['level'],rows[125]['level']), (9,3))
+        image[5] = ord('x')
+        with self.assertRaises(ValueError):
+            CHECK.dispatch_rows(image,sections)
 
     def test_short_dispatch_table_fails_closed(self):
         with self.assertRaises(SystemExit):

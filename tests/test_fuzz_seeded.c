@@ -66,6 +66,13 @@ static int guards_intact(void) {
 /* One seed per command changed or added during the alignment work, plus the
  * malformed variants that exercise each length guard. */
 static const char *const seeds[] = {
+    "!|J1S|f0a0A|2P10a000b0A00000000|3D000a|J10|",
+    "!|J1S|n5000|X&&&&&zzzzz|c&&|K0000000000&&&&&&&&&&|",
+    "!|9G00000000https://example.com/|9R00010000000000VAR|9U010000|",
+    "!|9D0000$APP0$^m|9\x1b" "01020000demo.icn<>|",
+    "!|1\x1b" "1000<<IF $APP0$=\"new\">>yes<<ELSE>>no<<ENDIF>>|",
+    "!|1\x1b" "3000resident|1\x1b" "4000text|1\x1b" "5000enter|1\x1b" "6000exit|",
+    "!|1\x1b" "1000$OFF$|1I000001010MASK|S0B04|B00000A0A|",
     "!|,2S2S462S2S1O462S2S1O|", "!|.2S2S462S2S1O|",
     "!|{2S2S462S2S1O|", "!|:2S2S462S2S1O462S2S1O1|",
     "!|`2S2S462S2S1O462S2S1O1|", "!|`ZZZZZZZZZZZZZZZZZZZZZ|",

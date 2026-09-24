@@ -28,6 +28,7 @@ check is worse than none.
 
     python scripts/check-field-names.py <path>/RIPSCRIP.DLL [--verbose]
 """
+from dll_record import dispatch_level
 import argparse
 import bisect
 import pathlib
@@ -38,7 +39,6 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "ripscrip.c"
 TABLE_RVA, ENTRIES, STRIDE = 0x080820, 129, 40
-RUNS = ((0, 0, 84), (1, 85, 109), (2, 110, 121), (3, 122, 128))
 
 # A diagnostic naming one of these implies a field carrying that concept.
 # Kept small and concrete on purpose: a big synonym table would fire on
@@ -135,7 +135,7 @@ def handler_diagnostics(d, secs, base):
         i, letter = slots[o]
         if letter == 0 or not (letter == 0x1B or 0x20 <= letter < 0x7F):
             continue
-        lvl = next(l for l, lo, hi in RUNS if lo <= i <= hi)
+        lvl = dispatch_level(d[tbl+i*STRIDE:tbl+(i+1)*STRIDE])
         out.setdefault((lvl, chr(letter)), set()).add(s.decode())
     return out
 
@@ -153,14 +153,16 @@ def riplib_fields():
     lines = SRC.read_text(encoding="latin-1").splitlines()
     marks = {}
     for i, l in enumerate(lines, 1):
-        for k, n in (("l3", "if (s->is_level3)"), ("l2", "if (s->is_level2)"),
+        for k, n in (("l9", "/* Level 9 commands */"), ("l3", "if (s->is_level3)"), ("l2", "if (s->is_level2)"),
                      ("l1", "if (s->is_level1)"), ("l0", "/* Level 0 commands */")):
             if k not in marks and n in l:
                 marks[k] = i
-    if len(marks) != 4:
+    if len(marks) != 5:
         raise SystemExit("cannot locate switch blocks in %s" % SRC.name)
 
     def lvl(n):
+        if marks["l9"] < n < marks["l3"]:
+            return 9
         if marks["l3"] < n < marks["l2"]:
             return 3
         if marks["l1"] < n < marks["l0"]:

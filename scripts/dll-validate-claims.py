@@ -21,10 +21,12 @@ re-derived is reported as UNVERIFIED rather than passed silently.
 Usage:
     python scripts/dll-validate-claims.py <path>/Ripscrip.dll [--corpus DIR]
 """
+from dll_record import dispatch_level
 import argparse
 import hashlib
 import importlib.util
 import os
+from pathlib import Path
 import re
 import struct
 import sys
@@ -91,9 +93,6 @@ def _blocks(src_text):
     return ((mark["l3"], mark["l2"]),
             (mark["l1"], mark["l0"]),
             (mark["l0"], 10 ** 9))
-
-def level_of(slot):
-    return 0 if slot <= 84 else 1 if slot <= 109 else 2 if slot <= 121 else 3
 
 
 def read_table(d, rva2off):
@@ -220,7 +219,7 @@ def main():
     for slot, (L, rva, argc, w, radix) in enumerate(table):
         if L is None:
             continue
-        key = "|%s%s" % (level_of(slot) or "", L)
+        key = "|%s%s" % (dispatch_level(d[rva2off(0x080820)+slot*40:rva2off(0x080820)+(slot+1)*40]) or "", L)
         by_cmd.setdefault(key, (slot, L, rva, argc, w, radix))
 
     results = []
@@ -256,7 +255,7 @@ def main():
     check("base-36 set is |J |N", b36 == ["|J", "|N"], "found %s" % " ".join(b36))
 
     # ---- string-tail offsets --------------------------------------------
-    TAILS = {"|1A": 6, "|1b": 18, "|1R": 8, "|1W": 1, "|3G": 8, "|3R": 14,
+    TAILS = {"|1A": 6, "|1b": 18, "|1R": 8, "|1W": 1, "|9G": 8, "|9R": 14,
              "|1D": 5, "|1F": 6, "|1t": 1}
     for cmd, want in TAILS.items():
         if cmd not in by_cmd:
@@ -473,6 +472,51 @@ def main():
               not re.search(r"draw_copy_rect|num_mouse_regions|rip_icon_lookup", body), pat)
 
     # ---- report ----------------------------------------------------------
+    # D-34: prefix bytes are independent of handler address and slot number.
+    rawrows = CONFORMANCE.dispatch_rows(d, secs)
+    levels = [r['level'] for r in rawrows]
+    check("all 129 literal dispatch prefixes agree with recovered grouping",
+          levels == [0]*85+[1]*25+[2]*12+[3]*2+[9]*5,
+          "record bytes 5..14; slots 124..128 are level 9")
+    check("driver has no duplicate named opcode",
+          len({(r['level'],r['letter']) for r in rawrows if r['letter']}) == 118,
+          "118 named rows must have distinct (prefix,letter) keys")
+    ins = instructions(0x252C0, 0x252F2)
+    check("9U validates type without decoding a payload",
+          None if ins is None else
+          {i.op_str for i in ins if i.mnemonic == 'call'} == {'0x10045038','0x10038e47'} and
+          any(i.mnemonic == 'cmp' and i.op_str == 'esi, 1' for i in ins),
+          "bounded handler calls only cursor reset and error reporting")
+    ins = instructions(0xCB38, 0xCEF8)
+    check("LoadIcon ROP reads argument 3",
+          None if ins is None else any(i.mnemonic == 'mov' and i.op_str == 'esi, dword ptr [ecx + 0xc]' for i in ins),
+          "ESI feeds the CD5A ROP selector")
+    body = case_body(src, 'I', *BLOCK[1])
+    check("LoadIcon uses p[5] for mode, never p[4]",
+          None if body is None else bool(re.search(r'uint8_t mode\s*=\s*\(uint8_t\)mega_digit\(p\[5\]\)',body)) and
+          not re.search(r'uint8_t mode\s*=\s*\(uint8_t\)mega_digit\(p\[4\]\)',body),
+          "source semantic-field predicate")
+    ins = instructions(0x49340, 0x493B7)
+    check("LoadIcon stretch invokes logical-to-device dimension scaling",
+          None if ins is None else any(i.mnemonic == 'call' and i.op_str == '0x10031084' for i in ins),
+          "show_bmp_file dimension helper")
+    drawing = (Path(SRC).parent / 'drawing.c').read_text(encoding='utf-8')
+    match = re.search(r'rip_fill_patterns\[10\]\[8\]\s*=\s*\{(.*?)\n\};',drawing,re.S)
+    got = [int(x,16) for x in re.findall(r'0x([0-9A-Fa-f]{2})',match[1])] if match else []
+    want = list(struct.unpack_from('<80H',d,rva2off(0x7AFD8)+32))
+    check("all 80 patterned-brush rows match driver data",got == want,
+          "BGI patterns 2..11, excluding EMPTY/SOLID and user brush")
+    ins = instructions(0xD3DA, 0xD64D)
+    calls = {i.op_str for i in ins or [] if i.mnemonic == 'call'}
+    check("query definitions check port and text-window existence/protection",
+          None if ins is None else {'0x100338bc','0x10033821','0x1000e028','0x10027642'} <= calls,
+          "four distinct target-slot checks in the bounded query handler")
+    ins = instructions(0x13E61, 0x13ED0)
+    strings = [cstr(d,rva2off,int(i.op_str,16)) for i in ins or []
+               if i.mnemonic == 'push' and i.op_str.startswith('0x')]
+    check("resident query helper recognizes OFF",None if ins is None else '$OFF$' in strings,
+          "resident-query assignment helper")
+
     ok = sum(1 for _, r, _ in results if r is True)
     bad = [x for x in results if x[1] is False]
     unk = [x for x in results if x[1] is None]
@@ -482,7 +526,7 @@ def main():
             print("%-4s %-46s %s" % (mark, name, detail))
     print("\n%d refuted, %d unverified, %d held (of %d claims)"
           % (len(bad), len(unk), ok, len(results)))
-    return 1 if bad else 0
+    return 1 if bad or unk else 0
 
 
 if __name__ == "__main__":
