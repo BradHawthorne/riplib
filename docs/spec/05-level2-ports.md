@@ -405,29 +405,23 @@ Draws a dialog box with shadow, title bar, and background fill.
 
 
 ---------------------------------------------------------------------
-5.14  RIP_REFRESH — Host-Triggered Refresh
+5.14  RIP_REFRESH — Define a Host Refresh Command
 ---------------------------------------------------------------------
 
-     Function:     Trigger Screen Refresh
      Command:      |2R
-     Arguments:    res:4
-     Format:       !|2R<res>|
+     Arguments:    res:4 command:string
+     Format:       !|2R<res><command>|
 
-Forces the client to refresh the entire screen. Marks all
-scanlines dirty for the DMA engine to re-transfer.
-
-     Parameter   Width   Range     Description
-     ---------   -----   -------   -----------
-     res         4       0         Reserved
-
-     Note: dispatch slot 117 records one mega4, so this is NOT a
-     zero-argument command - RIPlib used to treat it as one, which
-     left four characters in the stream.  The field is consumed so
-     the frame stays in sync and recorded for capability queries;
-     the driver does not otherwise act on it.
-
+Stores the command the host can transmit when the user requests refresh.
+It neither marks scanlines dirty nor transmits anything while parsing.
+The driver calls refreshAssignCommand at RVA 0x03E43C; D-32 corrects
+the previous immediate-screen-refresh interpretation. Empty text or
+$OFF$ clears the binding. RIPlib stores at most 1023 unescaped bytes;
+overlong definitions are rejected. rip_request_refresh(s) sends the
+stored bytes through the normal host TX callback, without adding CR.
 
 ---------------------------------------------------------------------
+
 5.15  RIP_CHORD — Chord Drawing
 ---------------------------------------------------------------------
 

@@ -3,6 +3,11 @@
 ==       SEGMENT 12: BINARY PROVENANCE & EVIDENCE CLASSES          ==
 =====================================================================
 
+CURRENT CORRECTIONS (2026-09-24): D-31..33 at the end of this file
+supersede D-14's mouse/copy interpretations, D-29's open backtick defects,
+D-30's two missing handlers, and the former immediate-refresh behavior.
+Earlier entries below preserve the investigation history, not current status.
+
 Segment 11 records conclusions drawn from a binary analysis of
 TeleGrafix's RIPSCRIP.DLL.  This segment records the *evidence* those
 conclusions rest on: which artifact, how it is identified, how the
@@ -1092,6 +1097,102 @@ D-11 RESOLVED 2026-08-12.  COORDINATE WIDTH WAS RECORDED BUT NOT
      rip_state_t.coord_size_unsupported remains, and is now cleared when
      a command is successfully normalised, so it means what it says: a
      width this build could not handle.
+
+D-30 CROSSWALK ACCOUNTING INCLUDES CONTROL OPCODES AND EVERY ROW.
+     Recorded 2026-09-24.
+
+     PREDICATE: every nonzero dispatch letter survives command indexing;
+     every zero-letter row has a named owner at the same level and
+     handler address.  A duplicate key remains a separate dispatch row.
+     Source presence, numeric-layout agreement and behavioral parity
+     are distinct claims and must not be counted interchangeably.
+
+     The printable-only filter in dll-conformance.py dropped all three
+     ESC commands.  '|1<ESC>' is implemented, while '|2<ESC>' (slot 110,
+     RIP_SwitchDirectory) and '|3<ESC>' (slot 124) lack source handlers.
+     Segment 13 also misclassified ESC rows as continuations; only the
+     eleven zero-letter rows are continuations.  The corrected census
+     is 129 rows, 118 nonzero rows, 117 distinct keys, one duplicate
+     '|3D' row.  RIPlib has 115 matching keys and 23 source-only keys.
+
+     The crosswalk reads actual Level 2 cases as well as levels 0/1/3.
+     The earlier twenty-item extension list included unimplemented
+     '|1S' and missed '|21', '|27', '|29', '|3J'.  That list described
+     documentation coverage, not implementation coverage.
+
+     bbs-land commit 2fb17724b6122a5ad5cd1df38b69b8cce3a7079f supplies
+     a third column: 116 inventory rows, 112 keyed opcodes, four names
+     without assigned opcodes.  Its ESC, level-9 and unlinked entries
+     are now retained by ref-compare.py rather than silently skipped.
+     Of 82 comparable numeric shapes, 69 agree and 13 differ; elided
+     lists, bare text and unassigned opcodes are explicitly bounded.
+     The generated table preserves all rows on both sides and pins
+     source fingerprints plus upstream commit and reference-file hash.
+
+     Reproduce with dll-conformance.py --crosswalk and --reference;
+     see docs/crosswalk-audit.md for commands, evidence and limitations.
+     Re-injecting the old printable-only filter produces exactly three
+     findings.  Twelve instrument tests cover this class and D-29.
+     No runtime source, corpus tolerance or command semantics changed.
+     The two D-29 backtick failures remain visible and still exit 1.
+
+     WHY INVISIBLE: the prior inventory measured only what survived
+     its printable-label filter, and the extension count was derived
+     from prose.  Neither denominator represented the executable sets.
+
+D-29 SOURCE-HANDLER COVERAGE MUST NOT DEPEND ON LENGTH OR LABEL
+     SPELLING.  Recorded 2026-09-11.
+
+     PREDICATE: every direct command case in ripscrip.c's three dispatch
+     switches is inspected through the next direct label or the switch's
+     closing brace.  No line cap, indentation-dependent break, nested
+     case, or numeric spelling may silently remove its statements.
+
+     THE INSTRUMENT DEFECT.  dll-conformance.py stopped after 121 source
+     lines.  '|1U' occupies 196 lines through the next case, so its hotkey
+     and flag reads were never checked.  Shifting mega2(p + 8) to p + 9
+     still returned zero findings.  The reader also matched only quoted
+     character cases: case 0x60 (backtick) and case 0x1B were invisible.
+
+     The replacement follows C brace depth, ignores comments and quoted
+     braces, includes numeric labels, and fails on missing switches,
+     unsupported case expressions, duplicate labels or an unclosed switch.
+     It reads 115 complete handlers across levels 0/1/3.  Read-offset
+     coverage rises from 70 commands / 277 reads to 71 / 284.  Level 2
+     bodies, called helpers, dynamic-offset reads and commands absent
+     from the printable DLL table are NOT thereby checked for offsets;
+     whole-source extraction is not whole-program semantic coverage.
+
+     FINDINGS EXPOSED, STILL OPEN.  Backtick's slot 83 records ten XY
+     fields and one mega1: 21 characters at the default coordinate width.
+     RIPlib admits 12 and reads the final digit at 40, not 20.  These now
+     produce two failures and exit status 1, with no new tolerance.
+
+     Re-reading RVA 0x01D963 confirms eleven argument loads through
+     args+0x28, five coordinate-pair transformations via 0x10031084,
+     and a call to 0x1000FA70 passing the ten coordinates and constant 3.
+     The returned point buffer goes to GDI Polygon or Polyline.  This
+     contradicts RIPlib's screen-copy implementation and its inherited
+     RIP_COMPOSITE_ICON name.  The exact point-generation contract and
+     final digit's meaning need further derivation; merely changing the
+     length and offset would leave the rendering interpretation wrong.
+     No runtime code was changed on that unsupported assumption.
+
+     CORPUS: 35 scenes, 12,328 command instances, 70 opcodes; zero
+     backtick instances.  Absence supplies no justification for accepting
+     the invented short form.  Existing '|k' and '|=' tolerances remain.
+
+     VALIDATION: eight instrument tests, including a shifted '|1U' read,
+     the historical '|1i' 12-character gate, numeric labels, nested cases,
+     padding, malformed structure and non-zero CLI failure.  Both button
+     regression tests fail against the pre-fix checker and pass afterward.
+     The C suite and all 35 corpus scenes pass; runtime sources are
+     unchanged.  Conformance remains RED on the two disclosed backtick
+     findings, not a claim that all protocol defects have reached zero.
+
+     WHY INVISIBLE: coverage counted case labels instead of proving that
+     their bodies were complete, and reported a numeric-spelled handler
+     as unimplemented.  The bounded reader could bless code it never saw.
 
 D-28 THE CORPUS COUNTED ITS REQUESTS AND NEVER READ THEM.  Recorded
      2026-08-13.
@@ -2576,3 +2677,115 @@ DLL-derived fact.
 ==                    END OF SEGMENT 12                             ==
 ==             Binary Provenance & Evidence Classes                 ==
 =====================================================================
+
+
+---------------------------------------------------------------------
+D-31 — AFFINE ELLIPSE FAMILY, NOT COMPOSITING OR MOUSE REGIONS
+---------------------------------------------------------------------
+
+2026-09-24, same pinned 592896-byte driver, MD5
+bade8b1f4e467ac7ad4edb2639738d4c. Evidence: handler disassembly and
+execution of its pure geometry helper, not inferred opcode names.
+
+     slot  key    handler RVA   geometry mode  RIPlib descriptive name
+       8   |,     0x01D5C2          1          AFFINE_ARC
+      10   |.     0x01D79B          0          AFFINE_OVAL
+      11   |:     0x01DD70          2          AFFINE_PIE
+      83   |`     0x01D963          3          AFFINE_CHORD
+      84   |{     0x01B89B          0          FILLED_AFFINE_OVAL
+
+All call 0x00FA70. Arguments are center C, conjugate-radius endpoints
+A/B, then ray endpoints S/E for partial ellipses. Whole ellipses have
+six coordinates (12 default digits); arc has ten (20); pie/chord add
+a fill digit (21). This withdraws D-14's five-vertex mouse-region
+interpretation and all copy/stamp/animation/composite interpretations.
+RIPlib stamp slots move to the unoccupied extension |3.; |3J is unchanged.
+
+Geometry: the driver sorts radii by integer polar angle (0x00F950),
+samples every five degrees with Q14 tables at 0x07B098/0x07B638,
+and intersects the resulting segments with rays (0x00F5A0). Same-segment
+direction uses 0x00F515. Missing-ray handling at 0x00FDEE is asymmetric:
+missing start selects vertex 0; missing end sets the START index to 71
+and leaves the end index -1. RIPlib reproduces that observable behavior.
+Equal intersections yield a whole ellipse; pie closes through C, chord
+closes directly, arc stays open. Degenerate point output is not a polygon.
+
+scripts/dll-affine-fixtures.py executes only this pure helper in Unicorn,
+with bounded emulation and the pinned image hash. It records 52 input/count/
+closed/hash fixtures, no executable DLL code. The C geometry tests consume
+these independently generated fixtures. A deterministic 136-run extra sweep
+found the same-segment and missing-ray mistakes in the first fix and now
+matches. This does not establish GDI raster equivalence or all inputs.
+
+D-29's len>=12 and digit-at-40 defects are fixed: len>=21, digit-at-20.
+Conformance now sees all three ESC levels and the numeric backtick case.
+
+---------------------------------------------------------------------
+D-32 — DIRECTORY, BLOCK-TRANSFER AND REFRESH HOST CONTRACTS
+---------------------------------------------------------------------
+
+Slot 110 |2ESC, RVA 0x046F66, names RIP_SwitchDirectory in its diagnostic.
+It has a mega4 reserved prefix plus a string. RIPlib trims, expands,
+validates a 1..12 character logical directory, uppercases it, and stores
+host_directory[13]. $OFF$ clears it. Separators, metacharacters, controls,
+dot/dot-dot and overlength names are rejected. The host owns resolution;
+the library does not change process cwd or open a directory.
+
+Slot 124 |3ESC, RVA 0x024B4E, names RIP_EnterBlockMode at 0x024C3B.
+Layout is direction:1 protocol:1 type:2 flags:2 res:2 filename:string.
+Bounds are direction 0..1, protocol 0..10 except 9, type 0..6. The filename
+ends at '<' or '>' (delimiter at 0x07DF18); download protocols 0..5 require
+one. The driver delegates via host messages 0x4C9/0x4CA. RIPlib records
+block_transfer and calls an opt-in rip_transfer_handler_t. It sends no
+protocol bytes and performs no file access. The host owns transfer policy,
+protocol engines and consuming/clearing pending state; requests overwrite
+the last pending record. Callback data is borrowed for the call duration.
+RIPlib rejects names above 255 bytes rather than silently truncating them.
+
+Slot 117 |2R, RVA 0x046BD9, copies its trailing string and calls
+refreshAssignCommand (0x03E43C), after clearing the old binding. It does
+not merely invalidate a framebuffer. RIPlib stores up to 1023 unescaped
+bytes in refresh_command; empty or $OFF$ clears it. rip_request_refresh
+is the explicit host action that transmits the stored bytes without an
+added CR. The four reserved digits remain consumed and recorded.
+Overlong definitions are rejected. Parsing defines, it does not transmit.
+
+The new session fields extend the public struct: consumers must rebuild
+against matching headers/library. No platform library is introduced.
+All 117 distinct DLL keys now have source handlers; duplicate |3D remains
+one key with an unresolved alternate handler. Coverage is not equivalence.
+
+---------------------------------------------------------------------
+D-33 — FILLS AND EXPOSED SOURCE REGIONS
+---------------------------------------------------------------------
+
+FillStyle (slot 58, RVA 0x01C679) copies eight row words from 0x07AFD8
+and builds a brush at 0x011210. The first eight words are zero (EMPTY),
+the next eight are 255 (SOLID). EMPTY paints the background; it is not
+permission to skip a filled primitive. RIPlib now uses background ink
+for empty filled shapes, including polygon, poly-polygon, circle/ellipse,
+pie/chord, rounded rectangle, affine geometry, and filled Bezier. Bezier
+previously used drawing color and changed fill into outline for EMPTY.
+Poly-polygon spans now use the fill brush, rather than drawing horizontal
+lines that wrongly inherited pen dash/thickness and ignored fill patterns.
+
+CopyBlit (slot 96, RVA 0x00B7A4) uses SRCCOPY at 0x00B8C2.
+Scroll (slot 95, RVA 0x00D7E0) also uses SRCCOPY. Modes select the
+brush used to fill source pixels outside the destination region:
+0 leave, 1 foreground, 2 background, 3 fill color, 4 current brush,
+5 stock BLACK_BRUSH. Scroll mode 6 samples source before the copy.
+Driver brush selection is at 0x00B9CF/0x00D9DD; scroll sampling at
+0x00D967. These are not raster-operation modes or unknown animations.
+RIPlib now copies independently of write mode and preserves overlap.
+Scroll also orders inverted bounds and honors exclusive edges.
+
+Runtime tests exercise twelve empty-fill families, every move mode,
+overlap, and host-side effects. Pre-fix runtime fails the corresponding
+regressions; current runtime passes. The audit report records all four
+changed corpus summaries rather than claiming unchanged frames.
+
+Standing claim predicates cover the helper mode at all five call sites,
+host self-naming, refresh assignment, brush rows, SRCCOPY instructions,
+and source geometry dispatch without the former host side effects.
+The validator now uses the complete brace-aware case extractor; the old
+120-line limit and printable-label restriction are removed there too.

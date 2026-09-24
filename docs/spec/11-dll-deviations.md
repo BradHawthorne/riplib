@@ -362,8 +362,9 @@ The genuine, decided deviations follow.
         |!   PRESENT  handler RVA 0x01AD36, 0 args (RIP_COMMENT).
         |(   PRESENT  handler RVA 0x01CA84, 0 args (group begin).
         |)   PRESENT  handler RVA 0x01CA85, 0 args (group end).
-        |`   PRESENT  handler RVA 0x01D963, 11 args.  The backtick
-                      composite-icon command is in the driver.
+        |`   PRESENT  handler RVA 0x01D963, 11 args.  The inherited
+                      composite-icon name is unsupported: the handler
+                      draws an affine elliptical chord (D-31).
 
      Only two survive as genuine RIPlib originals — neither letter
      appears anywhere in the Level 1 dispatch band:
@@ -372,9 +373,13 @@ The genuine, decided deviations follow.
         |1X  ABSENT   CLIPBOARD_OP     — RIPlib-original.
 
      U-026 is therefore CLOSED.  The deviation register loses four
-     entries at zero behavioural cost; behaviour matched in every
-     case, only the standing was wrong.  §A.1 should describe the
+     entries from the extension list. The earlier claim that behavior
+     matched was wrong for backtick; its rendering is corrected by D-31.  §A.1 should describe the
      four as documented commands rather than RIPlib extensions.
+
+     CURRENT INVENTORY (D-30/D-31): 24 source handlers are absent from
+     this driver; see 14.3.9 and ../riptel-crosswalk.md. Stamp slots use
+     |3. now that period has its driver-backed ellipse interpretation.
 
 §DEV.5 — RIP_SET_WINDOW ('22') draws fixed window chrome:
      Spec §5.10 defines '22' arguments as `x:2 y:2 w:2 h:2` with no

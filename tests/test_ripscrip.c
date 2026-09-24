@@ -10,6 +10,9 @@
 #include "rip_icons.h"
 #include "ripscrip.h"
 #include "ripscrip2.h"
+#include "../src/rip_affine_oval.h"
+#include "../src/rip_clipboard.h"
+#include "fixtures/affine_oval.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1064,27 +1067,13 @@ static void test_l1_copy_blit_requires_full_record(void) {
 }
 
 static void test_l0_mouse_region_ext_five_vertices(void) {
-    rip_state_t s;
-    comp_context_t ctx;
-
-    TEST("|: registers a 21-char five-vertex region (D-14)");
-    init_fixture(&s, &ctx);
-    /* Slot 11 records  XY x10, mega1  -- twenty-one characters, and the
-     * handler at RVA 0x01DD70 coordinate-maps five consecutive (x,y) pairs.
-     * RIPlib required twenty-two, so every valid command was dropped whole.
-     *
-     * Vertices (10,10) (20,10) (20,20) (10,20) (15,15), then one digit. */
-    feed_script(&s, &ctx, "!|:0A0A0K0A0K0K0A0K0F0F1|");
-    if (s.num_mouse_regions != 1)
-        FAIL("|: did not register a region from a 21-character record");
-    else if (s.mouse_regions[0].x0 != 10 || s.mouse_regions[0].x1 != 20)
-        FAIL("|: bounding box X does not span the five vertices");
-    else if (s.mouse_regions[0].y1 <= s.mouse_regions[0].y0)
-        FAIL("|: bounding box Y does not span the five vertices");
-    else if (!s.mouse_regions[0].active)
-        FAIL("|: region not marked active");
-    else
-        PASS();
+    rip_state_t s; comp_context_t ctx;
+    TEST("|: is a filled affine pie, with no mouse side effect");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|S0104|:2S2S462S2S1O462S2S1O1|");
+    if (s.num_mouse_regions || tx_len || draw_get_pixel(110,105) != s.palette[4])
+        FAIL("pie did not fill its sector or registered a mouse field");
+    else PASS();
 }
 
 static void test_l1_clipboard_get_put_roundtrip(void) {
@@ -3080,6 +3069,30 @@ static void test_runtime_icon_supersedes_flash(void) {
         FAIL("flash entry was returned even though runtime entry exists");
 }
 
+static void test_tiled_icon_coordinates_do_not_wrap(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    const uint8_t pixels[4]={1,2,3,4};
+    TEST("tiled icons terminate at signed coordinate limits and restore clip");
+    init_fixture(&s, &ctx);
+    rip_blit_pixels_tiled(&s,0,0,32767,0,pixels,2,2,DRAW_MODE_COPY);
+    for (int x=0;x<W;++x) {
+        if (draw_get_pixel(x,0)!=(uint8_t)(1+x%2)) {
+            FAIL("horizontal tile pixels differ"); return;
+        }
+    }
+    rip_blit_pixels_tiled(&s,0,0,0,32767,pixels,2,2,DRAW_MODE_COPY);
+    for (int y=0;y<H;++y) {
+        if (draw_get_pixel(0,y)!=(uint8_t)(1+2*(y%2))) {
+            FAIL("vertical tile pixels differ"); return;
+        }
+    }
+    draw_set_color(9);
+    draw_pixel(W-1,H-1);
+    if (draw_get_pixel(W-1,H-1)!=9) { FAIL("clip was not restored"); return; }
+    PASS();
+}
+
 static void test_clipboard_op_5_capture_op_6_paste(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -3125,7 +3138,7 @@ static void test_stamp_icon_unset_slot_falls_back_to_clipboard(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("'.' with an unset slot falls back to current clipboard");
+    TEST("'3.' with an unset slot falls back to current clipboard");
     init_fixture(&s, &ctx);
     draw_set_color(0x44);
     draw_rect(2, 2, 1, 1, true);
@@ -3133,7 +3146,7 @@ static void test_stamp_icon_unset_slot_falls_back_to_clipboard(void) {
     if (!s.clipboard.valid) { FAIL("setup: |1C"); return; }
     /* Stamp slot 03 (never saved) at (20, 20).  Should use clipboard. */
     draw_fill_screen(0);
-    feed_script(&s, &ctx, "!|.030K0K000000|");
+    feed_script(&s, &ctx, "!|3.030K0K000000|");
     if (draw_get_pixel(20, 22) == 0x44)
         PASS();
     else
@@ -3144,14 +3157,14 @@ static void test_save_and_stamp_icon_slot(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("J save-icon slot can be stamped with '.'");
+    TEST("J save-icon slot can be stamped with '3.'");
     init_fixture(&s, &ctx);
     draw_set_color(88);
     draw_rect(2, 2, 2, 2, true);
     feed_script(&s, &ctx, "!|1C020202020|");
     feed_script(&s, &ctx, "!|3J05|");
     draw_fill_screen(0);
-    feed_script(&s, &ctx, "!|.050U0U000000|");
+    feed_script(&s, &ctx, "!|3.050U0U000000|");
     if (draw_get_pixel(30, 34) == 88)
         PASS();
     else
@@ -3183,20 +3196,13 @@ static void test_save_icon_slot_updates_load_alias(void) {
 }
 
 static void test_l0_copy_region_scales_destination_rect(void) {
-    rip_state_t s;
-    comp_context_t ctx;
-
-    TEST("extended copy-region scales to destination rectangle");
-    init_fixture(&s, &ctx);
-    draw_set_color(99);
-    draw_rect(2, 2, 2, 2, true);
-    /* src (2,2)-(2,2), dest (20,20)-(22,22), reserved 0000 */
-    feed_script(&s, &ctx, "!|,020202020K0K0M0M0000|");
-    if (draw_get_pixel(20, 22) == 99 &&
-        draw_get_pixel(22, 25) == 99)
-        PASS();
-    else
-        FAIL("extended copy-region did not scale source pixels");
+    rip_state_t s; comp_context_t ctx;
+    TEST("|, strokes an affine arc without blitting");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|,2S2S462S2S1O462S2S1O|");
+    if (draw_get_pixel(150,114)==s.palette[15] && draw_get_pixel(100,114)==0 &&
+        draw_get_pixel(50,114)==0 && !s.num_mouse_regions) PASS();
+    else FAIL("arc endpoints or sweep are wrong");
 }
 
 static void test_l1_file_query_missing_returns_zero(void) {
@@ -3829,13 +3835,11 @@ static void test_ext_polyline_ext(void) {
 
 static void test_ext_animation_frame_brace(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|{ draws animation frame (triangle)");
-    init_fixture(&s, &ctx);
-    s.fill_color = 5;
-    s.fill_pattern = 1;
-    feed_script(&s, &ctx, "!|{050514051E0F0F|");  /* (5,5) (20,5) (15,30) */
-    if (draw_get_pixel(15, 10) != 0 || draw_get_pixel(10, 5) != 0) PASS();
-    else FAIL("|{ drew nothing");
+    TEST("|{ fills the entire affine ellipse, not a triangle");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|S0104|{2S2S462S2S1O|");
+    if (draw_get_pixel(85,125)==s.palette[4] && draw_get_pixel(120,90)==s.palette[4]) PASS();
+    else FAIL("ellipse's opposite quadrants were not filled");
 }
 
 static void test_ext_kill_mouse_in_region_K(void) {
@@ -3855,28 +3859,14 @@ static void test_ext_kill_mouse_in_region_K(void) {
 
 static void test_ext_mouse_region_ext_colon(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|: adds extended mouse region");
-    init_fixture(&s, &ctx);
-    /* x0:2 y0:2 x1:2 y1:2 hotkey:2 flags:2 res×5 (10 chars) = 22 total */
-    feed_script(&s, &ctx, "!|:05050F0F00000000000000|");
-    if (s.num_mouse_regions == 1) PASS();
-    else FAIL("|: did not add region");
+    TEST("|: truncated geometry is rejected without side effects");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|:2S2S462S2S1O462S2S1O|");
+    int n=0; for (int i=0;i<W*H;++i) n+=fb[i]!=0;
+    if (!n && !s.num_mouse_regions && !tx_len) PASS();
+    else FAIL("truncated pie was executed");
 }
 
-/* The skewed-oval family, checked against TeleGrafix's own demo.
- *
- * ICONS/NEWCMDS.RIP strokes a coordinate grid and places one shape on each
- * intersection, so the payloads below (copied verbatim from that file) say
- * where each shape must land.  The assertion is BOUNDING BOX containment,
- * not centroid: an arc, pie slice or chord covers only part of its ellipse,
- * so its centroid is legitimately off-centre and only its extent is
- * predictable.  Get a field slot wrong and the box moves or changes size.
- *
- * A centroid check was tried first and had to be abandoned -- against the
- * real file it "passed" for every shape because NEWCMDS.RIP opens with '|*',
- * which fills the screen, so a window centred on the expected point is
- * uniformly painted and its centroid is trivially the window centre.  It
- * was measuring the background. */
 static void check_shape_extent(rip_state_t *s, comp_context_t *ctx,
                                const char *script, const char *what,
                                int cx, int cy, int rx, int ry) {
@@ -5227,15 +5217,17 @@ static void test_l2_dialog_renders(void) {
 
 static void test_l2_set_refresh(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("|2R dispatches SET_REFRESH without crashing");
-    init_fixture(&s, &ctx);
-    feed_script(&s, &ctx, "!|2R|");
-    PASS();
+    TEST("|2R stores/clears a refresh binding and transmits only on request");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|2R1234redraw\\n|");
+    if (strcmp(s.refresh_command,"redraw\n") || tx_len || !rip_request_refresh(&s) ||
+        tx_len!=7 || memcmp(tx_capture,"redraw\n",7)) { FAIL("refresh binding wrong"); return; }
+    feed_script(&s,&ctx,"!|2R000|");
+    if (strcmp(s.refresh_command,"redraw\n")) { FAIL("short command changed binding"); return; }
+    feed_script(&s,&ctx,"!|2R0000$OFF$|");
+    if (s.refresh_command[0] || rip_request_refresh(&s)) FAIL("OFF retained a binding");
+    else PASS();
 }
-
-/* ═══════════════════════════════════════════════════════════════════
- * BUILT-IN TEXT VARIABLE COVERAGE  (rip_expand_variables)
- * ═══════════════════════════════════════════════════════════════════ */
 
 static void test_var_blip_pushes_marker(void) {
     rip_state_t s; comp_context_t ctx;
@@ -6162,7 +6154,173 @@ static void test_fsm_raw_text_after_cmd_eaten_as_letters(void) {
              "delete this test");
 }
 
+
+static void test_affine_driver_oracle(void) {
+    TEST("affine point runs agree with DLL execution fixtures");
+    for (unsigned i=0;i<sizeof(affine_fixtures)/sizeof(affine_fixtures[0]);++i) {
+        int16_t pts[2*RIP_AFFINE_MAX_POINTS]; bool closed;
+        int n=rip_affine_oval_points(affine_fixtures[i].xy,affine_fixtures[i].mode,pts,&closed);
+        uint32_t h=2166136261u;
+        for (int j=0;j<2*n;++j) h=(h^(uint16_t)pts[j])*16777619u;
+        if (n!=affine_fixtures[i].count || closed!=affine_fixtures[i].closed || h!=affine_fixtures[i].hash) {
+            printf("fixture %u: ",i); FAIL("point run differs from DLL"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_affine_intersection_numeric_limits(void) {
+    int16_t ring[144]={0}, hit[2]={0};
+    TEST("nearly parallel affine intersections avoid integer overflow");
+    /* The first segment's unbounded intersection is x=68,652,388,350.
+     * It is outside that segment and cannot safely be converted to int. */
+    ring[1]=4095; ring[2]=4094; ring[3]=8188;
+    int segment=rip_affine_intersect(ring,0,0,4095,4094,hit);
+    if (segment==0) FAIL("accepted an intersection outside the segment");
+    else PASS();
+}
+
+static void test_affine_chord_and_outline(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("backtick fills chord from exactly 21 digits; dot strokes ellipse");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|S0104|`2S2S462S2S1O462S2S1O1|");
+    if (draw_get_pixel(130,90)!=s.palette[4] || draw_get_pixel(103,110)!=0) {
+        FAIL("chord is not clipped between its rays"); return;
+    }
+    draw_fill_screen(0);
+    feed_script(&s,&ctx,"!|.2S2S462S2S1O|");
+    if (draw_get_pixel(50,114)!=s.palette[15] || draw_get_pixel(100,114)!=0) {
+        FAIL("dot did not draw a hollow ellipse"); return;
+    }
+    draw_fill_screen(0);
+    feed_script(&s,&ctx,"!|`2S2S462S2S1O462S2S1O|");
+    for (int i=0;i<W*H;++i) if (fb[i]) { FAIL("short backtick drew"); return; }
+    PASS();
+}
+
+
+static void test_empty_fill_family(void) {
+    static const struct { const char *script; int x,y; } shapes[] = {
+        {"!|B0A0A1414|",15,16}, {"!|K0A0A1414|",15,16},
+        {"!|G0K0K0A|",20,22}, {"!|o0K0K0A0A|",20,22},
+        {"!|u0A0A1E1E05|",20,22}, {"!|I0K0K00500A|",24,19},
+        {"!|i0K0K00500A0A|",24,19}, {"!|p040A0A1E0A1E1E0A1E|",20,22},
+        {"!|<01040A0A1E0A1E1E0A1E|",20,22},
+        {"!|-0K0K0A0A00|",20,22}, {"!|{0K0K0U0K0K0A|",20,22},
+        {"!|:0K0K0U0K0K0A0U0K0K0A1|",24,19},
+    };
+    rip_state_t s; comp_context_t ctx;
+    TEST("empty fill paints background across twelve filled primitives");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|k02|S0004|N00|");
+    for (unsigned i=0;i<sizeof(shapes)/sizeof(shapes[0]);++i) {
+        draw_fill_screen(0x66);
+        feed_script(&s,&ctx,shapes[i].script);
+        if (draw_get_pixel(shapes[i].x,shapes[i].y)!=s.palette[2]) {
+            printf("%s ",shapes[i].script); FAIL("interior was not erased to background"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_copy_scroll_exposed_modes(void) {
+    rip_state_t s; comp_context_t ctx; char cmd[80];
+    TEST("CopyBlit/Scroll copy plainly and fill only the exposed source");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|k02|S0104|W01|");
+    for (int kind=0;kind<2;++kind) for (int mode=0;mode<6+kind;++mode) {
+        uint8_t expected=mode==0||mode==6 ? 0x66 : mode==1 ? s.palette[15] :
+                         mode==2 ? s.palette[2] : mode==5 ? 0 : s.palette[4];
+        draw_set_write_mode(DRAW_MODE_COPY); draw_fill_screen(0x77);
+        draw_set_color(0x66); draw_rect(7,8,8,9,true);
+        if (kind) snprintf(cmd,sizeof(cmd),"!|1G07070E0E%d00E|",mode);
+        else snprintf(cmd,sizeof(cmd),"!|1g07070E0E0L07%d0|",mode);
+        feed_script(&s,&ctx,cmd);
+        if (draw_get_pixel(kind?9:23,kind?18:10)!=0x66 || draw_get_pixel(9,10)!=expected) {
+            printf("kind=%d mode=%d ",kind,mode); FAIL("wrong destination or exposed brush"); return;
+        }
+    }
+    draw_set_write_mode(DRAW_MODE_COPY); draw_fill_screen(0x66);
+    feed_script(&s,&ctx,"!|1g07070E0E0A0750|");
+    if (draw_get_pixel(8,10)!=0 || draw_get_pixel(11,10)!=0x66) { FAIL("overlap was erased"); return; }
+    /* A user brush must paint both inks; COPY must survive the session's XOR. */
+    feed_script(&s,&ctx,"!|s4Q4Q4Q4Q4Q4Q4Q4Q04|");
+    draw_set_write_mode(DRAW_MODE_COPY); draw_fill_screen(0x66);
+    feed_script(&s,&ctx,"!|1g07070E0E0L0740|");
+    if (draw_get_pixel(8,10)!=s.palette[4] || draw_get_pixel(9,10)!=s.palette[2]) {
+        FAIL("mode 4 did not apply both brush colors"); return;
+    }
+    /* Exclusive bounds are normalized before mapping Y. Source bottom 14
+     * maps to 16, so the upward sample is at (12,14), not (13,15). */
+    draw_set_write_mode(DRAW_MODE_COPY); draw_fill_screen(0x66);
+    draw_set_color(0x33); draw_pixel(12,14);
+    feed_script(&s,&ctx,"!|1G0E0E07076100|");
+    if (draw_get_pixel(9,12)!=0x33 || draw_get_pixel(14,12)!=0x66) {
+        FAIL("inverted/exclusive scroll sampled or erased the wrong pixels"); return;
+    }
+    PASS();
+}
+
+static int transfer_calls;
+static void test_transfer_callback(void *user,const rip_block_transfer_t *request) {
+    if (user==&transfer_calls && request->pending) ++transfer_calls;
+}
+static void test_host_service_commands(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("ESC host services validate, store and delegate without wire traffic");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|2\x1b" "0000demo|");
+    if (strcmp(s.host_directory,"DEMO")) { FAIL("directory not selected"); return; }
+    const char *invalid[]={"!|2\x1b" "000|", "!|2\x1b" "0000..|", "!|2\x1b" "0000a/b|",
+                           "!|2\x1b" "0000abcdefghijklm|"};
+    for (unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) feed_script(&s,&ctx,invalid[i]);
+    if (strcmp(s.host_directory,"DEMO")) { FAIL("invalid directory altered selection"); return; }
+    feed_script(&s,&ctx,"!|2\x1b" "0000$OFF$|");
+    if (s.host_directory[0]) { FAIL("directory OFF failed"); return; }
+    if (tx_len) { FAIL("directory command sent bytes"); return; }
+    PASS();
+}
+
+static void test_poly_polygon_brush(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("poly-polygon uses fill brush, independently of line style");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|k02|N00|=04000000|s4Q4Q4Q4Q4Q4Q4Q4Q04|<01040A0A1E0A1E1E0A1E|");
+    if (draw_get_pixel(20,22)!=s.palette[4] || draw_get_pixel(21,22)!=s.palette[2])
+        FAIL("interior followed line style or ignored brush");
+    else PASS();
+}
+static void test_block_transfer_commands(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("ESC block transfer validates and delegates without wire traffic");
+    init_fixture(&s,&ctx);
+    transfer_calls=0; rip_set_transfer_handler(&s,test_transfer_callback,&transfer_calls);
+    feed_script(&s,&ctx,"!|3\x1b" "01020000demo.icn<>|");
+    if (transfer_calls!=1 || strcmp(s.block_transfer.filename,"demo.icn") ||
+        s.block_transfer.direction!=0 || s.block_transfer.protocol!=1 || s.block_transfer.file_type!=2) {
+        FAIL("block transfer fields wrong"); return;
+    }
+    const char *bad[]={"!|3\x1b" "0102000|", "!|3\x1b" "21020000x<>|", "!|3\x1b" "09020000x<>|",
+                       "!|3\x1b" "01070000x<>|", "!|3\x1b" "01020000<>|"};
+    for (unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i) feed_script(&s,&ctx,bad[i]);
+    if (transfer_calls!=1 || tx_len) { FAIL("invalid request delegated or sent bytes"); return; }
+    rip_set_transfer_handler(&s,NULL,NULL);
+    feed_script(&s,&ctx,"!|3\x1b" "07000000<>|");
+    if (transfer_calls==1 && s.block_transfer.protocol==7 && !s.block_transfer.filename[0]) PASS();
+    else FAIL("batch download announcement failed");
+}
+
 int main(void) {
+    test_empty_fill_family();
+    test_poly_polygon_brush();
+    test_copy_scroll_exposed_modes();
+    test_affine_driver_oracle();
+    test_affine_intersection_numeric_limits();
+    test_affine_chord_and_outline();
+    test_host_service_commands();
+    test_block_transfer_commands();
+
     printf("RIPlib v1.0 — RIPscrip Regression Tests\n");
     printf("======================================\n\n");
 
@@ -6306,6 +6464,7 @@ int main(void) {
     test_write_icon_caches_clipboard_for_load_icon();
     test_write_icon_replaces_cached_name();
     test_runtime_icon_supersedes_flash();
+    test_tiled_icon_coordinates_do_not_wrap();
     test_clipboard_op_5_capture_op_6_paste();
     test_save_icon_slot_out_of_range_is_noop();
     test_stamp_icon_unset_slot_falls_back_to_clipboard();

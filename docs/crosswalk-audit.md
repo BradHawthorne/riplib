@@ -1,0 +1,223 @@
+# RIPlib / RIPtel / bbs-land crosswalk audit
+
+Audited 2026-09-24. The [complete generated crosswalk](riptel-crosswalk.md)
+contains every DLL dispatch row, RIPlib source handler, and upstream command
+inventory row. This is a command inventory and static syntax audit, not a
+claim of terminal-feature or pixel parity.
+
+## Inputs and result
+
+| Input | Exact scope |
+|---|---|
+| RIPlib | Working tree based on `7ea20aa7c81f30f53df337e18653e602cafb735f`; source SHA-256 values are in the generated crosswalk |
+| RIPtel | Local RIPtel 3.1 installation; RIPSCRIP.DLL is 592,896 bytes, MD5 `bade8b1f4e467ac7ad4edb2639738d4c`, self-reported version 3.00.04 |
+| bbs-land | [Commit 2fb17724b6122a5ad5cd1df38b69b8cce3a7079f](https://github.com/bbs-land/remote-imaging-protocol/tree/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f), principally `version/3.0/ripscrip/9.0-command-reference.md` and `version/3.0-riplib/CONFLICTS.md` |
+| Corpus | The local installation's 35 `.RIP` scenes, 12,328 lexical command instances, 70 command keys; not upstream's larger 116-script census |
+
+The DLL has **129 rows, 117 distinct command keys, 11 continuation rows,
+and one additional row for the duplicate `|3D` key**. RIPlib has source
+handlers for **all 117 keys**, plus **24 keys absent from this
+DLL**. Handler presence does not establish behavioral equivalence.
+
+The upstream inventory has **116 rows: 112 keyed opcodes and four names
+without assigned opcodes**. Among 82 comparable numeric layouts, **69
+agree and 13 differ** from the DLL. Twelve elided/variable lists remain
+uncompared. The generated table also preserves nonnumeric cases, reference
+opcodes absent from the DLL, and the four unassigned names.
+
+## Fixes from this audit
+
+| Finding | Driver evidence | Implemented correction |
+|---|---|---|
+| Five misidentified punctuation commands | Slots 8, 10, 11, 83, 84 all call the pure geometry helper at RVA `0x00FA70` | Comma draws an affine elliptical arc; period outlines the whole ellipse; colon draws a pie; backtick draws a chord; brace fills the whole ellipse. They no longer copy screen regions, stamp icons, create mouse regions, or draw triangles |
+| Backtick field overread | Slot 83 has ten coordinate fields and a final single digit | Require 21 characters; read the fill digit at offset 20. Geometry uses center, conjugate radii, and endpoint rays |
+| Missing Level 2 ESC | Slot 110, RVA `0x046F66`, self-named `RIP_SwitchDirectory` | Validate and store the logical host directory, including `$OFF$`; no process-directory mutation |
+| Missing Level 3 ESC | Slot 124, RVA `0x024B4E`, self-named `RIP_EnterBlockMode` | Decode the eight-character prefix and filename, validate driver bounds, store a pending request, and optionally call the host transfer handler |
+| Wrong refresh behavior | Slot 117 calls `refreshAssignCommand` at RVA `0x03E43C` | Store the command string; host calls `rip_request_refresh()` to transmit it. Parsing itself neither transmits nor forces a framebuffer redraw |
+| Empty fills skipped; filled Bezier used drawing color | Zero brush rows at RVA `0x07AFD8`; filled handlers select a brush | Apply background fill consistently across filled shapes; Bezier uses current fill ink and pattern |
+| Compound polygon fill inherited pen style | Its interior spans called `draw_line`, bypassing the fill brush | Use filled spans so both brush colors apply independently of line dash/thickness |
+| CopyBlit mode treated as raster operation; scroll effects ignored | Both handlers use `SRCCOPY`, then fill exposed source with a mode-selected brush | Modes 0–5 implemented for copy and scroll; scroll mode 6 samples source before moving. Overlap survives; drawing write mode does not alter the move |
+| Checker coverage holes | Numeric cases, early breaks, long handlers, ESC macro values, and continuation rows | Complete handler extraction and explicit accounting; numeric Level 2 defines retained; adversarial instrument tests |
+
+The five geometry names above are descriptive RIPlib names. The driver's
+helper supplies geometry evidence; its command handlers do not supply those
+names. [D-31 through D-33](spec/12-dll-provenance.md) record the addresses,
+corrections to earlier claims, fixtures, and portable host boundaries.
+
+**Compatibility change:** RIPlib-specific stamp-slot content must move
+from `|.` to the extension `|3.`. `|3J` still saves slots. This avoids
+occupying the driver's ellipse opcode. New host fields extend the public
+`rip_state_t`; rebuild consumers with the matching headers and library.
+
+## Remaining boundaries
+
+- Duplicate `|3D`: slots 122 and 125 have different handlers. RIPlib
+  implements slot 122's delay; selection of the other behavior remains
+  unresolved. One covered key is not two established behaviors.
+- File transfers, logical directory selection, URL navigation, audio, and
+  playback timing require host implementation. Callbacks and stored requests
+  establish a portable interface, not RIPtel's complete desktop services.
+- Encoded-stream payload decoding, image stretch semantics, query-definition
+  protection, and exact text/font/pattern/GDI rendering are not fully established.
+  These are retained in the [divergence register](spec/14-divergence-register.md).
+- Generic fields remain base 36: `|J` records the requested base but does
+  not switch all decoders globally. Fixed-base-64 commands retain their
+  dedicated decoders; this pre-existing boundary is documented in the
+  [wire format](spec/01-wire-format.md).
+- No hardware run or full RIPtel framebuffer differential was performed.
+  The current result closes the concrete runtime defects above, not every
+  historical semantic uncertainty in the reference corpus.
+
+## Thirteen upstream numeric-layout differences
+
+`n` means configurable coordinate/color width, normalized to two digits
+for this comparison. These are differences in the numeric argument array;
+the DLL passes strings separately. The links in the full crosswalk lead
+to the exact upstream lines at the pinned revision.
+
+| Commands | DLL layout | bbs-land layout | Effect |
+|---|---|---|---|
+| `\|1I` | `n n 1 1 1 1 1` | `n n 2 1 1 1` | Same default total, different subdivision |
+| `\|1M` | `2 n n n n 1 1 2 3` | `2 n n n n 1 1 5` | Same total, merged reserved fields |
+| `\|1R` | `2 6` | `8` | Same prefix total, different subdivision |
+| `\|1T` | `n n n n 1 1` | `n n n n 2` | Same total, merged fields |
+| `\|1w` | `1 3` | `4` | Same total, missing separate mode field |
+| `\|2W` | `1 n n n n 2 2` | `1 n n n n 4` | Same total, merged fields |
+| `\|2A`, `\|2B`, `\|2E` | `1 2` | `2` | Three characters versus two |
+| `\|2T`, `\|2Y` | `1 2` | `1 1` | Three characters versus two |
+| `\|2s` | `1 2` | `1 2 3` | Three characters versus six |
+| `\|3e` | `2` | `4` | Two characters versus four |
+
+RIPlib's comment-signature comparison reports 75 comparable commands,
+with zero layout differences. The broader actual-read conformance check also
+reports zero defects. These are static syntax checks, separate from the
+behavioral regressions and geometry oracle below.
+
+## Upstream conflict register: what is stale
+
+The pinned [upstream conflict register](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0-riplib/CONFLICTS.md)
+describes an older RIPlib snapshot. The following are verified against the
+current source; they are not claims that every concern in that file is closed.
+
+| Upstream entries | Current evidence | Assessment |
+|---|---|---|
+| B1, write modes | [drawing.h](../include/drawing.h): XOR=1, OR=2, AND=3 | The alleged numbering defect is fixed |
+| B2/B3/B5/B6, opcode identities | [ripscrip.c](../src/ripscrip.c): `J` base math, `f` world frame, `K` filled rectangle, `D/d` drawing palette, `y` extended font style | The listed old opcode assignments are stale; identity agreement alone does not prove full rendering parity |
+| B4, punctuation block | [ripscrip.c](../src/ripscrip.c): skewed-oval family, markers and poly-polygon | Old ICON_STYLE/TEXT_XY_EXT/etc. assignments are gone |
+| B8, swapped commands | [ripscrip.c](../src/ripscrip.c): `1i` image style, `1w` audio, `1A` article selection, `1G/1g` scroll/copy, Level 1 ESC query, `t` poly-Bezier line | The listed old assignments are stale; host-owned behavior remains separately limited |
+| B12 and X5, stream introducers | [ripscrip.c](../src/ripscrip.c): SOH/STX accepted; ordinary `!` requires a line boundary | Missing-control-introducer and relaxed-CSI-trigger descriptions are stale |
+| B9, empty fill | [ripscrip.c](../src/ripscrip.c): all tested filled primitives paint the background at pattern 0 | Empty-fill regression fixed across twelve shape families; exact historical pattern bitmap equivalence remains separate |
+| B7, refresh | [ripscrip2.c](../src/ripscrip2.c): consumes four digits and stores the trailing command | Refresh-string behavior is implemented; transmission requires an explicit host call |
+| X7, DEBUG transmission | [CMakeLists.txt](../CMakeLists.txt): `RIPLIB_ENABLE_DEBUG_DIRECTIVE` defaults OFF | Unsolicited debug output is disabled by default; this does not settle macro-name ambiguity |
+| N1, backtick called a genuine addition | DLL slot 83 is present | The opcode itself is driver-backed, although the former composite-icon interpretation was wrong; D-31 replaces it with an affine chord |
+
+Other conflict entries, text-variable semantics, exact pattern bitmaps,
+font rendering, host-command behavior, and historical-version differences
+were not exhaustively re-adjudicated here. No upstream repository changes
+or messages were made.
+
+## Reproduction and validation
+
+```powershell
+python scripts/dll-conformance.py C:/RIPtel/RIPSCRIP.DLL -v --corpus C:/RIPtel --crosswalk docs/riptel-crosswalk.md --reference build-crosswalk-reference/version/3.0/ripscrip/9.0-command-reference.md --reference-revision 2fb17724b6122a5ad5cd1df38b69b8cce3a7079f
+python scripts/ref-compare.py C:/RIPtel/RIPSCRIP.DLL build-crosswalk-reference/version/3.0/ripscrip/9.0-command-reference.md
+python tests/test_dll_conformance.py
+```
+
+The reference path is an ignored local clone of the pinned commit; the
+DLL and vendor corpus are not vendored. Re-injecting the printable-only
+filter produces exactly three dispatch-accounting findings. Tests also
+cover truncated records, orphan continuations, duplicate keys, upstream
+ESC/level-9/unlinked/unassigned rows, numeric Level 2 macro values, and the earlier handler-boundary defects.
+
+The initial runtime regressions passed **326/326**. The isolated pre-fix runtime failed
+twelve of those tests (new public helper definitions supplied only to link
+the test harness); the current runtime passes them. The geometry fixture
+contains **52 point runs** generated by executing the pinned DLL helper in
+an x86 emulator, including coincident rays, skewed axes, truncation, and
+degeneracies. A further 136 deterministic point-run comparisons exposed and
+verified fixes to same-segment direction and missing-ray fallback handling.
+This is geometry evidence for sampled inputs, not universal pixel parity.
+
+All **35 corpus scenes** replay cleanly. Asset requests and region counts are
+unchanged. Fill corrections change these four scene summaries:
+
+| Scene | Foreground pixels before → after | Distinct colors before → after |
+|---|---|---|
+| CURVES | 67,814 → 67,814 | 2 → 7 |
+| LANDSCPE | 111,595 → 200,890 | 6 → 7 |
+| SEABYME1 | 110,681 → 173,865 | 6 → 10 |
+| SEANITE | 121,222 → 180,882 | 6 → 12 |
+
+The other 31 scene summaries are unchanged. Filled Bezier now uses the
+fill brush, and empty fills paint the background; those are intentional
+rendering changes, not silently refreshed golden images. The six existing
+compatibility frame-hash fixtures remain unchanged.
+
+The standing validator re-derives **58 claims** from the image, source and
+corpus. The 129-row binary-table and command/spec document checks pass.
+Field-name review remains advisory: it reports 16 unmatched diagnostic
+concepts across nine commands, including known shared-name diagnostics;
+those are not counted as resolved defects. See the final verification notes below for
+sanitizer and fuzz results.
+
+Additional reproduction:
+
+```powershell
+python scripts/dll-affine-fixtures.py C:/RIPtel/RIPSCRIP.DLL --check
+python scripts/dll-validate-claims.py C:/RIPtel/RIPSCRIP.DLL
+python scripts/check-dll-table.py C:/RIPtel/RIPSCRIP.DLL
+python scripts/check-field-names.py C:/RIPtel/RIPSCRIP.DLL
+python scripts/check-command-docs.py
+python scripts/check-spec-examples.py
+```
+
+Oracle regeneration requires Python Unicorn; normal tests use the checked-in
+numeric fixtures and need neither Unicorn nor the unvendored DLL.
+
+## Final verification
+
+- All six CTest groups pass on Windows GCC and Linux Clang with ASan/UBSan;
+  the final parser suite is 328/328. Fourteen audit instrument tests pass.
+- Linux coverage-guided fuzzing, instrumenting the library as well as its
+  harness, completed 60,717 runs in 61 seconds with no finding. It began
+  with 86 directed seeds. The earlier sanitizer sweep also completed one
+  million seeded mutations; the final geometry/fill changes received a
+  further 100,000 seeded mutations.
+- The Cortex-M33/RP2350 static archive builds with `arm-none-eabi-gcc`.
+  This is a cross-compile check, not an on-device execution result.
+- Predicate reinjection detects a wrong DLL closure mode, a nonzero EMPTY
+  brush row, and replacing the arc handler with screen copying. The actual
+  driver remains unmodified; these checks mutate bytes/source in memory.
+- `git diff --check` passes. The version stays at 2.0.1 pending a separate
+  release decision. No bbs-land repository changes were made.
+
+For the fuzz build, configure with Clang and enable `RIPLIB_BUILD_TESTS`
+and `RIPLIB_BUILD_FUZZ`; CMake instruments both library and harness. Run
+`scripts/fuzz-seeds.py <corpus-directory>` to export the 86 directed seeds,
+then run CTest plus both fuzz executables. The test runner disables inlining so hundreds of large
+session fixtures do not combine into one oversized optimized stack frame.
+
+### Publication verification findings
+
+- A C++ consumer failed to link C API functions because six public headers
+  lacked C linkage guards. The guards now cover all six; installed-package
+  and source-vendoring consumers pass on Linux GCC and Windows MSVC. CI
+  exercises both integration paths across its OS/build-type matrix.
+- A synthetic nearly parallel affine segment produced an out-of-range
+  double-to-int conversion under UBSan. Rejecting impossible intersections
+  before conversion fixes it while all 52 driver-derived fixtures still pass.
+  A deterministic 500,000-case geometry stress sweep passes with ASan,
+  UBSan and float-cast-overflow instrumentation.
+- Tiled icon iteration used signed 16-bit counters and could wrap forever
+  at 32767. A regression times out against the old loop and passes with
+  32-bit counters, checking both axes, rendered pixels, and restored clipping.
+- The corrected affine command no longer needs the internal scaled-screen-copy
+  helper. Removing its unused implementation/declaration removes dead code;
+  all nine existing coverage floors pass without lowering any threshold.
+- The CI fuzz option formerly instrumented only its entry point. It now
+  instruments RIPlib as well, rejects unsupported configurations, and seeds
+  coverage-guided runs from the mutation harness. An option-only Clang build
+  completed 182,340 runs in 61 seconds without a sanitizer finding.
+- Generated Python caches are excluded from version control. Source hashes
+  in the crosswalk normalize CRLF so checkout conventions do not change them.

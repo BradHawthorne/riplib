@@ -18,6 +18,10 @@
 #include <stdbool.h>
 #include "riplib_platform.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define RIP_ICON_CACHE_MAX   64
 #define RIP_ICON_NAME_MAX    12
 #define RIP_FILE_REQUEST_MAX 16
@@ -116,3 +120,7 @@ int rip_icon_dequeue_request(rip_icon_state_t *state,
  * Called from rip_session_reset() on BBS disconnect so that icon
  * requests from a previous session are not replayed to the next BBS. */
 void rip_icon_clear_requests(rip_icon_state_t *state);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

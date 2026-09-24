@@ -9,6 +9,12 @@ add_test(NAME drawing_tests COMMAND test_drawing)
 
 add_executable(test_ripscrip test_ripscrip.c)
 target_link_libraries(test_ripscrip PRIVATE riplib)
+# Hundreds of independent stack-local sessions must not be folded into one
+# enormous main() frame by optimized sanitizer builds (Clang -O1 exceeded
+# Linux's 8 MiB stack before the first test ran).
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_ripscrip PRIVATE -fno-inline)
+endif()
 
 add_test(NAME ripscrip_tests COMMAND test_ripscrip)
 
@@ -67,6 +73,15 @@ target_link_libraries(test_fuzz_seeded PRIVATE riplib)
 
 add_test(NAME fuzz_seeded_tests COMMAND test_fuzz_seeded 20000)
 
+# Exercise the audit instrument without requiring the unvendored driver.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME dll_conformance_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_dll_conformance.py")
+else()
+    message(STATUS "Skipping dll_conformance_tests: Python3 interpreter unavailable")
+endif()
+
 # ── Optional libFuzzer harness ───────────────────────────────────
 # Build with: cmake -DRIPLIB_BUILD_FUZZ=ON -DCMAKE_C_COMPILER=clang
 #
@@ -81,6 +96,15 @@ add_test(NAME fuzz_seeded_tests COMMAND test_fuzz_seeded 20000)
 # The target is not registered with ctest because libFuzzer drives its own
 # runner.  Run manually:  ./build/tests/fuzz_parser -max_total_time=60
 if(RIPLIB_BUILD_FUZZ)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "RIPLIB_BUILD_FUZZ requires Clang/libFuzzer")
+    endif()
+    # Instrument the code under test, not only the entry point. fuzzer-no-link
+    # supplies coverage without main(); ordinary test executables still need
+    # the sanitizer runtimes when they link this instrumented archive.
+    target_compile_options(riplib PRIVATE
+        -fsanitize=fuzzer-no-link,address,undefined -g -O1)
+    target_link_options(riplib INTERFACE -fsanitize=address,undefined)
     add_executable(fuzz_parser fuzz_parser.c)
     target_link_libraries(fuzz_parser PRIVATE riplib)
     target_compile_options(fuzz_parser PRIVATE

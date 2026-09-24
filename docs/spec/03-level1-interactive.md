@@ -312,9 +312,8 @@ Deactivates the current text block region.
      Arguments:    x0:XY y0:XY x1:XY y1:XY mode:1 excl:1 dest_y:XY
      Format:       !|1G<x0><y0><x1><y1><mode><excl><dest_y>|
 
-CORRECTED from RIP_COPY_REGION, which is a different command — '|,'
-at Level 0 (§4.5), ten coordinates.  This letter carried that name
-too, so the name sat on two commands at once.
+CORRECTED from RIP_COPY_REGION. The former assignment of that name to
+comma was also wrong: '|,' is an affine elliptical arc (§4.5, D-31).
 
 The handler (RVA 0x00D7E0) names itself RIP_Scroll in its own
 diagnostics, and the export table already listed RIP_Scroll as
@@ -341,8 +340,12 @@ The copy order flips on dest_y >= y0 so overlapping moves do not
 smear.  A dest_y equal to y0 is a no-op ("Nothing to do"), and a
 mode above 6 is rejected ("Invalid mode parameter").
 
-RIPlib implements the move.  The mode 1-6 effect routines are
-accepted but not performed; see D-14.
+D-33 implements the exposed-source fills. The move always uses COPY,
+independently of the current drawing write mode. Mode 0 leaves the source;
+1 fills the exposed area with foreground, 2 background, 3 fill color,
+4 current fill brush, 5 black, and 6 a source-edge sample taken before
+the move. Overlap with the destination is excluded. CopyBlit |1g uses
+the same rules for modes 0..5; its mode digit is not a raster operation.
 
 
 ---------------------------------------------------------------------

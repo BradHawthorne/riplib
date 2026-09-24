@@ -19,11 +19,15 @@ Usage:
     python scripts/check-command-docs.py
 """
 import pathlib
+import importlib.util
 import re
 import sys
 
 SRC = pathlib.Path("src/ripscrip.c")
 APPENDIX = pathlib.Path("docs/spec/10-appendices.md")
+_spec = importlib.util.spec_from_file_location("conformance", pathlib.Path(__file__).with_name("dll-conformance.py"))
+CHECK = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(CHECK)
 
 # Appendix uses short names; the parser prefixes RIP_ and sometimes differs in
 # a documented, deliberate way.  Anything here is an accepted alias, not a
@@ -44,10 +48,15 @@ def main():
     src = SRC.read_text(encoding="latin-1")
     doc = APPENDIX.read_text(encoding="utf-8")
 
-    # parser: `    case 'X': /* RIP_NAME ...`  (Level 0 only -- four spaces)
+    # Use the brace-aware switch reader so numeric labels (notably backtick)
+    # and changes in indentation cannot silently reduce this check's scope.
     code = {}
-    for m in re.finditer(r"^    case '(.)': /\* RIP_([A-Z0-9_]+)", src, re.M):
-        code.setdefault(m.group(1), m.group(2))
+    for level, ch, line, body in CHECK.handler_bodies(src.splitlines()):
+        if level != 0:
+            continue
+        m = re.search(r"/\* RIP_([A-Z0-9_]+)", src.splitlines()[line-1])
+        if m:
+            code[ch] = m.group(1)
 
     # appendix rows: `     X    NAME    args   format`
     docs = {}

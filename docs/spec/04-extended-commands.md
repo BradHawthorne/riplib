@@ -23,8 +23,8 @@ font attributes, icon operations, and coordinate/color modes.
      Arguments:    cx:2 cy:2 radius:2
      Format:       !|G<cx><cy><r>|
 
-Draws a filled circle. If fill pattern is non-empty, fills with
-fill color first, then draws outline in draw color. Radius is
+Draws a filled circle using the current brush (background ink for EMPTY),
+then draws the border in drawing color when borders are enabled. Radius is
 Y-scaled (EGA 350→400).
 
      Attributes: [DC] [FC] [FP] [WM] [CL]
@@ -67,8 +67,8 @@ the smaller dimension.
      Arguments:    x0:2 y0:2 x1:2 y1:2 radius:2
      Format:       !|u<x0><y0><x1><y1><r>|
 
-Draws a filled rounded rectangle. If fill pattern is non-empty,
-fills with fill color, then draws outline in draw color.
+Draws a filled rounded rectangle using the current brush (background ink
+for EMPTY), then draws the border in drawing color when borders are enabled.
 
      Attributes: [DC] [FC] [FP] [WM] [CL]
 
@@ -107,21 +107,26 @@ between the endpoints, filling the enclosed area.
 
 
 ---------------------------------------------------------------------
-4.5  RIP_COPY_REGION_EXT — Extended Copy Region
+4.5  RIP_AFFINE_ARC — Arc from Conjugate Radii
 ---------------------------------------------------------------------
 
-     Function:     Extended Copy Region
      Command:      |,
-     Arguments:    sx0:2 sy0:2 sx1:2 sy1:2 dx:2 dy:2
-                   dx1:2 dy1:2 res:2 res:2
-     Format:       !|,<sx0><sy0><sx1><sy1><dx><dy><dx1><dy1><r><r>|
+     Arguments:    cx:XY cy:XY ax:XY ay:XY bx:XY by:XY
+                   sx:XY sy:XY ex:XY ey:XY
 
-Extended version of copy region with separate source and
-destination rectangles. If the destination rectangle is present
-and differs in size, RIPlib scales the source region into it.
+C is the center; A and B are endpoints of conjugate radii. The ellipse
+is C + (A-C) cos(t) + (B-C) sin(t). S and E define rays from C to the
+arc endpoints. This draws the open arc, without filling it.
 
+D-31 corrects the former COPY_REGION interpretation. Slots 8, 10, 11,
+83 and 84 all call the same pure geometry helper at RVA 0x00FA70. Its
+72-point, five-degree Q14 sampling is reproduced by RIPlib; checked-in
+fixtures compare point runs with actual execution of that helper. This
+establishes geometry for the fixture inputs, not GDI raster equivalence.
+AFFINE_* names are descriptive names used by RIPlib.
 
 ---------------------------------------------------------------------
+
 4.6  RIP_FILLED_SKEWED_OVAL — Filled Rotated Ellipse
 ---------------------------------------------------------------------
 
@@ -240,23 +245,18 @@ wraps through 0.  A decoder that rejects end < start draws nothing.
 
 
 ---------------------------------------------------------------------
-4.12  RIP_ANIMATION_FRAME — Animation Frame
+4.12  RIP_FILLED_AFFINE_OVAL — Filled Ellipse from Conjugate Radii
 ---------------------------------------------------------------------
 
-     Function:     Animation Frame
      Command:      |{
-     Arguments:    x0:2 y0:2 x1:2 y1:2 x2:2 y2:2
-     Format:       !|{<x0><y0><x1><y1><x2><y2>|
+     Arguments:    cx:XY cy:XY ax:XY ay:XY bx:XY by:XY
 
-Defines an animation frame with source, destination, and
-timing coordinates. Used for simple sprite-like animations.
-
-     v3.1 STATUS: Embedded fallback. RIPlib renders the frame
-     geometry immediately; timer-based sprite playback remains a
-     host/client responsibility.
-
+Fills the whole ellipse defined by C, A and B (§4.5), with the current
+fill state and optional border. This is not an animation command or a
+triangle; the former assignment is withdrawn by D-31.
 
 ---------------------------------------------------------------------
+
 4.13  RIP_FILLED_RECTANGLE — Filled Rectangle
 ---------------------------------------------------------------------
 
@@ -278,30 +278,24 @@ RIP_KILL_ENCLOSED_MOUSE_FIELDS, which is a separate and real command.
 
 
 ---------------------------------------------------------------------
-4.14  RIP_MOUSE_REGION_EXT — Extended Mouse Region
+4.14  RIP_AFFINE_PIE — Elliptical Pie from Conjugate Radii
 ---------------------------------------------------------------------
 
-     Function:     Extended Mouse Region
      Command:      |:
-     Arguments:    x0:XY y0:XY x1:XY y1:XY x2:XY y2:XY
-                   x3:XY y3:XY x4:XY y4:XY flags:1
-     Format:       !|:<x0><y0><x1><y1><x2><y2><x3><y3><x4><y4><flags>|
+     Arguments:    cx:XY cy:XY ax:XY ay:XY bx:XY by:XY
+                   sx:XY sy:XY ex:XY ey:XY fill:1
 
-CORRECTED.  This was documented as a rectangle carrying a 2-digit
-hotkey and a 2-digit flags field, twenty-two characters in all.
+Uses §4.5's arc and closes through the center. A nonzero final digit
+selects the current fill state; zero draws the outline. Five coordinate
+pairs are geometry controls, not five mouse-region vertices. D-31
+withdraws D-14's mouse-region claim. This creates no mouse region.
 
-Slot 11 records XY×10 followed by a single mega1 — twenty-one
-characters — and the handler (RVA 0x01DD70) loads all eleven
-arguments and coordinate-maps exactly five consecutive (x,y)
-pairs.  This is a five-vertex region, not a rectangle: the fields
-previously read as hotkey and flags are the third vertex.
-
-RIPlib registers the bounding box of the five vertices as the
-hit-area.  The polygon itself is not retained, so hit-testing is a
-conservative over-approximation.  See D-14.
-
+The backtick command |` has the same 21-character default layout and
+fill digit, but closes directly between the arc endpoints: an affine
+elliptical chord. It is not a screen-compositing command.
 
 ---------------------------------------------------------------------
+
 4.15  RIP_POLY_MARKER — Draw a Marker Glyph
 ---------------------------------------------------------------------
 
@@ -593,19 +587,19 @@ keeps it on '|3&' as a library extension.
 
 
 ---------------------------------------------------------------------
-4.24  RIP_STAMP_ICON — Stamp Icon at Position
+4.24  RIP_AFFINE_OVAL — Ellipse Outline from Conjugate Radii
 ---------------------------------------------------------------------
 
-     Function:     Stamp Icon
      Command:      |.
-     Arguments:    slot:2 x:2 y:2 w:2 h:2 flags:2
-     Format:       !|.<slot><x><y><w><h><flags>|
+     Arguments:    cx:XY cy:XY ax:XY ay:XY bx:XY by:XY
 
-Stamps a previously saved icon slot at the given position
-with optional scaling and flags.
-
+Draws the whole ellipse outline defined by §4.5. D-31 corrects the
+former stamp-icon assignment. RIPlib's stamp-slot feature is preserved
+as the extension |3. with slot:2 x:2 y:2 w:2 h:2 flags:2; |3J still
+saves a slot. Existing RIPlib-specific content must change |. to |3..
 
 ---------------------------------------------------------------------
+
 4.25  RIP_SET_BASE_MATH — Select the MegaNum Radix
 ---------------------------------------------------------------------
 

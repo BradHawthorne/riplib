@@ -9,7 +9,9 @@
 
 # Source files: keep LF in the repo.
 *.c   text eol=lf
+*.cpp text eol=lf
 *.h   text eol=lf
+*.sh  text eol=lf
 *.yml text eol=lf
 *.md  text eol=lf
 CMakeLists.txt text eol=lf

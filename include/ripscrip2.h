@@ -8,9 +8,9 @@
  *   - Improved button/mouse region system
  *   - Clipboard operations
  *
- * RIPscrip 2.0 was never widely deployed.  TeleGrafix went defunct
- * circa 1996.  No complete implementation exists in the wild besides
- * the original never-released RIPterm 2.0 client.
+ * Driver-backed commands are checked against the shipped RIPSCRIP.DLL
+ * 3.00.04 from RIPtel 3.1; RIPlib-specific extensions are documented
+ * separately in the command reference.
  *
  * This parser extends ripscrip.c (1.54) with 2.0+ commands and the
  * v3.x §A2G extensions (see docs/spec/06-v31-extensions.md and
@@ -26,6 +26,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "ripscrip.h"   /* rip_state_t, rip_port_t, RIP_MAX_PORTS */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* RIPscrip 2.0 command prefixes (Level 2) */
 #define RIP2_CMD_SET_PALETTE    '0'  /* Set VGA palette entry */
@@ -59,6 +63,7 @@
 #define RIP2_CMD_SWITCH_TEXT_WINDOW  'T'  /* !|2T — RIP_SwitchTextWindow   */
 #define RIP2_CMD_SWITCH_STYLE        'Y'  /* !|2Y — RIP_SwitchStyle (graphics style slot) */
 #define RIP2_CMD_PORT_WRITE          'W'  /* !|2W — RIP_PortWrite (to bitmap) */
+#define RIP2_CMD_SWITCH_DIRECTORY   0x1B /* !|2ESC — res:4 directory */
 
 void ripscrip2_init(ripscrip2_state_t *s);
 
@@ -75,3 +80,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                        char cmd,
                        const char *raw, int raw_len,
                        const int16_t *params, int param_count);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

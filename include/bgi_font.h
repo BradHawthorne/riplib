@@ -24,6 +24,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* BGI font IDs (matching RIPscrip font numbering) */
 #define BGI_FONT_DEFAULT    0  /* 8×8 bitmap (not BGI) */
 #define BGI_FONT_TRIPLEX    1  /* TRIP.CHR */
@@ -94,3 +98,7 @@ void bgi_font_set_char_spacing(uint16_t pct);
 int16_t bgi_font_string_width(const bgi_font_t *font,
                                const char *str, int len,
                                uint8_t scale);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

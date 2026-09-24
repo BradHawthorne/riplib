@@ -13,6 +13,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Parse an ICN (BGI putimage) file from memory.
  * Deinterleaves 4 EGA bitplanes to 8bpp palette indices (0-15).
  * out_pixels must have space for width * height bytes.
@@ -23,3 +27,7 @@ bool rip_icn_measure(const uint8_t *data, int size,
 bool rip_icn_parse(const uint8_t *data, int size,
                    uint8_t *out_pixels,
                    uint16_t *out_w, uint16_t *out_h);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif

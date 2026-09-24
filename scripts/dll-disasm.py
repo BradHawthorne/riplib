@@ -92,6 +92,8 @@ def main():
     ap.add_argument("rva", help="handler RVA, e.g. 0x01f904")
     ap.add_argument("-c", "--count", type=int, default=80,
                     help="max instructions to print (default 80)")
+    ap.add_argument("--end", type=lambda s: int(s, 0),
+                    help="exclusive end RVA; continue past early returns")
     args = ap.parse_args()
 
     try:
@@ -135,6 +137,8 @@ def main():
 
     n = 0
     for ins in md.disasm(code, IB + rva):
+        if args.end is not None and ins.address >= IB + args.end:
+            break
         note = ""
         # an indirect call through the IAT names the API being invoked
         if ins.mnemonic == "call" and ins.op_str.startswith("dword ptr ["):
@@ -154,7 +158,7 @@ def main():
                         break
         print(f"  {ins.address - IB:#08x}  {ins.mnemonic:<7} {ins.op_str}{note}")
         n += 1
-        if ins.mnemonic == "ret" or n >= args.count:
+        if (ins.mnemonic == "ret" and args.end is None) or n >= args.count:
             break
 
 

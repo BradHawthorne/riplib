@@ -84,12 +84,3 @@ void rip_draw_icon_pixels(rip_state_t *s,
                           uint16_t src_w, uint16_t src_h,
                           int16_t requested_w, int16_t requested_h,
                           uint8_t write_mode);
-
-/* Copy a screen rectangle to another location with optional scaling
- * and write-mode application.  Used by L0_COPY_REGION + L1_COPY_REGION. */
-void rip_copy_screen_region_scaled(rip_state_t *s,
-                                   int16_t sx, int16_t sy,
-                                   int16_t sw, int16_t sh,
-                                   int16_t dx, int16_t dy,
-                                   int16_t dw, int16_t dh,
-                                   uint8_t write_mode);

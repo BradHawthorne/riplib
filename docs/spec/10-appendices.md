@@ -68,7 +68,7 @@ LEVEL 0 — Extended Commands (v2.0+):
      U    ROUNDED_RECT           10    !|U<x0><y0><x1><y1><r>|
      u    FILLED_ROUNDED_RECT    10    !|u<x0><y0><x1><y1><r>|
      +    SKEWED_OVAL_CHORD      14    !|+<cx><cy><rx><ry><st><end><skew>|  (was SCROLL)
-     ,    COPY_REGION            20    !|,<sx0>..<dy1><r><r>|
+     ,    AFFINE_ARC             20    !|,<cx><cy><ax><ay><bx><by><sx><sy><ex><ey>|
      -    FILLED_SKEWED_OVAL     10    !|-<cx><cy><rx><ry><skew>|  (was TEXT_XY_EXT)
      x    FILLED_POLY_BEZIER     var   !|x<nsegs><nsteps><pts..>|
      z    POLY_BEZIER            var   !|z<nsegs><nsteps><pts..>|
@@ -76,9 +76,9 @@ LEVEL 0 — Extended Commands (v2.0+):
      [    SKEWED_OVAL_PIE_SLICE  14    !|[<cx><cy><rx><ry><st><end><skew>|
      ]    SKEWED_OVAL_ARC        14    !|]<cx><cy><rx><ry><st><end><skew>|
      _    FILLED_OVAL_CHORD      12    !|_<cx><cy><st><end><rx><ry>|  (was DRAW_TO)
-     {    ANIMATION_FRAME        12    !|{<x0><y0><x1><y1><x2><y2>|
+     {    FILLED_AFFINE_OVAL     12    !|{<cx><cy><ax><ay><bx><by>|
      K    FILLED_RECTANGLE       8     !|K<x0><y0><x1><y1>|  (was KILL_MOUSE_EXT)
-     :    MOUSE_REGION_EXT       21    !|:<x0><y0>..<x4><y4><fl>|  (five vertices)
+     :    AFFINE_PIE             21    !|:<cx><cy><ax><ay><bx><by><sx><sy><ex><ey><fill>|
      ;    POLY_MARKER            14    !|;<x><y><num><x2><y2><rot><fl>|  (was BUTTON_EXT)
      b    EXT_TEXT_WINDOW        var   !|b<x0><y0>..<flags>|
      d    ONE_DRAWING_PALETTE    7     !|d<index><bits><rgb>|  (BASE 64; was EXT_FONT_STYLE)
@@ -92,19 +92,19 @@ LEVEL 0 — Extended Commands (v2.0+):
      M    SET_COLOR_MODE         2     !|M<mode><depth>|
      N    SET_BORDER             2     !|N<borders>|
      &    SKEWED_OVAL            10    !|&<cx><cy><rx><ry><skew>|  (was ICON_STYLE)
-     .    STAMP_ICON             12    !|.<slot><x><y><w><h><fl>|
+     .    AFFINE_OVAL            12    !|.<cx><cy><ax><ay><bx><by>|
      J    SET_BASE_MATH          2     !|J<base>|      (was SAVE_ICON)
      D    SET_DRAWING_PALETTE    var   !|D<start><count><bits><rgb..>|  (BASE 64; was FILL_PATTERN_EXT)
      <    POLY_POLYGON         var     (variable-length; was GET_IMAGE_EXT)
      t    POLY_BEZIER_LINE       var   !|t<nsegs><nsteps><pts..>|  (was REGION_TEXT, B8)
-     `    COMPOSITE_ICON         var   !|`<n><pairs..><mode>|
+     `    AFFINE_CHORD           21    !|`<cx><cy><ax><ay><bx><by><sx><sy><ex><ey><fill>|
      !    COMMENT                var   !|!<text>|   (consumed, no output)
      ( )  GROUP_BEGIN / _END     0     !|(|  !|)|  (no-op markers)
 
-     (The backtick COMPOSITE_ICON, the '!' comment marker and the
-      '('/')' group markers are all PRESENT in RIPSCRIP.DLL 3.0.7 —
-      they are documented commands, not RIPlib extensions.  See
-      11-dll-deviations.md §DEV.4, corrected 2026-08-12.)
+     (Affine names are descriptive RIPlib names recovered from the
+      shipping 3.00.04 driver's geometry, D-31. C is the center, A/B
+      are conjugate-radius endpoints, S/E are ray points. These are
+      not rectangles or polygon vertices. Stamp slots moved to |3..)
 
 LEVEL 1 — Interactive (prefix '1'):
 
@@ -158,7 +158,8 @@ LEVEL 2 — Drawing Ports (prefix '2'):
      3    SCROLLBAR              16    !|23<x><y>..<page>|
      4    MENU                   var   !|24<y><h><bg>...|
      5    DIALOG                 12    !|25<x><y><w><h><tc><bg>|
-     R    REFRESH                0     !|2R|
+     R    REFRESH                var   !|2R<res:4><command>|
+     ESC  SWITCH_DIRECTORY       var   !|2<ESC><res:4><directory>|
      c    CHORD                  var   !|2c...|
 
 
