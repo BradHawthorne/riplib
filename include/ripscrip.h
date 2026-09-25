@@ -289,13 +289,15 @@ typedef struct {
 
 /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────────── *
  *
- * The spec defines 36 independent drawing surfaces (one per port slot).
+ * The driver has 36 port slots, with shared-screen or offscreen storage.
  * RIPlib runs against a single shared framebuffer, so per-port pixel
  * data is not maintained — instead each port stores its drawing state
  * (clip region, color, line style, etc.) and that state is saved on
  * switch-away and restored on switch-in.  All drawing targets the
  * single framebuffer; the active port's viewport becomes the clip
  * rectangle.
+ * D-41 records remaining differences in relative coordinates, exclusive
+ * copy extents and offscreen origins (docs/spec/12-dll-provenance.md).
  *
  * Port 0 is permanent: full-screen viewport, cannot be deleted,
  * allocated at rip_init_first() time.

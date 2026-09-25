@@ -265,12 +265,12 @@ SHA-256 of the audited source files, with CRLF normalized to LF:
 | include/rip_icons.h | a4d27f59035c96170cdc2e7d08245aaa4dd8e5a2aa453e8ef4d664dcceb146d8 |
 | include/riplib_platform.h | 2076b68078f8c27b1a73bc73ff5075a7b6481f0877f3de7e92f4a2838f767e47 |
 | include/riplib_version.h | 44c89b2b94a9471bfed220d0e2ecb8ac6691d4968cb96a422ee380eff5431b5d |
-| include/ripscrip.h | 2a36e39785c91d1e3d9586ed6842e04817bc8d1fe05fd849df40acddea0be828 |
+| include/ripscrip.h | 998f84d195830fa3d924a88bd227d00828416d218d6893254bcc1a8d71a154e8 |
 | include/ripscrip2.h | 4309e86c8787ea8ee9cb4bcee3bafc7ff34b8fbd64a7224fdcca3cc948a82aa6 |
 | src/bgi_font.c | bed593d21f5752f8dc2a39d49a0db0a56b310c606f59a39373434a97a815aff6 |
 | src/drawing.c | 642966691b9bc408b968fde8d76629cd317eeed90e4cfcf19efb43c3b5751375 |
 | src/rip_affine_oval.h | 20a18420d1f1667bef54f1005a46296e410f6da9383776eb8ca814ff0f462cf2 |
-| src/rip_clipboard.c | 2be5060cb37a0c94a776edcb5abc3c6a0dec4805bc44bca64f2a424d96ad84b0 |
+| src/rip_clipboard.c | a189d176ebc74b7004ef788ca9b99359f41e3491d9cfa8d95fb10b28897d7eb4 |
 | src/rip_clipboard.h | 2c56a771599d939ebbbfea9112d9147466297f46e46f79888b709b57d8b3b5ba |
 | src/rip_icn.c | 308057ef78c5b34ba29aad5b05f1ecda2173120e7a1be96ec208c32c1527dda5 |
 | src/rip_icons.c | efc941453155a168be82c21908716b824b74defea91bc2b59f46527cfbb60fa3 |
@@ -282,4 +282,4 @@ SHA-256 of the audited source files, with CRLF normalized to LF:
 | src/rip_variables.h | fa355279e8fca6b0c13dab42956b996977d5c2307b4fb4c9df08c621feffee1b |
 | src/riplib_version.c | 4c4375b07dfac26116a6ba4741af8634aa2f74108869c8f5a1206be943bfad41 |
 | src/ripscrip.c | 05fc4398fd03a52a385da91bd1e8443d53bbeb48c10e934065932d716675220b |
-| src/ripscrip2.c | cdd27a4a12d8cf64c3c9c7a8b7e38c40eca1e0ad43e551c8b4527b324cb1b509 |
+| src/ripscrip2.c | 7780820475d985f2bae6a841999b93b5fdbaf8a35ab05ead820a0f93e7b48841 |

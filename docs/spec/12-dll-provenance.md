@@ -1,9 +1,69 @@
-CURRENT CORRECTION (2026-09-24, D-34..40): historical claims below
+CURRENT CORRECTION (2026-09-24, D-34..41): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
 are now implemented. D-40 supersedes the source-icon clipboard limitation
 in D-38/39. See ../crosswalk-audit.md for current boundaries.
+
+D-41 PORT CREATION, COMPLETE ICON HANDLER AND PORT COPY (2026-09-24).
+
+     scripts/dll-port-fixtures.py executes decoded 2P (466EC), 2s (468EB),
+     portInit (3326F), port selection (3393C/343E4), coordinate conversion
+     (31084), and then 1I (CB38) or 2C (46372), through their real returns.
+     Unlike D-39's helper experiment, show_bmp_file resumes from its display
+     boundary through its real epilogue. The 32 cases cover zero/nonzero
+     origins, shared/offscreen ports, icon stretch/capture flags and both
+     port-copy directions with equal/unequal sizes. No executable DLL bytes
+     are committed. Results live in tests/fixtures/port_calls.json.
+
+     Boundaries: the wire parser and live terminal are not executed. File
+     availability/bitmap metadata, string services, drawing synchronization,
+     initial protection lookup, allocation handles and GDI calls are modeled.
+     The fixture starts with an initialized master port, empty other slots,
+     ample bitmap capacity, no palette remapping and an unprotected session.
+     Port geometry and DC choice come from driver code, not the allocation
+     stub used in D-39. GDI is recorded, not rasterized. An allowlist rejects
+     unexpected execution; missing display/copy events and driver diagnostics
+     fail generation rather than becoming apparently successful fixtures.
+
+     PROVEN call contracts in this profile:
+       * 2P flag bit 0 selects offscreen storage. A shared port defined at
+         logical (10,20)-(110,90) retains device clip (10,22)-(110,102)
+         and uses the master DC. An offscreen port has kind 4, its own DC,
+         and clip (0,0)-(100,80), regardless of the requested origin.
+       * 1I at logical (3,7) draws at (13,30) on that shared port, with
+         native 2x7 size or stretched 2x8. Capture receives that displayed
+         rectangle unchanged, allocates 3x8/3x9, but reads from (23,52).
+         Thus D-40's extra-origin observation survives real port setup and
+         the complete successful handler path. Offscreen capture reads
+         (3,8) from its own DC because its stored origin is zero.
+       * Explicit 2C source/destination coordinates are port-relative.
+         Logical source (3,7)-(5,14) copies 2x8 pixels, using exclusive
+         endpoints and floor scaling on both Y endpoints. Shared source
+         coordinates become (13,30); offscreen source stays (3,8).
+         Reverse copies similarly add the destination shared-port origin.
+         In contrast to 1I capture, 2C applies that origin once.
+
+     RIPlib still treats explicit port-copy coordinates as absolute and adds
+     one to its copy extents, while scaling bottom Y with ceiling. Offscreen
+     selection remains informational in its single-framebuffer model. These
+     are remaining semantic differences, not syntax defects. D-41 changes
+     no runtime behavior; it prevents an isolated icon-offset patch from
+     concealing the shared coordinate/storage problem. The next bounded
+     experiment is 2C's all-zero source/destination, clipping and reversed
+     rectangles before correcting copy extents. Independent storage requires
+     a separate memory/API design; 35 extra 640x400 8-bit surfaces alone would
+     consume 8,960,000 bytes, so eager full-size allocation is not proposed.
+
+     Validation: 18 audit-instrument tests, including four adversarial fixture
+     mutations (display origin, source DC, capture origin, duplicate case).
+     Removing the real handler's X-coordinate add at CDD4 in emulator memory
+     is also rejected by the independent fixture-contract checker. The DLL
+     file remains unchanged. Existing 350 parser and 43 drawing tests and
+     all 70 driver/source claims remain green. No new runtime parity claim
+     follows merely from those existing tests.
+
+     Reproduce: python scripts/dll-port-fixtures.py <pinned DLL> --check.
 
 D-40 NATIVE MEMORY-DIB SAMPLING AND ICON SCREEN CAPTURE (2026-09-24).
 

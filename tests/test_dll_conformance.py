@@ -1,5 +1,6 @@
 """Regression tests for the conformance instrument; no proprietary DLL needed."""
 import contextlib
+import copy
 import importlib.util
 import io
 import json
@@ -33,6 +34,30 @@ def fixture(body):
 
 
 class HandlerCoverageTests(unittest.TestCase):
+    def port_instrument(self):
+        spec = importlib.util.spec_from_file_location('port_fixture', ROOT / 'scripts/dll-port-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/port_calls.json').read_text(encoding='utf-8'))
+        return module, data
+
+    def test_full_port_fixtures_preserve_coordinate_and_dc_contracts(self):
+        module, data = self.port_instrument()
+        module.validate(data)
+
+    def test_port_fixture_checker_rejects_origin_surface_and_matrix_mutations(self):
+        module, original = self.port_instrument()
+        for mutation in ('origin', 'surface', 'capture', 'duplicate'):
+            data = copy.deepcopy(original)
+            case = next(c for c in data['load_icon']
+                        if c['define_origin'] == [10, 20] and not c['offscreen'] and c['args'][4])
+            if mutation == 'origin': case['events'][0]['display'][0] -= 10
+            elif mutation == 'surface': case['events'][-1]['StretchBlt'][5] = 201
+            elif mutation == 'capture': case['events'][-1]['StretchBlt'][6] -= 10
+            else: data['port_copy'][0] = data['port_copy'][1]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                module.validate(data)
+
     def test_raster_fixtures_keep_source_not_and_capture_extents(self):
         data = json.loads((ROOT / 'tests/fixtures/raster_calls.json').read_text(encoding='utf-8'))
         rops = [0xCC0020, 0x660046, 0xEE0086, 0x8800C6, 0x330008, 0xCC0020]

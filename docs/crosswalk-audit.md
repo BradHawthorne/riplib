@@ -343,3 +343,25 @@ does not establish arbitrary palette remapping, independent port surfaces,
 halftone, historical display-driver or font parity. D-40 records the exact
 scope and reproduction commands; [iteration-state.md](iteration-state.md)
 identifies the next evidence needed.
+
+## Port coordinate and surface evidence (D-41)
+
+The new `dll-port-fixtures.py` executes real port creation and switching,
+followed by complete decoded LOAD_ICON or PORT_COPY handlers through return.
+Its 32 cases distinguish shared-screen ports from offscreen ports, which
+reset their origin to zero and select a separate DC. File/GDI services remain
+modeled; this is call-level evidence, not a live-terminal pixel comparison.
+
+The extra LOAD_ICON capture offset is confirmed for shared ports: logical
+port origin (10,20), icon (3,7), becomes device display (13,30) and capture
+source (23,52). PORT_COPY instead adds the source/destination origin once,
+uses exclusive extents and floor-scales both endpoints. A logical source
+(3,7)-(5,14) produces 2x8 pixels. RIPlib's absolute coordinates, inclusive
+copy extents and informational offscreen flag remain explicit differences.
+
+No runtime behavior changes in this iteration. Two new instrument tests
+(18 total) preserve the measured contracts and reject four fixture mutations.
+A mutation removing the driver's X-coordinate addition is also rejected.
+All 350 parser tests, 43 drawing tests and 70 existing claims remain green.
+The next input class is PORT_COPY's all-zero rectangles, reversed endpoints
+and clipping, before making a coherent correction to its copy semantics.

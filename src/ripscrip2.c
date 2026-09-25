@@ -25,7 +25,7 @@
  *
  * Port implementation notes (single-framebuffer architecture):
  *
- *   The spec defines 36 independent drawing surfaces; RIPlib runs
+ *   The driver supports shared-screen and offscreen ports; RIPlib runs
  *   against a single shared framebuffer with no off-screen surfaces.
  *   The port system instead:
  *     - Stores per-port drawing state (clip region, color, fill, etc.)
@@ -367,7 +367,7 @@ static void port_set_defaults(rip_port_t *p)
 /*
  * rip_port_create -- allocate a port and set its viewport rectangle.
  *
- * Mirrors DLL portInit / sub_03326F behavior:
+ * Implements a subset of DLL portInit / sub_03326F behavior (see D-41):
  *   - Rejects port 0 (permanent, cannot be redefined by BBS)
  *   - Rejects protected ports
  *   - If the slot is already allocated, clears existing state first

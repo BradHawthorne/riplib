@@ -623,6 +623,29 @@ rather than a slogan.
      Only a bare-RET body proves a command is inert.
 
 
+14.3.11  PORT COORDINATES, EXTENTS AND OFFSCREEN STORAGE (D-41)
+
+     Native port setup plus complete decoded 1I/2C execution establishes
+     shared-screen versus offscreen behavior; see D-41 and port_calls.json.
+     Shared ports retain their origin and use the master DC. Offscreen
+     ports reset their origin to zero and have an independent DC.
+
+     RIPlib's single framebuffer does not implement that storage separation.
+     Explicit 2C coordinates are currently absolute, with inclusive extents
+     and ceiling-scaled bottom Y. The measured driver uses port-relative
+     coordinates, exclusive extents and floor scaling on both endpoints.
+     A logical 2C source (3,7)-(5,14) therefore means 2x8 pixels in the driver.
+
+     1I has a further driver quirk: on the shared port defined at logical
+     (10,20), it draws a logical (3,7) icon at device (13,30), then its capture
+     reads (23,52). This extra offset survives actual port creation/switching;
+     it is absent in the tested offscreen case because that origin is zero.
+
+     Status: OPEN. No runtime parity fix in D-41. First cover all-zero copy
+     rectangles and clipping, then correct bounded copy semantics. Choose a
+     storage/coordinate model coherently before changing every drawing path.
+     These findings do not require changing any wire field widths.
+
 14.4  WHAT THIS REGISTER IS FOR
 ---------------------------------------------------------------------
 
