@@ -1,57 +1,55 @@
-# Iteration checkpoint — 2026-09-24, D-44
+# Iteration checkpoint — 2026-09-25, D-45
 
-STATE: PROVEN by 16 decoded redefinition cases through the next native line
-handler, clipping, ROP selection and graphics-style lock/unlock. Successful
-definition resets the target position; protection preserves it. Selected
-style slot 7 and all seeded style bytes survive port selection/redefinition.
-GDI/memory handles, caret and invalidation remain modeled. Focus is inactive.
-No live pixels or complete port/style parity are claimed.
+STATE: PROVEN by 128 native decoded style-selection/protection cases and
+three sequences through native reset-style primitives. Runtime matches
+colors, ROPs, flags and defaults; port changes leave style selection intact.
+Brush realization, palette lookup and GDI remain modeled. Full reset,
+font rasterization and scene pixel parity are not claimed.
 
-ADVANCE: Active 2P redefinition now applies the new stored viewport,
-preserves current style and resets drawing position, with or without the
-activation flag. The portable mirror survives switch-away/back. Two runtime
-regressions fail on f60270f and pass after correction. Wire widths, length
-gates, aliases and public structure layout are unchanged.
-Fixed an emulator import-address collision after stub removal; all existing
-raster/port/lifetime fixtures remain unchanged. Two instrument regressions
-cover that bug and five classes of redefinition-fixture mutation. Removing
-the native next-line ROP call is detected.
+ADVANCE: |2Y now restores 36 independent style slots; port switching
+restores only cursor and viewport. Slot zero cannot be protected. Unused
+styles take defaults, contrary to the historical reference's copy-current
+prose but matching DLL execution. Soft reset preserves protected styles,
+selects zero and clears unprotected styles; disconnect clears the table.
+Custom fill rows and character spacing are now restored to the renderer.
+Wire syntax is unchanged. Consumers must rebuild for the expanded session
+structure (GCC: 1,296-byte style table plus 8 active pattern bytes).
 
-FRONTIER: The driver selects graphics styles independently of ports
-(RIPINST+0x0A versus +0x22); RIPlib still saves/loads per-port styles and
-treats its explicit style selection as metadata. New/other-port activation
-therefore needs a coherent style-slot correction. 2P geometry still uses
-RIPlib's inclusive/clamped representation. Independent offscreen storage
-remains absent, including the FONTS/SPECLEFX fidelity gap documented in D-42.
-Active redefinition is fixed for stored geometry, not for those larger models.
+FRONTIER: 2P still clamps/sorts geometry to the shared framebuffer and uses
+inclusive/ceiling-scaled stored rectangles. D-43 native fixtures prove
+exclusive, floor-scaled, potentially off-display rectangles. Independent
+offscreen storage remains absent: FONTS needs 371,200 bytes and SPECLEFX
+1,201,824 bytes at 8 bpp. Driver pixel accounting is not a portable byte
+budget. Other resource-table backing stores and complete reset side effects
+remain separate fidelity boundaries.
 
 NEXT:
 
-1. [/verify] Trace explicit 2Y style selection and style lifetime alongside
-   2P/2s; derive which attributes belong to style slots versus port cursors.
-2. [/debug] Correct the proven style-selection semantics without changing
-   wire syntax; retain source-level rebuild requirements explicitly if needed.
-3. [/verify] Apply D-43's definition fixtures to a geometry/storage design,
-   including empty/reversed/outside rectangles and bounded allocation failure.
-   FONTS needs 371,200 bytes and SPECLEFX 1,201,824 bytes at 8 bpp; driver
-   pixel accounting is not a portable byte budget.
+1. [/debug] Apply D-43 definition fixtures to exact shared-port geometry,
+   preserving existing wire widths and established short-form tolerances.
+2. [/verify] Carry rectangles through clipping/copy paths with empty,
+   reversed and off-display cases; keep native geometry distinct from
+   framebuffer safety and full-scene pixel claims.
+3. [/decide] Derive bounded optional offscreen allocation from native
+   lifetime/failure evidence and the embedded RAM budget, then implement
+   and validate the FONTS/SPECLEFX path.
 
-COMPOUND: D-44 in spec/12-dll-provenance.md; register 14.3.13;
-scripts/dll-port-redefine-fixtures.py and tests/fixtures/port_redefine.json;
-updated active-definition and audit documentation.
-356 parser, 43 drawing, 22 instrument tests; all six CTest groups pass
-with Windows GCC/MSVC and Linux Clang ASan/UBSan. All 70 claims,
-nine coverage floors, static analysis and RP2350 build pass. Another
-100,000 seeded sanitizer mutations pass. All 35 corpus metrics, requests,
-regions and passive host silence match D-43.
+COMPOUND: D-45 in spec/12-dll-provenance.md and register 14.3.13;
+scripts/dll-style-fixtures.py, style_slots.json and generated C cases.
+359 parser, 43 drawing, 23 instrument tests; all six CTest groups,
+Windows GCC/MSVC and Linux Clang ASan/UBSan, 100,000 seeded mutations,
+nine coverage floors, static analysis and RP2350 build pass. All 70
+claims hold; conformance reports zero defects. All 35 corpus summaries,
+requests, regions and passive host silence match D-44. Two new runtime
+regressions fail before correction and pass afterward.
 
 PROMPTS:
 
-- "Verify explicit style selection and port switching from D-44, then fix the confirmed mismatch."
-- "Use D-43 and D-44 to design compatible port geometry and bounded offscreen storage."
+- "Use D-43 through D-45 to fix shared-port geometry without changing syntax."
+- "Derive and validate bounded offscreen storage for FONTS and SPECLEFX."
 
-Reconcile: git status/log, fresh CTest, dll-conformance.py,
-dll-validate-claims.py and dll-port-redefine-fixtures.py <DLL> --check.
-The raster/port/lifetime oracles also verify the shared emulator change.
+Reconcile git status/log, fresh CTest, dll-conformance.py,
+dll-validate-claims.py and dll-style-fixtures.py <DLL> --check.
 Driver: C:/RIPtel/RIPSCRIP.DLL, MD5 bade8b1f4e467ac7ad4edb2639738d4c.
-PR #5 uses codex/remaining-protocol-compatibility. No merge/tag/release implied.
+Reference revision: 2fb17724b6122a5ad5cd1df38b69b8cce3a7079f.
+PR #5: codex/remaining-protocol-compatibility. No merge/tag/release implied.

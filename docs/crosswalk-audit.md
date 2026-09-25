@@ -435,3 +435,30 @@ new fixture predicates.
 All 356 parser, 43 drawing and 22 instrument tests pass, along with sanitizer
 tests, 100,000 mutations, coverage floors, static analysis, the RP2350 build,
 70 claims and conformance. All 35 corpus metrics remain unchanged from D-43.
+
+
+## Independent style correction (D-45)
+
+`2Y` now saves and restores 36 graphics styles independently of ports.
+Port creation, deletion and selection retain the selected style while
+restoring the port cursor/viewport. Slot zero cannot be protected. Unused
+styles begin with defaults, matching actual styleSwitch execution rather
+than the reference's historical copy-current-style prose. Wire syntax is
+unchanged; the expanded session structure requires consumers to rebuild.
+
+A new oracle executes 128 selection/protection cases and three sequences
+through native style-reset primitives. It checks default initialization,
+flag ordering, ROP and pen arguments, unchanged port state and unchanged
+style state across port switches. Brush realization, palette lookup and GDI
+are modeled; neither complete reset nor font/pixel equivalence is implied.
+The portable table preserves existing font and custom-pattern behavior;
+reset-windows retains protected slots and disconnect clears all styles.
+
+Two new regressions fail before the fix. Tests now cover all generated
+cases, independent cursor/style lifetime, custom fill pixels, font fields,
+protection, resets, malformed input and slot 35. Seven mutation classes
+check the oracle predicates. All 359 parser, 43 drawing and 23 instrument
+tests pass; compiler/sanitizer, fuzz, coverage, analyzer, ARM, conformance
+and 70-claim checks pass. All 35 corpus summaries remain unchanged from D-44.
+The next binding constraints are exact 2P geometry and independent offscreen
+storage; the FONTS/SPECLEFX gap is still open.

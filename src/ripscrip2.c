@@ -28,8 +28,8 @@
  *   The driver supports shared-screen and offscreen ports; RIPlib runs
  *   against a single shared framebuffer with no off-screen surfaces.
  *   The port system instead:
- *     - Stores per-port drawing state (clip region, color, fill, etc.)
- *     - Saves/restores that state on port switch
+ *     - Stores per-port cursor and viewport state
+ *     - Saves/restores that state without changing the graphics style
  *     - Applies the new port's viewport as the hardware clip rectangle
  *       via draw_set_clip()
  *     - draw_copy_rect() implements port-to-port pixel copy within the
@@ -42,6 +42,7 @@
 #include "ripscrip2.h"
 #include "riplib_platform.h"
 #include "drawing.h"
+#include "bgi_font.h"
 #include "rip_meganum.h"
 #include "rip_clipboard.h"
 #include <stdlib.h>
@@ -259,8 +260,8 @@ void ripscrip2_init(ripscrip2_state_t *s) {
 /*
  * port_save_state -- snapshot rip_state_t drawing fields into ports[idx].
  *
- * Called before switching away from the active port so its drawing
- * state is preserved for when it becomes active again.
+ * Saves the per-port cursor and legacy diagnostic style mirrors. Only the
+ * cursor is restored on activation; styles are selected separately by |2Y.
  *
  * The viewport rect (vp_x0/y0/x1/y1) is authoritative in rip_port_t
  * and is NOT copied back from rip_state_t -- all viewport-setting
@@ -303,24 +304,6 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
 
     rs->draw_x       = p->draw_x;
     rs->draw_y       = p->draw_y;
-    rs->draw_color   = p->draw_color;
-    rs->fill_color   = p->fill_color;
-    rs->fill_pattern = p->fill_pattern;
-    rs->back_color   = p->back_color;
-    rs->write_mode   = p->write_mode;
-    rs->line_style   = p->line_style;
-    rs->line_pattern = p->line_pattern;
-    rs->line_thick   = p->line_thick;
-    rs->font_id      = p->font_id;
-    rs->font_size    = p->font_size;
-    rs->font_dir     = p->font_dir;
-    rs->font_hjust   = p->font_hjust;
-    rs->font_vjust   = p->font_vjust;
-    rs->font_attrib  = p->font_attrib;
-    rs->font_ext_id   = p->font_ext_id;
-    rs->font_ext_attr = p->font_ext_attr;
-    rs->font_ext_size = p->font_ext_size;
-
     /* Sync rip_state_t viewport from port */
     rs->vp_x0 = p->vp_x0;
     rs->vp_y0 = p->vp_y0;
@@ -330,14 +313,98 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
     /* Apply viewport as hardware clip rectangle */
     draw_set_clip(p->vp_x0, p->vp_y0, p->vp_x1, p->vp_y1);
 
-    /* Sync draw layer state */
-    draw_set_color(rs->palette[p->draw_color & 0x0F]);
-    draw_set_write_mode(p->write_mode);
-    draw_set_pos(p->draw_x, p->draw_y);
-    draw_set_line_style(p->line_pattern, p->line_thick);
-    card_pat = bgi_fill_to_card(p->fill_pattern);
+    /* Legacy diagnostic mirrors are snapshots, not independent styles. */
+    port_save_state(rs, idx);
+    draw_set_color(rs->palette[rs->draw_color & 0x0F]);
+    draw_set_write_mode(rs->write_mode);
+    draw_set_pos(rs->draw_x, rs->draw_y);
+    draw_set_line_style(rs->line_pattern, rs->line_thick);
+    card_pat = bgi_fill_to_card(rs->fill_pattern);
     draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
-                        rs->palette[p->back_color & 0x0F]);
+                        rs->palette[rs->back_color & 0x0F]);
+}
+
+/* D-45: the DLL's style manager is separate from its port manager. */
+static void style_save(rip_state_t *rs) {
+    rip_graphics_style_t *p = &rs->styles[rs->rip2_state.cur_style_slot];
+    p->initialized = true;
+    p->draw_color = rs->draw_color;
+    p->back_color = rs->back_color;
+    p->write_mode = rs->write_mode;
+    p->line_off_draw = rs->line_off_draw;
+    p->line_style = rs->line_style;
+    p->line_thick = rs->line_thick;
+    p->line_pattern = rs->line_pattern;
+    p->fill_pattern = rs->fill_pattern;
+    p->fill_color = rs->fill_color;
+    p->font_id = rs->font_id;
+    p->font_dir = rs->font_dir;
+    p->font_size = rs->font_size;
+    p->font_hjust = rs->font_hjust;
+    p->font_vjust = rs->font_vjust;
+    p->font_attrib = rs->font_attrib;
+    p->font_ext_id = rs->font_ext_id;
+    p->font_ext_attr = rs->font_ext_attr;
+    p->font_ext_size = rs->font_ext_size;
+    p->char_spacing = rs->char_spacing;
+    p->filled_borders_enabled = rs->filled_borders_enabled;
+    memcpy(p->user_fill_pattern, rs->user_fill_pattern, 8);
+}
+
+static void style_switch(rip_state_t *rs, uint8_t slot) {
+    style_save(rs);
+    rip_graphics_style_t *p = &rs->styles[slot];
+    if (!p->initialized) {
+        memset(p, 0, sizeof(*p));
+        p->initialized = true;
+        p->draw_color = p->fill_color = 15;
+        p->fill_pattern = p->line_thick = p->font_size = 1;
+        p->line_pattern = 0xFFFF;
+        p->filled_borders_enabled = true;
+        memset(p->user_fill_pattern, 0xFF, 8);
+    }
+    rs->draw_color = p->draw_color;
+    rs->back_color = p->back_color;
+    rs->write_mode = p->write_mode;
+    rs->line_off_draw = p->line_off_draw;
+    rs->line_style = p->line_style;
+    rs->line_thick = p->line_thick;
+    rs->line_pattern = p->line_pattern;
+    rs->fill_pattern = p->fill_pattern;
+    rs->fill_color = p->fill_color;
+    rs->font_id = p->font_id;
+    rs->font_dir = p->font_dir;
+    rs->font_size = p->font_size;
+    rs->font_hjust = p->font_hjust;
+    rs->font_vjust = p->font_vjust;
+    rs->font_attrib = p->font_attrib;
+    rs->font_ext_id = p->font_ext_id;
+    rs->font_ext_attr = p->font_ext_attr;
+    rs->font_ext_size = p->font_ext_size;
+    rs->char_spacing = p->char_spacing;
+    rs->filled_borders_enabled = p->filled_borders_enabled;
+    memcpy(rs->user_fill_pattern, p->user_fill_pattern, 8);
+    rs->rip2_state.cur_style_slot = slot;
+    draw_set_color(rs->palette[rs->draw_color & 15]);
+    draw_set_write_mode(rs->write_mode);
+    draw_set_line_style(rs->line_pattern, rs->line_thick);
+    int8_t pat = bgi_fill_to_card(rs->fill_pattern);
+    draw_set_fill_style(pat >= 0 ? (uint8_t)pat : 0, rs->palette[rs->back_color & 15]);
+    draw_set_user_fill_pattern(rs->user_fill_pattern);
+    bgi_font_set_char_spacing(rs->char_spacing ? rs->char_spacing : 100);
+}
+
+/* Called before reset-windows overwrites the active drawing fields. */
+void rip_style_reset_windows(rip_state_t *rs) {
+    /* ResetAllWindows writes the active border flag before deleting slots,
+     * including when the current slot is protected (RVA 0x1626A..0x16277). */
+    rs->filled_borders_enabled = true;
+    style_save(rs);
+    for (unsigned i = 0; i < RIP_MAX_PORTS; ++i)
+        if (!(rs->rip2_state.protected_style & (UINT64_C(1) << i)))
+            memset(&rs->styles[i], 0, sizeof(rs->styles[i]));
+    /* The caller installs defaults; saving again would resurrect old state. */
+    rs->rip2_state.cur_style_slot = 0;
 }
 
 /*
@@ -739,49 +806,16 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *   1 = protect dest, 2 = unprotect dest
      *   4 = protect src,  8 = unprotect src
      */
-    /* ── Resource-slot switching: !|2A !|2B !|2E !|2T !|2Y ──────────
-     *
-     * All five share the signature slot:1 flags:2.  The driver validates the
-     * slot ("Invalid palette slot number", "Illegal button style slot
-     * number", "Illegal environment slot number", "Illegal text window slot
-     * number") and switches a backing table.  RIPlib keeps one of each
-     * resource, so it validates identically and records the selection rather
-     * than pretending to swap a store it does not have.  Added 2026-08-12;
-     * see docs/spec §12.12 for the parity caveat. */
+    /* Resource selectors share slot:1 flags:2. Graphics styles have real
+     * independent storage (D-45); other resource families retain their
+     * existing selection/protection metadata and documented storage limits. */
     case RIP2_CMD_SWITCH_PALETTE:
     case RIP2_CMD_SWITCH_BUTTON_STYLE:
     case RIP2_CMD_SWITCH_ENVIRONMENT:
     case RIP2_CMD_SWITCH_TEXT_WINDOW:
     case RIP2_CMD_SWITCH_STYLE: {
-        /* Slots 111, 112, 114, 119 and 121 all record  mega1, mega2  -- three
-         * characters.  The gate was one character, so a truncated command was
-         * acted on where the driver rejects it; the corpus sends three
-         * ("!|2s000", "!|2s100").  Same defect class as '|1g' and '|1i' in
-         * D-14/D-16.  See D-17.
-         *
-         * THE SECOND FIELD IS NOT RESERVED.  This comment used to call it a
-         * "reserved pair", and 14.3.6 used to call slot protection inert on
-         * the strength of that.  Disassembly on 2026-08-14 showed the driver
-         * acting on four of its bits -- from slot 111:
-         *
-         *     test esi,4 -> paletteSlotProtect(inst,-1,1)   before switch
-         *     test esi,8 -> paletteSlotProtect(inst,-1,0)   before switch
-         *                   (the switch itself)
-         *     test esi,1 -> paletteSlotProtect(inst,-1,1)   after switch
-         *     test esi,2 -> paletteSlotProtect(inst,-1,0)   after switch
-         *
-         * so bits 2/3 protect and unprotect the slot being LEFT and bits 0/1
-         * the slot being ENTERED.  Each family has its own protector
-         * (styleSlotProtect, textWindowSlotProtect, environmentProtect,
-         * colorTableProtect, and 0x100454C4 for button styles).
-         *
-         * RIPlib honours these bits for '|2s' and ports only.  For the other
-         * five families the flags are still ignored, which means RIPlib
-         * completes writes the driver would refuse -- the tolerable
-         * direction under 14.6, but a real divergence.  Implementing it
-         * needs a protected flag per slot per family plus checks at the 24
-         * write sites the driver guards; that is a feature, not a patch, and
-         * it is recorded in 14.3.6 rather than half-done here. */
+        /* Preserve the three-character gate and source-before-destination
+         * protection ordering. Protect precedes unprotect for either side. */
         if (raw_len < 3)
             break;
         uint8_t slot = (uint8_t)mega1(raw + 0);
@@ -809,10 +843,11 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 uint8_t  fl   = (uint8_t)mega2l(raw + 1);
                 uint64_t from = (uint64_t)1u << *cur;
                 uint64_t to   = (uint64_t)1u << slot;
-                if (fl & 0x04) *mask |=  from;   /* protect the slot being left  */
+                if ((fl & 0x04) && (cmd != RIP2_CMD_SWITCH_STYLE || *cur != 0)) *mask |= from;   /* protect the slot being left  */
                 if (fl & 0x08) *mask &= ~from;   /* unprotect it                 */
-                *cur = slot;                      /* the switch itself            */
-                if (fl & 0x01) *mask |=  to;     /* protect the slot entered     */
+                if (cmd == RIP2_CMD_SWITCH_STYLE) style_switch(rs, slot);
+                else *cur = slot;
+                if ((fl & 0x01) && (cmd != RIP2_CMD_SWITCH_STYLE || slot != 0)) *mask |= to;     /* protect the slot entered     */
                 if (fl & 0x02) *mask &= ~to;     /* unprotect it                 */
             }
             break;

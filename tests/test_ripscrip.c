@@ -17,6 +17,7 @@
 #include "fixtures/gdi_raster.h"
 #include "fixtures/port_copy.h"
 #include "fixtures/port_lifecycle.h"
+#include "fixtures/style_slots.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -589,18 +590,21 @@ static void test_port_text_justification_roundtrip(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("port switch preserves text justification");
+    TEST("style switch preserves text justification across ports");
     init_fixture(&s, &ctx);
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
                       "100", 3, NULL, 0);
+    feed_script(&s, &ctx, "!|2Y100|");
     s.font_hjust = 2;
     s.font_vjust = 3;
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
                       "000", 3, NULL, 0);
+    feed_script(&s, &ctx, "!|2Y000|");
     s.font_hjust = 0;
     s.font_vjust = 0;
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
                       "100", 3, NULL, 0);
+    feed_script(&s, &ctx, "!|2Y100|");
     if (s.font_hjust == 2 && s.font_vjust == 3)
         PASS();
     else
@@ -1621,6 +1625,103 @@ static void test_l1_audio_off_sentinel(void) {
         FAIL("1w treated $OFF$ as a filename");
 }
 
+static void test_style_driver_matrix(void) {
+    rip_state_t s; comp_context_t ctx;
+    const char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    TEST("128 native style selection/protection cases survive port switches");
+    init_fixture(&s, &ctx);
+    for (size_t i = 0; i < sizeof(style_cases)/sizeof(style_cases[0]); ++i) {
+        char select[] = "!|2Y000|";
+        rip_session_reset(&s);
+        feed_script(&s, &ctx, "!|c02|k03|W01|S0104|2Y700|c05|k06|W02|S0109|"
+                              "2YZ00|c0A|k0B|W03|S010C|");
+        select[4] = digits[style_cases[i].active];
+        feed_script(&s, &ctx, select);
+        select[4] = digits[style_cases[i].dest];
+        select[6] = digits[style_cases[i].flags];
+        feed_script(&s, &ctx, select);
+        feed_script(&s, &ctx, "!|2s100|2s000|");
+        if (s.rip2_state.cur_style_slot != style_cases[i].dest ||
+            s.rip2_state.protected_style != style_cases[i].protected_mask ||
+            s.draw_color != style_cases[i].color || s.back_color != style_cases[i].back ||
+            s.write_mode != style_cases[i].mode || s.fill_color != style_cases[i].fill) {
+            printf("case %zu: ", i); FAIL("native style contract differs"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_style_port_independence(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("styles preserve port position and port changes preserve styles");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c05|W01|m0A0E|2Y100|");
+    if (s.draw_x != 10 || s.draw_y != 16 || s.draw_color != 15 || s.write_mode != 0) {
+        FAIL("new style did not default independently of cursor"); return;
+    }
+    feed_script(&s, &ctx, "!|c03|2P100000A0A00020000|");
+    if (s.draw_color != 3 || s.draw_x != 0 || s.draw_y != 0) {
+        FAIL("port activation changed style or inherited cursor"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y000|2s000|");
+    if (s.draw_color != 5 || s.write_mode != 1 || s.draw_x != 10 || s.draw_y != 16) {
+        FAIL("independent style/cursor restoration failed"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y100|2Y101|c09|2s100|2p1100|");
+    if (s.draw_color != 3 || s.rip2_state.cur_style_slot != 1) {
+        FAIL("protection or port recreation lost selected style"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y001|c07|");
+    if (s.draw_color != 7 || (s.rip2_state.protected_style & 1)) {
+        FAIL("style zero incorrectly protected"); return;
+    }
+    PASS();
+}
+
+static void test_style_attributes_and_reset(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("style snapshots restore patterns/fonts and reset honors protection");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2Y100|c05|k03|s737373737373737309|=041BEO03|N00|");
+    s.font_id = 3; s.font_size = 4; s.font_dir = 1;
+    s.font_hjust = 2; s.font_vjust = 3; s.font_attrib = 5;
+    s.font_ext_id = 6; s.font_ext_attr = 7; s.font_ext_size = 1234;
+    s.char_spacing = 150;
+    feed_script(&s, &ctx, "!|2Y200|c0C|k04|s000000000000000002|2Y100|");
+    if (s.draw_color != 5 || s.back_color != 3 || s.fill_color != 9 || s.fill_pattern != 12 ||
+        s.line_pattern != 0x000F || s.line_thick != 3 || s.filled_borders_enabled ||
+        s.font_id != 3 || s.font_size != 4 || s.font_dir != 1 || s.font_hjust != 2 ||
+        s.font_vjust != 3 || s.font_attrib != 5 || s.font_ext_id != 6 ||
+        s.font_ext_attr != 7 || s.font_ext_size != 1234 || s.char_spacing != 150) {
+        FAIL("style attributes failed to round-trip"); return;
+    }
+    /* A restored all-on user pattern must not retain slot 2's all-off bits. */
+    feed_script(&s, &ctx, "!|B00000707|");
+    if (draw_get_pixel(2, 2) != s.palette[9]) {
+        FAIL("restored custom fill was not applied to the renderer"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y101|*|2Y200|");
+    if (s.draw_color != 15 || s.font_size != 1 || s.char_spacing != 0) {
+        FAIL("reset resurrected an unprotected style"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y100|");
+    if (s.draw_color != 5 || s.font_ext_size != 1234 || s.char_spacing != 150 ||
+        !s.filled_borders_enabled || !(s.rip2_state.protected_style & 2)) {
+        FAIL("reset lost a protected style"); return;
+    }
+    rip_session_reset(&s);
+    feed_script(&s, &ctx, "!|2Y100|");
+    if (s.draw_color != 15 || s.rip2_state.protected_style || s.char_spacing ||
+        s.font_ext_size || s.user_fill_pattern[0] != 255) {
+        FAIL("disconnect retained old styles"); return;
+    }
+    feed_script(&s, &ctx, "!|c06|2Y20|J1S|2Ya00|");
+    if (s.draw_color != 6 || s.rip2_state.cur_style_slot != 1) {
+        FAIL("truncated or out-of-range style changed selection"); return;
+    }
+    PASS();
+}
+
 static void test_slot_protection_round_trip(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -2463,7 +2564,7 @@ static void test_port_switch_preserves_color_and_pos(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("port switch saves/restores color, position, line style, fill");
+    TEST("port switch restores position and keeps selected style");
     init_fixture(&s, &ctx);
     /* Define port 1.  Set state on port 0 first. */
     s.draw_color = 7;
@@ -2477,9 +2578,9 @@ static void test_port_switch_preserves_color_and_pos(void) {
     /* Mutate state inside port 1. */
     s.draw_color = 2;
     s.draw_x = 30;
-    /* Switch back to port 0 — state should be restored. */
+    /* Restore port 0 position while retaining the current graphics style. */
     feed_script(&s, &ctx, "!|2s000|");
-    if (s.draw_color == 7 &&
+    if (s.draw_color == 2 &&
         s.fill_color == 11 &&
         s.draw_x == 100 &&
         s.draw_y == 80 &&
@@ -3174,11 +3275,11 @@ static void test_port_lifecycle_driver_states(void) {
 
 static void test_port_delete_all_query_and_destination_state(void) {
     rip_state_t s; comp_context_t ctx;
-    TEST("delete-all clears removed queries and restores protected destination state");
+    TEST("delete-all clears removed queries and preserves selected style");
     init_fixture(&s, &ctx);
     feed_script(&s, &ctx, "!|2s100|1\x1b" "3100one|2s200|1\x1b" "3200two|c05|"
                           "2s201|2s300|1\x1b" "3300three|c07|2p0200|");
-    if (s.active_port != 2 || s.draw_color != 5 || s.ports[1].allocated || s.ports[3].allocated ||
+    if (s.active_port != 2 || s.draw_color != 7 || s.ports[1].allocated || s.ports[3].allocated ||
         !s.ports[0].allocated || !s.ports[2].allocated ||
         rip_trigger_query(&s, 3, 1) || rip_trigger_query(&s, 3, 3) ||
         !rip_trigger_query(&s, 3, 2) || tx_len != 3 || memcmp(tx_capture, "two", 3)) {
@@ -3186,7 +3287,7 @@ static void test_port_delete_all_query_and_destination_state(void) {
     }
     /* Deleting and selecting the same slot must recreate a fresh full-screen port. */
     feed_script(&s, &ctx, "!|2s202|2p2200|");
-    if (s.active_port != 2 || !s.ports[2].allocated || s.draw_color != 15 ||
+    if (s.active_port != 2 || !s.ports[2].allocated || s.draw_color != 7 ||
         s.vp_x0 != 0 || s.vp_y0 != 0 || s.vp_x1 != 639 || s.vp_y1 != 399 ||
         rip_trigger_query(&s, 3, 2)) {
         FAIL("same-slot destination did not recreate a clean default port"); return;
@@ -3528,14 +3629,14 @@ static void test_port_switch_restores_custom_line_pattern(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("port restore keeps custom line pattern");
+    TEST("style restore keeps custom line pattern across ports");
     init_fixture(&s, &ctx);
     feed_script(&s, &ctx, "!|c0F|");
     feed_script(&s, &ctx, "!|=041BEO01|"); /* user_pat 0xF000: first 4 pixels on */
     feed_script(&s, &ctx, "!|2P1000A140U00|");
     feed_script(&s, &ctx, "!|2s100|");
-    feed_script(&s, &ctx, "!|=01000001|"); /* unrelated temporary port style */
-    feed_script(&s, &ctx, "!|2s000|");
+    feed_script(&s, &ctx, "!|2Y100|=01000001|"); /* separate graphics style */
+    feed_script(&s, &ctx, "!|2s000|2Y000|");
     feed_script(&s, &ctx, "!|L0A0A140A|");
 
     if (draw_get_pixel(10, 11) != 0 &&
@@ -7227,6 +7328,9 @@ int main(void) {
     test_l1_audio_pushes_marker();
     test_l1_audio_off_sentinel();
     test_slot_protection_round_trip();
+    test_style_driver_matrix();
+    test_style_port_independence();
+    test_style_attributes_and_reset();
     test_query_prefix_is_four();
     test_query_unknown_variable_is_silent();
     test_zero_viewport_suppresses_drawing();

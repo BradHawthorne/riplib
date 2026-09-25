@@ -291,9 +291,8 @@ typedef struct {
  *
  * The driver has 36 port slots, with shared-screen or offscreen storage.
  * RIPlib runs against a single shared framebuffer, so per-port pixel
- * data is not maintained — instead each port stores its drawing state
- * (clip region, color, line style, etc.) and that state is saved on
- * switch-away and restored on switch-in.  All drawing targets the
+ * data is not maintained. Ports store the cursor and viewport; graphics
+ * styles are selected independently by |2Y (D-45).  All drawing targets the
  * single framebuffer; the active port's viewport becomes the clip
  * rectangle.
  * D-42 corrects port-copy coordinates/extents for the stored viewports;
@@ -335,7 +334,8 @@ typedef struct {
     /* Coordinate origin offset (v2.0 world-space translation; 0,0 normally) */
     int16_t  origin_x, origin_y;
 
-    /* Saved drawing state — written on switch-away, loaded on switch-in */
+    /* Cursor is saved/restored. Style fields below are legacy diagnostic
+     * snapshots only; they do not select or restore graphics styles. */
     int16_t  draw_x, draw_y;     /* Per-port current drawing position */
     uint8_t  draw_color;
     uint8_t  fill_color;
@@ -392,6 +392,20 @@ typedef struct {
  *  explicit getter/setter to ripscrip.h and document it as part
  *  of the public API.
  * ───────────────────────────────────────────────────────────────── */
+
+/* Independent graphics-style snapshots selected by |2Y (D-45). */
+typedef struct {
+    bool initialized;
+    uint8_t draw_color, back_color, write_mode;
+    uint8_t line_off_draw, line_style, line_thick;
+    uint16_t line_pattern;
+    uint8_t fill_pattern, fill_color, user_fill_pattern[8];
+    uint8_t font_id, font_dir, font_size, font_hjust, font_vjust, font_attrib;
+    uint8_t font_ext_id, font_ext_attr;
+    uint32_t font_ext_size;
+    uint16_t char_spacing;
+    bool filled_borders_enabled;
+} rip_graphics_style_t;
 
 /* RIPscrip parser state */
 struct rip_state_s {
@@ -714,9 +728,11 @@ struct rip_state_s {
      * Port 0 is always allocated (full-screen, permanent).
      * Ports 1-35 are created on demand by !|2P and destroyed by !|2p.
      * active_port tracks the current drawing port (0-35).
-     * On switch: active port's drawing fields are snapshotted into
-     * ports[active_port], then new port's fields are loaded back into
-     * the rip_state_t drawing fields and its viewport clip is applied. */
+     * Switching restores the target cursor and applies its viewport.
+     * The selected graphics style is unaffected. */
+    /* Active style fields above are authoritative until saved on switching. */
+    rip_graphics_style_t styles[RIP_MAX_PORTS];
+    uint8_t user_fill_pattern[8];
     rip_port_t ports[RIP_MAX_PORTS];
     uint8_t    active_port;           /* Index of current active port (0-35) */
 

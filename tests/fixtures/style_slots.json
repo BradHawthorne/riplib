@@ -1,0 +1,4409 @@
+{
+  "driver_md5": "bade8b1f4e467ac7ad4edb2639738d4c",
+  "cases": [
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 0,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 1,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 2,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 3,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 4,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 5,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          },
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 6,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 7,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          },
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 8,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 9,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 10,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 11,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 12,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 13,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          },
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 14,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 0,
+      "flags": 15,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          },
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 0,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 1,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 2,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 3,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 4,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 5,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 6,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 7,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 8,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 9,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 10,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 11,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 12,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 13,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 14,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 7,
+      "flags": 15,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 0,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 1,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 256,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 2,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 3,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 4,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 5,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 256,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 6,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 7,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 8,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 9,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 256,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 10,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 11,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 12,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 13,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 256,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 14,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 8,
+      "flags": 15,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 0,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 1,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738368,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 2,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 3,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 4,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 5,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738368,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 6,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 7,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 8,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 9,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738368,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 10,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 11,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 12,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 13,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738368,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 14,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 0,
+      "dest": 35,
+      "flags": 15,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 0,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 1,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 2,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 3,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 4,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 5,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 128,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 6,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 7,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 128,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 8,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 9,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 10,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 11,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 12,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 13,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 14,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 0,
+      "flags": 15,
+      "result": {
+        "selected": 0,
+        "values": [
+          2,
+          3,
+          1,
+          4
+        ],
+        "protected": 0,
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              7
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 0,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 1,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 2,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 3,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 4,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 5,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 6,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 7,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 8,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 9,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 10,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 11,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 12,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 13,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 14,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 7,
+      "flags": 15,
+      "result": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 0,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 1,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 256,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 2,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 3,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 4,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 5,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 384,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 6,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 7,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 8,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 9,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 256,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 10,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 11,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 12,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 13,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 256,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 14,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 8,
+      "flags": 15,
+      "result": {
+        "selected": 8,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 0,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 1,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738368,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 2,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 3,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 4,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 5,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738496,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 6,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 7,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 8,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 9,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738368,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 10,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 11,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 12,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 13,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 34359738368,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 14,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "dest": 35,
+      "flags": 15,
+      "result": {
+        "selected": 35,
+        "values": [
+          10,
+          11,
+          3,
+          12
+        ],
+        "protected": 0,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              9
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              10
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "resets": [
+    {
+      "active": 0,
+      "selected_after_reset": 0,
+      "zero": {
+        "selected": 0,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      },
+      "protected": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      },
+      "unprotected": {
+        "selected": 35,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 7,
+      "selected_after_reset": 0,
+      "zero": {
+        "selected": 0,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      },
+      "protected": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      },
+      "unprotected": {
+        "selected": 35,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "active": 35,
+      "selected_after_reset": 0,
+      "zero": {
+        "selected": 0,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      },
+      "protected": {
+        "selected": 7,
+        "values": [
+          5,
+          6,
+          2,
+          9
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              15
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              5
+            ]
+          }
+        ]
+      },
+      "unprotected": {
+        "selected": 35,
+        "values": [
+          15,
+          0,
+          0,
+          15
+        ],
+        "protected": 128,
+        "errors": [],
+        "drawing": [
+          {
+            "SetROP2": [
+              101,
+              13
+            ]
+          },
+          {
+            "CreatePen": [
+              0,
+              1,
+              15
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

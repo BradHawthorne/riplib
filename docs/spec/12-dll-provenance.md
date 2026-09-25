@@ -1,9 +1,81 @@
-CURRENT CORRECTION (2026-09-24, D-34..44): historical claims below
+CURRENT CORRECTION (2026-09-25, D-34..45): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
 are now implemented. D-40 supersedes the source-icon clipboard limitation
 in D-38/39. See ../crosswalk-audit.md for current boundaries.
+
+D-45 INDEPENDENT GRAPHICS STYLE SELECTION (2026-09-25).
+
+     The pinned DLL's 2Y handler (46E41) calls styleSlotProtect (390E4)
+     before and after styleSwitch (394FE). The style manager is RIPINST+0A,
+     with 36 entries of 0x61 bytes, separate from the port manager at +22.
+     Style entry byte +21 bit 0 is protection and bit 1 is initialized.
+     Slot zero cannot be protected. Source protect/unprotect precedes the
+     switch; destination protect/unprotect follows it, so unprotect wins
+     when both bits for one side are present. Same-slot commands follow
+     the same order. Existing style data survives selection and port switches.
+
+     Unused destinations are initialized by copying the default record at
+     RVA 762E8, then setting the initialized bit. They do NOT inherit the
+     previous style. This conflicts with the historical prose in bbs-land
+     7.1-data-tables.md at reference commit
+     2fb17724b6122a5ad5cd1df38b69b8cce3a7079f; that page also describes a
+     one-digit reserved field. The DLL dispatch and executable handler win:
+     slot:1 flags:2, unchanged from RIPlib's existing three-character gate.
+
+     scripts/dll-style-fixtures.py executes 128 decoded cases: active style
+     0/7, destination 0/7/8/35, flags 0..15. Styles 0/7/35 have distinct
+     colors and ROPs, while 8 is unused. It checks selected foreground,
+     background, fill color, mode, protection mask, slot-zero diagnostics,
+     CreatePen arguments and SetROP2. It also asserts that selection leaves
+     all port-entry bytes (including nonzero cursors) untouched and that
+     switching ports leaves all style bytes and the selected style unchanged.
+     Native lock counters must balance. JSON and a generated C fixture
+     contain metadata and calls, not proprietary executable bytes.
+
+     Three more sequences execute styleSlotDelete(-2) (391FD) followed by
+     styleSwitch(0), the exact style primitives called by ResetAllWindows
+     at 163F8..16406. They preserve protected slot 7, reset unprotected 35,
+     and select default slot zero. The surrounding whole reset is not run.
+     Disassembly at 1626A..16277 separately proves that reset first enables
+     the active style's border, including when that style is protected.
+
+     RIPlib now stores 36 independent style snapshots. |2Y restores colors,
+     write mode, line/fill patterns, custom fill rows, font attributes and
+     spacing, and filled-object borders. Ports restore only cursor and
+     viewport. Existing public port style fields remain diagnostic mirrors,
+     never a source for restoring a style. First-use slots get portable
+     defaults. Reset-windows resets unprotected styles and selects zero;
+     disconnect clears styles and protection. Reactivation reapplies the
+     session's custom fill rows and spacing. No wire keys, widths, aliases
+     or tolerances change. The session layout grows: GCC measures each style
+     at 36 bytes (1,296-byte table plus 8 active custom-pattern bytes), with
+     no new heap allocation. Consumers must rebuild matching headers/library.
+
+     Two runtime regressions fail against the pre-fix working tree and pass
+     after correction. The generated matrix compares all 128 cases using
+     real wire commands, including slot 35. An additional regression covers
+     complete portable attributes, visible custom-fill restoration, soft
+     reset/protection, disconnect, truncation and base-64 out-of-range input.
+     Older port tests now check independent cursor/style behavior or use
+     explicit style selection to restore attributes. Instrument tests reject
+     seven fixture mutation classes; removing the native style-switch ROP
+     call at 39578 is detected. Directed fuzz seeds reach style swaps,
+     protection, reset and invalid selectors.
+
+     Scope: decoded arguments, inactive focus, modeled brush realization,
+     identity palette lookup, GDI and memory services. The native ROP and
+     pen setup execute; no live style/font pixel parity is claimed. Font
+     field round-trips are authored portable tests. Complete reset side
+     effects and other resource-table storage remain separate boundaries.
+
+     Validation: 359 parser, 43 drawing and 23 instrument tests; all six
+     CTest groups, Windows GCC/MSVC, Linux Clang ASan/UBSan, 100,000 seeded
+     mutations, nine coverage floors, GCC analyzer and RP2350 archive.
+     Conformance has zero defects; all 70 standing claims hold. All 35
+     corpus summaries match D-44, including requests, regions and passive
+     host silence. D-42's offscreen scene limitations remain unchanged.
 
 D-44 ACTIVE PORT REDEFINITION AND INDEPENDENT STYLES (2026-09-24).
 

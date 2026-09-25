@@ -676,12 +676,17 @@ rather than a slogan.
      viewport, resets drawing position and preserves current style for
      either activation flag value. Protected refusal remains unchanged.
 
-     OPEN: driver graphics styles have a selection independent of drawing
-     ports. The new 16-case oracle keeps style slot 7 selected while changing
-     ports 0/1 and verifies the next line's clip and ROP. RIPlib still saves
-     and loads per-port styles and treats its explicit style selector as
-     metadata. That broader model, 2P extents and offscreen storage remain
-     unresolved; D-44 does not claim complete port or style fidelity.
+     FIXED (D-45): 36 graphics-style slots are independently selected by
+     |2Y. Switching ports restores only cursor/viewport, preserving style.
+     Style zero cannot be protected. Reset-windows clears unprotected
+     styles and selects zero; disconnect clears the whole style table.
+     128 native cases pin selection, defaults, protection order, ROP and
+     pen arguments. Three sequences execute native style-reset primitives.
+     Syntax widths and gates are unchanged; consumers must rebuild for the
+     expanded session struct. Full font/GDI equivalence is not claimed.
+
+     OPEN: 2P geometry, independent offscreen storage, other resource-table
+     storage, and complete reset side effects remain separate boundaries.
 
 14.4  WHAT THIS REGISTER IS FOR
 ---------------------------------------------------------------------

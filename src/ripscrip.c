@@ -171,6 +171,7 @@ static void rip_cache_icn_if_valid(rip_state_t *s, const char *name, int name_le
 /* rip_reset_windows_state is defined non-static below so the extracted
  * rip_variables.c module can reach it from the $RESET$ text variable. */
 void rip_reset_windows_state(rip_state_t *s, comp_context_t *c);
+void rip_style_reset_windows(rip_state_t *s);
 
 /* Library->host TX FIFO helper (implemented by the consumer's
  * platform-stubs translation unit — see examples/platform_stubs.c). */
@@ -1016,6 +1017,7 @@ void rip_init_first(rip_state_t *s) {
     s->fill_pattern = 1; /* solid */
     s->fill_color = 15; /* Default fill_color is white (15), not black — matches DLL rip_defaults */
     s->font_size = 1;
+    memset(s->user_fill_pattern, 0xFF, 8);
     s->tw_x1 = 639;
     s->tw_y1 = 349;
     s->vp_x0 = 0; s->vp_y0 = 0;
@@ -1229,6 +1231,13 @@ void rip_session_reset(rip_state_t *s) {
 
     /* Reset ripscrip2 overflow state. */
     ripscrip2_init(&s->rip2_state);
+
+    memset(s->styles, 0, sizeof(s->styles));
+    memset(s->user_fill_pattern, 0xFF, 8);
+    s->rip2_state.cur_style_slot = 0;
+    s->rip2_state.protected_style = 0;
+    s->line_off_draw = 0;
+    s->char_spacing = 0;
 
     /* Reset parser and drawing defaults for the next session. */
     s->state = RIP_ST_IDLE;
@@ -2161,6 +2170,8 @@ static void apply_session_draw_state(rip_state_t *s) {
 
     draw_set_clip(s->vp_x0, s->vp_y0, s->vp_x1, s->vp_y1);
     draw_set_pos(s->draw_x, s->draw_y);
+    draw_set_user_fill_pattern(s->user_fill_pattern);
+    bgi_font_set_char_spacing(s->char_spacing ? s->char_spacing : 100);
     draw_set_line_style(s->line_pattern, s->line_thick);
     /* The 2nd arg becomes g_fill_color in drawing.c, used by fill_span
      * for the OFF bits of patterned fills.  Per BGI/RIP semantics that
@@ -2224,6 +2235,8 @@ void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
     if (!s)
         return;
 
+    rip_style_reset_windows(s);
+
     /* Windows + viewport -> full defaults */
     s->tw_x0 = 0; s->tw_y0 = 0;
     s->tw_x1 = 639; s->tw_y1 = 349;
@@ -2238,6 +2251,11 @@ void rip_reset_windows_state(rip_state_t *s, comp_context_t *c) {
     s->line_style = 0; s->line_pattern = 0xFFFF; s->line_thick = 1;
     s->fill_pattern = 1; s->fill_color = 15;
     s->back_color = 0;
+    s->font_ext_attr = 0; s->font_ext_size = 0;
+    s->line_off_draw = 0; s->char_spacing = 0;
+    memset(s->user_fill_pattern, 0xFF, 8);
+    draw_set_user_fill_pattern(s->user_fill_pattern);
+    bgi_font_set_char_spacing(100);
     s->font_id = 0; s->font_ext_id = 0;
     s->font_dir = 0; s->font_size = 1;
     s->font_hjust = 0; s->font_vjust = 0;
@@ -4821,6 +4839,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
             uint8_t pat[8];
             for (int i = 0; i < 8; i++)
                 pat[i] = (uint8_t)mega2(p + i * 2);
+            memcpy(s->user_fill_pattern, pat, 8);
             draw_set_user_fill_pattern(pat);
             s->fill_color = mega2(p + 16) & 0x0F;
             s->fill_pattern = 12; /* BGI USER_FILL */

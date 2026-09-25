@@ -34,6 +34,25 @@ def fixture(body):
 
 
 class HandlerCoverageTests(unittest.TestCase):
+    def test_style_instrument_and_mutations(self):
+        spec = importlib.util.spec_from_file_location('styles', ROOT / 'scripts/dll-style-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/style_slots.json').read_text(encoding='utf-8'))
+        module.validate(data)
+        self.assertEqual(module.c_header(data), (ROOT / 'tests/fixtures/style_slots.h').read_text(encoding='utf-8'))
+        for mutation in ('values', 'protection', 'errors', 'rop', 'pen', 'reset', 'duplicate'):
+            broken = copy.deepcopy(data)
+            r = broken['cases'][0]['result']
+            if mutation == 'values': r['values'][0] = 15
+            elif mutation == 'protection': r['protected'] = 1
+            elif mutation == 'errors': r['errors'] = [{'error_code': 30}]
+            elif mutation == 'rop': r['drawing'][0]['SetROP2'][1] = 13
+            elif mutation == 'pen': r['drawing'][1]['CreatePen'][2] = 15
+            elif mutation == 'reset': broken['resets'][0]['protected']['values'][0] = 15
+            else: broken['cases'][1] = broken['cases'][0]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError): module.validate(broken)
+
     def port_instrument(self):
         spec = importlib.util.spec_from_file_location('port_fixture', ROOT / 'scripts/dll-port-fixtures.py')
         module = importlib.util.module_from_spec(spec)
