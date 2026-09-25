@@ -9,19 +9,20 @@ claim of terminal-feature or pixel parity.
 
 | Input | Exact scope |
 |---|---|
-| RIPlib | Working tree based on `7ea20aa7c81f30f53df337e18653e602cafb735f`; source SHA-256 values are in the generated crosswalk |
+| RIPlib | Working tree based on `024032a263649cbd842bcf855ac1fe9238606e6f`; source SHA-256 values are in the generated crosswalk |
 | RIPtel | Local RIPtel 3.1 installation; RIPSCRIP.DLL is 592,896 bytes, MD5 `bade8b1f4e467ac7ad4edb2639738d4c`, self-reported version 3.00.04 |
 | bbs-land | [Commit 2fb17724b6122a5ad5cd1df38b69b8cce3a7079f](https://github.com/bbs-land/remote-imaging-protocol/tree/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f), principally `version/3.0/ripscrip/9.0-command-reference.md` and `version/3.0-riplib/CONFLICTS.md` |
 | Corpus | The local installation's 35 `.RIP` scenes, 12,328 lexical command instances, 70 command keys; not upstream's larger 116-script census |
 
-The DLL has **129 rows, 117 distinct command keys, 11 continuation rows,
-and one additional row for the duplicate `|3D` key**. RIPlib has source
-handlers for **all 117 keys**, plus **24 keys absent from this
-DLL**. Handler presence does not establish behavioral equivalence.
+The DLL has **129 rows, 118 distinct command keys, 11 continuation rows,
+and no duplicate keys**. RIPlib has handlers for all 118, plus 28 source-only
+keys (including four preserved level-3 service aliases). The earlier
+117-key count and duplicate `3D` finding were wrong: the last five records
+carry a literal `9` prefix. D-34 documents the correction.
 
 The upstream inventory has **116 rows: 112 keyed opcodes and four names
-without assigned opcodes**. Among 82 comparable numeric layouts, **69
-agree and 13 differ** from the DLL. Twelve elided/variable lists remain
+without assigned opcodes**. Among 84 comparable numeric layouts, **69
+agree and 15 differ** from the DLL. Twelve elided/variable lists remain
 uncompared. The generated table also preserves nonnumeric cases, reference
 opcodes absent from the DLL, and the four unassigned names.
 
@@ -32,7 +33,7 @@ opcodes absent from the DLL, and the four unassigned names.
 | Five misidentified punctuation commands | Slots 8, 10, 11, 83, 84 all call the pure geometry helper at RVA `0x00FA70` | Comma draws an affine elliptical arc; period outlines the whole ellipse; colon draws a pie; backtick draws a chord; brace fills the whole ellipse. They no longer copy screen regions, stamp icons, create mouse regions, or draw triangles |
 | Backtick field overread | Slot 83 has ten coordinate fields and a final single digit | Require 21 characters; read the fill digit at offset 20. Geometry uses center, conjugate radii, and endpoint rays |
 | Missing Level 2 ESC | Slot 110, RVA `0x046F66`, self-named `RIP_SwitchDirectory` | Validate and store the logical host directory, including `$OFF$`; no process-directory mutation |
-| Missing Level 3 ESC | Slot 124, RVA `0x024B4E`, self-named `RIP_EnterBlockMode` | Decode the eight-character prefix and filename, validate driver bounds, store a pending request, and optionally call the host transfer handler |
+| Missing Level 9 ESC | Slot 124, RVA `0x024B4E`, self-named `RIP_EnterBlockMode` | Decode the eight-character prefix and filename, validate driver bounds, store a pending request, and optionally call the host transfer handler |
 | Wrong refresh behavior | Slot 117 calls `refreshAssignCommand` at RVA `0x03E43C` | Store the command string; host calls `rip_request_refresh()` to transmit it. Parsing itself neither transmits nor forces a framebuffer redraw |
 | Empty fills skipped; filled Bezier used drawing color | Zero brush rows at RVA `0x07AFD8`; filled handlers select a brush | Apply background fill consistently across filled shapes; Bezier uses current fill ink and pattern |
 | Compound polygon fill inherited pen style | Its interior spans called `draw_line`, bypassing the fill brush | Use filled spans so both brush colors apply independently of line dash/thickness |
@@ -51,24 +52,23 @@ occupying the driver's ellipse opcode. New host fields extend the public
 
 ## Remaining boundaries
 
-- Duplicate `|3D`: slots 122 and 125 have different handlers. RIPlib
-  implements slot 122's delay; selection of the other behavior remains
-  unresolved. One covered key is not two established behaviors.
-- File transfers, logical directory selection, URL navigation, audio, and
-  playback timing require host implementation. Callbacks and stored requests
-  establish a portable interface, not RIPtel's complete desktop services.
-- Encoded-stream payload decoding, image stretch semantics, query-definition
-  protection, and exact text/font/pattern/GDI rendering are not fully established.
-  These are retained in the [divergence register](spec/14-divergence-register.md).
-- Generic fields remain base 36: `|J` records the requested base but does
-  not switch all decoders globally. Fixed-base-64 commands retain their
-  dedicated decoders; this pre-existing boundary is documented in the
-  [wire format](spec/01-wire-format.md).
-- No hardware run or full RIPtel framebuffer differential was performed.
-  The current result closes the concrete runtime defects above, not every
-  historical semantic uncertainty in the reference corpus.
+- File transfers, logical directory selection, URL navigation, audio,
+  host expressions and playback timing require host implementation.
+  `9D` stores its expression and optionally invokes the registered handler.
+- Exact Windows GDI text rasterization and font substitution remain outside
+  the portable BGI/CP437 renderer. Exact built-in brush masks are now verified.
+- The existing single-framebuffer and active-text-window model remains:
+  automatic mode-4 query hit-testing uses the active text window. Hosts managing
+  additional text windows can dispatch their registered queries through
+  `rip_trigger_query()`. This does not establish 36 independent text surfaces.
+- General host macros and decimal-compressed query prefixes are not fully
+  emulated. Unknown query macros remain silent; malformed templates send no
+  partial response. Negotiated-width normalization still covers its generated
+  fixed-arity table, not every variable-length signature or world transform.
+- No hardware run or complete RIPtel framebuffer differential was performed.
+  These are explicit integration/rendering boundaries, not disputed opcode syntax.
 
-## Thirteen upstream numeric-layout differences
+## Fifteen upstream numeric-layout differences
 
 `n` means configurable coordinate/color width, normalized to two digits
 for this comparison. These are differences in the numeric argument array;
@@ -87,8 +87,10 @@ to the exact upstream lines at the pinned revision.
 | `\|2T`, `\|2Y` | `1 2` | `1 1` | Three characters versus two |
 | `\|2s` | `1 2` | `1 2 3` | Three characters versus six |
 | `\|3e` | `2` | `4` | Two characters versus four |
+| `\|9ESC` | `1 1 2 2 2` | `1 1 2 4` | Same total, different subdivision |
+| `\|9U` | `2 4` | `2 8` | Driver consumes six numeric characters |
 
-RIPlib's comment-signature comparison reports 75 comparable commands,
+RIPlib's comment-signature comparison reports 76 comparable commands,
 with zero layout differences. The broader actual-read conformance check also
 reports zero defects. These are static syntax checks, separate from the
 behavioral regressions and geometry oracle below.
@@ -106,12 +108,12 @@ current source; they are not claims that every concern in that file is closed.
 | B4, punctuation block | [ripscrip.c](../src/ripscrip.c): skewed-oval family, markers and poly-polygon | Old ICON_STYLE/TEXT_XY_EXT/etc. assignments are gone |
 | B8, swapped commands | [ripscrip.c](../src/ripscrip.c): `1i` image style, `1w` audio, `1A` article selection, `1G/1g` scroll/copy, Level 1 ESC query, `t` poly-Bezier line | The listed old assignments are stale; host-owned behavior remains separately limited |
 | B12 and X5, stream introducers | [ripscrip.c](../src/ripscrip.c): SOH/STX accepted; ordinary `!` requires a line boundary | Missing-control-introducer and relaxed-CSI-trigger descriptions are stale |
-| B9, empty fill | [ripscrip.c](../src/ripscrip.c): all tested filled primitives paint the background at pattern 0 | Empty-fill regression fixed across twelve shape families; exact historical pattern bitmap equivalence remains separate |
+| B9, empty fill | [ripscrip.c](../src/ripscrip.c): all tested filled primitives paint the background at pattern 0 | Empty-fill regression fixed across twelve shape families; all ten patterned brush masks now match the driver table |
 | B7, refresh | [ripscrip2.c](../src/ripscrip2.c): consumes four digits and stores the trailing command | Refresh-string behavior is implemented; transmission requires an explicit host call |
 | X7, DEBUG transmission | [CMakeLists.txt](../CMakeLists.txt): `RIPLIB_ENABLE_DEBUG_DIRECTIVE` defaults OFF | Unsolicited debug output is disabled by default; this does not settle macro-name ambiguity |
 | N1, backtick called a genuine addition | DLL slot 83 is present | The opcode itself is driver-backed, although the former composite-icon interpretation was wrong; D-31 replaces it with an affine chord |
 
-Other conflict entries, text-variable semantics, exact pattern bitmaps,
+Other conflict entries, text-variable semantics,
 font rendering, host-command behavior, and historical-version differences
 were not exhaustively re-adjudicated here. No upstream repository changes
 or messages were made.
@@ -175,7 +177,7 @@ python scripts/check-spec-examples.py
 Oracle regeneration requires Python Unicorn; normal tests use the checked-in
 numeric fixtures and need neither Unicorn nor the unvendored DLL.
 
-## Final verification
+## Initial audit verification (PR #4)
 
 - All six CTest groups pass on Windows GCC and Linux Clang with ASan/UBSan;
   the final parser suite is 328/328. Fourteen audit instrument tests pass.
@@ -221,3 +223,242 @@ session fixtures do not combine into one oversized optimized stack frame.
   completed 182,340 runs in 61 seconds without a sanitizer finding.
 - Generated Python caches are excluded from version control. Source hashes
   in the crosswalk normalize CRLF so checkout conventions do not change them.
+
+## Remaining-issue pass (D-34 through D-37)
+
+| Issue | Result |
+|---|---|
+| Global radix recorded but ignored | Session base reaches all command levels and width normalization; fixed-radix exceptions remain; disconnect resets it |
+| Apparent duplicate `3D` and missing service dispatch | Literal prefix recovery proves `3D` is delay and `9D` a host expression; all five level-9 services dispatch, four historical level-3 aliases remain |
+| Encoded-stream uncertainty | The bounded `9U` handler validates type but contains no payload decoder; RIPlib records metadata without inventing a codec |
+| Icon ROP and stretch | ROP reads the actual args[3] column; stretch uses device/logical dimension ratios |
+| Approximate fill masks | All ten patterned masks match the DLL's 80 row values; generic drawing API pattern IDs stay compatible |
+| Query protection and timing | Definitions defer output, check target protection, clear on `$OFF$`, evaluate templates at events, and honor mouse-field precedence |
+| Shared audit blind spot | All table readers use prefix bytes; mutation tests vary prefix independently of slot; table checker rejects the five old wrong prefixes |
+
+There are now 337 parser tests and 15 audit-instrument tests. All six CTest
+groups pass under Windows GCC/MSVC and Linux Clang ASan/UBSan; 35 shipped
+scenes replay without failure. All 67 driver/source predicates hold. All
+nine coverage floors pass, GCC `-fanalyzer` is clean, and the RP2350 archive
+builds. Fuzzing with 93 directed seeds completed 183,890 runs in 61 seconds
+without a finding. All nine new regression functions fail against the
+pre-fix implementation and pass after correction.
+
+Comparing all 35 scene metrics with baseline changes only BUTTONS.RIP's
+foreground count (90,788 to 93,716, with the corrected fill masks). Its
+10 colors, two asset requests and 20 regions are unchanged; all other
+scene metrics and host-silence assertions remain unchanged. Reinjection
+of the old prefix, icon ROP column and a single wrong brush bit makes
+the strengthened claim validator fail in each case.
+
+This pass changes no wire field widths and preserves legacy service aliases.
+The public session structure grows, so consumers must rebuild. Exact fonts,
+GDI edges, clipboard screen capture, independent window surfaces and full
+host-macro execution remain explicit integration/rendering boundaries.
+
+## Raster value iteration (D-38)
+
+Native-size image restores now obey the active viewport for every existing
+drawing raster operation. Tile boxes intersect that viewport, retain the
+original tile phase and skip invisible tiles. Clipboard captures initialize
+offscreen padding, Level 2 shares that implementation, and scaled port-copy
+scratch images are initialized before capture. Unrepresentable clipboard
+dimensions are rejected without damaging the previous clipboard.
+
+Six regressions cover pixels, source stride, empty clips, extreme origins,
+dirty rows, tile phase, reused capture bytes, metadata and wire-level scaled
+port copies. The first five fail against 7f773bd. There are now 341 parser
+tests and 43 drawing tests. Windows GCC/MSVC and Linux Clang ASan/UBSan pass
+all six CTest groups. All 35 corpus scene metrics are identical to 7f773bd;
+67 driver/source predicates and all nine coverage floors still pass. GCC
+static analysis and the RP2350 archive build pass. A further 100,000 seeded
+mutations pass under sanitizers.
+
+No syntax or public session layout changes in this iteration. Exact icon
+clipboard screen capture remains open: static driver tracing finds an
+exclusive source rectangle passed to a helper that allocates inclusive
+dimensions, then selects a scaling path. That needs an executable rectangle
+and copy-call oracle before changing capture dimensions. See D-38 and
+[iteration-state.md](iteration-state.md) for the evidence and next experiment.
+
+## Image operands and executable rectangle oracle (D-39)
+
+Image mode 4 now complements source samples for icon drawing, clipboard
+pasting and port copies, including scaling and tiling. It previously inverted
+the destination. The generic drawing API keeps its destination-inversion
+contract. Level 2 now shares the image blitter. Syntax and public structures
+are unchanged.
+
+The new `scripts/dll-raster-fixtures.py` executes six capture cases and eighteen
+ROP selections in the pinned driver, with explicit file/palette/allocation
+stubs and modeled rectangle APIs. It records actual driver arguments to GDI
+without rasterizing them. Checked-in call fixtures and ROP truth tables make
+the results reviewable; ordinary CI does not require the DLL or Unicorn.
+Regenerate with `python scripts/dll-raster-fixtures.py C:/RIPtel/RIPSCRIP.DLL`
+and verify with the same command plus `--check`.
+
+Three new runtime tests fail against bc9e7e1 and pass with the fix. The suite
+now has 344 parser tests, 43 drawing tests and 16 audit-instrument tests.
+All 70 driver/source predicates hold. All 35 corpus scene metrics are
+unchanged. Native/scaled/tiled output and state restoration are checked
+against the driver's ROP truth tables; a new directed seed reaches image NOT.
+
+The capture discrepancy is now demonstrated at the call boundary: 2x7 is
+captured into 3x8, and right/bottom clipping shrinks the source without
+shrinking the destination allocation. Exact capture pixels, GDI palette
+remapping and resampling remain unverified. RIPlib still caches source icons.
+
+## Native memory-DIB capture iteration (D-40)
+
+This supersedes D-39's source-icon caching limitation. Standard LOAD_ICON
+stretch now follows measured native GDI sampling, and its clipboard flag
+captures the displayed pixels after the raster operation. Capture uses the
+actual rendered rectangle, expands both dimensions by one, and retains that
+allocation when right/bottom clipping shrinks its source. Ordinary captures
+use row copies with repeated edges. Full-frame capacity grows by 1,041 bytes
+to 257,041; oversized captures preserve the previous clipboard. Wire syntax,
+public structure layout and other extension sampling remain unchanged.
+
+The evidence consists of nine bounded DLL call cases, 1,024 native size-pair
+maps, 360 two-dimensional grids and 162 native capture configurations. All
+capture configurations use top-down 8-bit memory DIBs, matching palettes
+(identity or permuted grayscale), stretch modes 1/2/3, and COPY/XOR/NOT source.
+The near-size sampling shortcut requires BOTH dimensions to differ by at
+most one; mixed-ratio fixtures caught an initial per-axis hypothesis.
+
+Six new runtime tests bring the parser suite to 350, alongside 43 drawing
+and 16 audit-instrument tests. The wire capture regression fails against
+3780b18 and passes with this correction. The remaining tests exercise new
+helpers, style bounds, negative origins, capacity failure and full-frame
+capture. All six CTest groups pass under Windows GCC/MSVC and Linux Clang
+sanitizers. All 35 scene metrics remain unchanged, 70 driver/source claims
+hold, all nine coverage floors pass, GCC static analysis is clean, and the
+RP2350 archive builds. A directed seed now reaches cached-icon screen capture;
+100,000 additional seeded mutations pass under ASan/UBSan.
+
+Nonzero port origins remain a separate boundary: the bounded driver helper
+chain adds the origin again during capture. Full port setup has not been
+executed; RIPlib retains its absolute framebuffer model. This evidence also
+does not establish arbitrary palette remapping, independent port surfaces,
+halftone, historical display-driver or font parity. D-40 records the exact
+scope and reproduction commands; [iteration-state.md](iteration-state.md)
+identifies the next evidence needed.
+
+## Port coordinate and surface evidence (D-41)
+
+The new `dll-port-fixtures.py` executes real port creation and switching,
+followed by complete decoded LOAD_ICON or PORT_COPY handlers through return.
+Its 32 cases distinguish shared-screen ports from offscreen ports, which
+reset their origin to zero and select a separate DC. File/GDI services remain
+modeled; this is call-level evidence, not a live-terminal pixel comparison.
+
+The extra LOAD_ICON capture offset is confirmed for shared ports: logical
+port origin (10,20), icon (3,7), becomes device display (13,30) and capture
+source (23,52). PORT_COPY instead adds the source/destination origin once,
+uses exclusive extents and floor-scales both endpoints. A logical source
+(3,7)-(5,14) produces 2x8 pixels. RIPlib's absolute coordinates, inclusive
+copy extents and informational offscreen flag remain explicit differences.
+
+No runtime behavior changes in this iteration. Two new instrument tests
+(18 total) preserve the measured contracts and reject four fixture mutations.
+A mutation removing the driver's X-coordinate addition is also rejected.
+All 350 parser tests, 43 drawing tests and 70 existing claims remain green.
+The next input class is PORT_COPY's all-zero rectangles, reversed endpoints
+and clipping, before making a coherent correction to its copy semantics.
+
+## Port-copy correction (D-42)
+
+PORT_COPY now uses relative coordinates, exclusive extents and floor-scaled
+Y endpoints. All-zero destinations scale to their entire viewport;
+position-only destinations retain native size. Empty/reversed rectangles
+and invalid ROPs are rejected. Trimming follows the driver's native/scaled
+distinction, and scaled copies use measured GDI sampling. The native COPY
+shortcut now obeys the active clip; overlapping samples and draw state are
+preserved. Syntax and public structure layout are unchanged.
+
+The driver oracle adds 84 boundary cases. Fifty shared-port fixtures check
+runtime pixels across all five ROPs and invalid mode 5, using matching stored
+viewport geometry. Both new runtime tests fail with the previous ripscrip2.c
+and pass after correction. There are 352 parser, 43 drawing and 19 instrument
+tests; all six CTest groups, 70 claims, nine coverage floors, static analysis,
+RP2350 build and 100,000 additional sanitizer mutations pass.
+
+All 35 scenes replay, but two change: FONTS foreground 15,494 -> 2,092
+(3 -> 2 colors), SPECLEFX foreground 82,788 -> 129,372 (7 colors retained).
+The other 33 scene metrics and all asset-request/region/host-silence results
+are unchanged. Both changed scenes use larger independent offscreen surfaces
+that RIPlib still maps onto its one display. This pass proves copy behavior
+for equivalent viewports; it does not establish 2P geometry, independent
+storage or full visual parity. Those remain the next implementation boundary.
+
+## Port lifetime correction (D-43)
+
+The complete native deletion path disproves the earlier reserved-destination
+and source-zero explanations. `2p` now deletes all unprotected secondary
+ports when source is zero and always selects its destination after a valid
+request, including when deletion is refused or its source is absent. An
+empty destination is recreated. `2s` cannot protect the permanent master
+port. Deleted queries are cleared and protected destination state survives.
+Wire widths, gates and public structure layout are unchanged.
+
+The new oracle records 18 lifetime sequences, 18 definition cases and eight
+allocation failures. Thirty-two wire steps compare allocated slots,
+protection and selection against the driver; two new runtime tests fail
+before the fix. Instrument predicates reject altered states, geometry,
+resource cleanup, accounting, diagnostics and missing/duplicate cases.
+Removing the actual native destination-selection call is also detected.
+All 354 parser, 43 drawing and 20 instrument tests pass, with sanitizers,
+100,000 mutations, coverage floors, static analysis and the RP2350 build.
+All 35 corpus metrics match D-42; all 70 claims hold.
+
+Geometry/failure evidence is conditional on modeled allocation services:
+shared rectangles are not clamped, reversed dimensions wrap, and failed
+replacement can lose the old port and recreate a default shared port. That
+evidence guides future storage work; no large-surface implementation or
+Windows pixel parity is claimed. See D-43 and the iteration checkpoint.
+
+## Active redefinition correction (D-44)
+
+Active `2P` redefinition now applies the new stored viewport, resets drawing
+position and preserves the current style for both activation choices. Two
+new runtime regressions fail on f60270f and pass after correction, including
+protected refusal, switch persistence and drawing inside the new clip.
+
+The driver oracle adds 16 cases through the next native line handler, its
+clipping and ROP setup, and real graphics-style lock/unlock. Styles retain
+an independent selected index: RIPlib's broader per-port style model remains
+an explicit difference. Port-definition geometry and offscreen storage also
+remain open. Fixing an import-address collision in the emulator leaves all
+older driver fixtures unchanged; adversarial tests cover that bug and the
+new fixture predicates.
+
+All 356 parser, 43 drawing and 22 instrument tests pass, along with sanitizer
+tests, 100,000 mutations, coverage floors, static analysis, the RP2350 build,
+70 claims and conformance. All 35 corpus metrics remain unchanged from D-43.
+
+
+## Independent style correction (D-45)
+
+`2Y` now saves and restores 36 graphics styles independently of ports.
+Port creation, deletion and selection retain the selected style while
+restoring the port cursor/viewport. Slot zero cannot be protected. Unused
+styles begin with defaults, matching actual styleSwitch execution rather
+than the reference's historical copy-current-style prose. Wire syntax is
+unchanged; the expanded session structure requires consumers to rebuild.
+
+A new oracle executes 128 selection/protection cases and three sequences
+through native style-reset primitives. It checks default initialization,
+flag ordering, ROP and pen arguments, unchanged port state and unchanged
+style state across port switches. Brush realization, palette lookup and GDI
+are modeled; neither complete reset nor font/pixel equivalence is implied.
+The portable table preserves existing font and custom-pattern behavior;
+reset-windows retains protected slots and disconnect clears all styles.
+
+Two new regressions fail before the fix. Tests now cover all generated
+cases, independent cursor/style lifetime, custom fill pixels, font fields,
+protection, resets, malformed input and slot 35. Seven mutation classes
+check the oracle predicates. All 359 parser, 43 drawing and 23 instrument
+tests pass; compiler/sanitizer, fuzz, coverage, analyzer, ARM, conformance
+and 70-claim checks pass. All 35 corpus summaries remain unchanged from D-44.
+The next binding constraints are exact 2P geometry and independent offscreen
+storage; the FONTS/SPECLEFX gap is still open.

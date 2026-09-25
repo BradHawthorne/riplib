@@ -1,0 +1,3248 @@
+{
+  "driver_md5": "bade8b1f4e467ac7ad4edb2639738d4c",
+  "lifetimes": [
+    {
+      "name": "delete_current",
+      "steps": [
+        {
+          "command": "p",
+          "args": [
+            1,
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "delete_current_missing_dest",
+      "steps": [
+        {
+          "command": "p",
+          "args": [
+            1,
+            2,
+            0
+          ],
+          "state": {
+            "active": 2,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "delete_same_dest",
+      "steps": [
+        {
+          "command": "p",
+          "args": [
+            1,
+            1,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "delete_other",
+      "steps": [
+        {
+          "command": "P",
+          "args": [
+            2,
+            10,
+            20,
+            110,
+            90,
+            0,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "p",
+          "args": [
+            2,
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "delete_missing",
+      "steps": [
+        {
+          "command": "p",
+          "args": [
+            3,
+            2,
+            0
+          ],
+          "state": {
+            "active": 2,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "protected_current",
+      "steps": [
+        {
+          "command": "s",
+          "args": [
+            1,
+            1
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "p",
+          "args": [
+            1,
+            2,
+            0
+          ],
+          "state": {
+            "active": 2,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": true,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [
+            {
+              "error_code": 30
+            }
+          ],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "protected_other",
+      "steps": [
+        {
+          "command": "P",
+          "args": [
+            2,
+            10,
+            20,
+            110,
+            90,
+            0,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "s",
+          "args": [
+            2,
+            1
+          ],
+          "state": {
+            "active": 2,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "s",
+          "args": [
+            1,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "p",
+          "args": [
+            2,
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [
+            {
+              "error_code": 30
+            }
+          ],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "delete_all",
+      "steps": [
+        {
+          "command": "P",
+          "args": [
+            2,
+            10,
+            20,
+            110,
+            90,
+            0,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "p",
+          "args": [
+            0,
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "delete_all_protected",
+      "steps": [
+        {
+          "command": "P",
+          "args": [
+            2,
+            10,
+            20,
+            110,
+            90,
+            0,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "s",
+          "args": [
+            2,
+            1
+          ],
+          "state": {
+            "active": 2,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "s",
+          "args": [
+            1,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "p",
+          "args": [
+            0,
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "delete_all_recreate_dest",
+      "steps": [
+        {
+          "command": "P",
+          "args": [
+            2,
+            10,
+            20,
+            110,
+            90,
+            0,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  10,
+                  22,
+                  110,
+                  102
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "p",
+          "args": [
+            0,
+            2,
+            0
+          ],
+          "state": {
+            "active": 2,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 2,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "unprotect_then_delete",
+      "steps": [
+        {
+          "command": "s",
+          "args": [
+            1,
+            1
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "s",
+          "args": [
+            1,
+            2
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "p",
+          "args": [
+            1,
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "protect_master_dest",
+      "steps": [
+        {
+          "command": "s",
+          "args": [
+            0,
+            1
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "s",
+          "args": [
+            1,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "protect_master_source",
+      "steps": [
+        {
+          "command": "s",
+          "args": [
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "s",
+          "args": [
+            1,
+            4
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "replace_shared",
+      "steps": [
+        {
+          "command": "P",
+          "args": [
+            1,
+            20,
+            30,
+            50,
+            60,
+            0,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  20,
+                  34,
+                  50,
+                  68
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "replace_protected",
+      "steps": [
+        {
+          "command": "s",
+          "args": [
+            1,
+            1
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": []
+        },
+        {
+          "command": "P",
+          "args": [
+            1,
+            20,
+            30,
+            50,
+            60,
+            2,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": true,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [
+            {
+              "error_code": 30
+            }
+          ],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "replace_offscreen_delete",
+      "steps": [
+        {
+          "command": "P",
+          "args": [
+            1,
+            10,
+            20,
+            110,
+            90,
+            1,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 4,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 201
+              }
+            ],
+            "available_pixels": 1992000
+          },
+          "errors": [],
+          "resources": [
+            {
+              "create_dc": 201
+            },
+            {
+              "create_bitmap": [
+                301,
+                100,
+                80
+              ]
+            }
+          ]
+        },
+        {
+          "command": "p",
+          "args": [
+            1,
+            0,
+            0
+          ],
+          "state": {
+            "active": 0,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [],
+          "resources": [
+            {
+              "delete_bitmap": 301
+            },
+            {
+              "delete_dc": 201
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "invalid_delete_source",
+      "steps": [
+        {
+          "command": "p",
+          "args": [
+            36,
+            0,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [
+            {
+              "error_code": 30
+            }
+          ],
+          "resources": []
+        }
+      ]
+    },
+    {
+      "name": "invalid_delete_dest",
+      "steps": [
+        {
+          "command": "p",
+          "args": [
+            1,
+            36,
+            0
+          ],
+          "state": {
+            "active": 1,
+            "ports": [
+              {
+                "slot": 0,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  640,
+                  400
+                ],
+                "protected": false,
+                "dc": 101
+              },
+              {
+                "slot": 1,
+                "kind": 1,
+                "clip": [
+                  0,
+                  0,
+                  100,
+                  80
+                ],
+                "protected": false,
+                "dc": 101
+              }
+            ],
+            "available_pixels": 2000000
+          },
+          "errors": [
+            {
+              "error_code": 30
+            }
+          ],
+          "resources": []
+        }
+      ]
+    }
+  ],
+  "definitions": [
+    {
+      "name": "normal",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          20,
+          110,
+          90,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                10,
+                22,
+                110,
+                102
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "normal",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          20,
+          110,
+          90,
+          3,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1992000
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              100,
+              80
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "unit",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          1,
+          1,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "unit",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          1,
+          1,
+          3,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                1,
+                1
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1999999
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              1,
+              1
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_x",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          20,
+          10,
+          90,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                10,
+                22,
+                10,
+                102
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "empty_x",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          20,
+          10,
+          90,
+          3,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                0,
+                80
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              0,
+              80
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty_y",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          20,
+          110,
+          20,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                10,
+                22,
+                110,
+                22
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "empty_y",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          20,
+          110,
+          20,
+          3,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                100,
+                0
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              100,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "reverse_x",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          110,
+          20,
+          10,
+          90,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                110,
+                22,
+                65546,
+                102
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "reverse_x",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          110,
+          20,
+          10,
+          90,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": []
+      }
+    },
+    {
+      "name": "reverse_y",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          90,
+          110,
+          20,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                10,
+                102,
+                110,
+                65558
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "reverse_y",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          10,
+          90,
+          110,
+          20,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": []
+      }
+    },
+    {
+      "name": "outside",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          650,
+          360,
+          700,
+          400,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                650,
+                411,
+                700,
+                457
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "outside",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          650,
+          360,
+          700,
+          400,
+          3,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                50,
+                46
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1997700
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              50,
+              46
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "fonts",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          1280,
+          254,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                1280,
+                290
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "fonts",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          1280,
+          254,
+          3,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                1280,
+                290
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1628800
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              1280,
+              290
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "effects",
+      "offscreen": 0,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          936,
+          960,
+          2,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                936,
+                1097
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      }
+    },
+    {
+      "name": "effects",
+      "offscreen": 1,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          936,
+          960,
+          3,
+          0
+        ],
+        "state": {
+          "active": 2,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 2,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                936,
+                1097
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 973208
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              936,
+              1097
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "failures": [
+    {
+      "failure": "budget",
+      "replacement": false,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 1
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": []
+      }
+    },
+    {
+      "failure": "budget",
+      "replacement": true,
+      "step": {
+        "command": "P",
+        "args": [
+          1,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 1
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": []
+      }
+    },
+    {
+      "failure": "dc",
+      "replacement": false,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": []
+      }
+    },
+    {
+      "failure": "dc",
+      "replacement": true,
+      "step": {
+        "command": "P",
+        "args": [
+          1,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": []
+      }
+    },
+    {
+      "failure": "bitmap",
+      "replacement": false,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "delete_dc": 201
+          }
+        ]
+      }
+    },
+    {
+      "failure": "bitmap",
+      "replacement": true,
+      "step": {
+        "command": "P",
+        "args": [
+          1,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "delete_dc": 201
+          }
+        ]
+      }
+    },
+    {
+      "failure": "select",
+      "replacement": false,
+      "step": {
+        "command": "P",
+        "args": [
+          2,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              100,
+              80
+            ]
+          },
+          {
+            "delete_bitmap": 301
+          },
+          {
+            "delete_dc": 201
+          }
+        ]
+      }
+    },
+    {
+      "failure": "select",
+      "replacement": true,
+      "step": {
+        "command": "P",
+        "args": [
+          1,
+          0,
+          0,
+          100,
+          70,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 255
+          },
+          {
+            "error_code": 40
+          }
+        ],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              100,
+              80
+            ]
+          },
+          {
+            "delete_bitmap": 301
+          },
+          {
+            "delete_dc": 201
+          }
+        ]
+      }
+    }
+  ]
+}

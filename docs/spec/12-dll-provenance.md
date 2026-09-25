@@ -1,3 +1,541 @@
+CURRENT CORRECTION (2026-09-25, D-34..45): historical claims below
+about 117 keys, a duplicate |3D, or service commands at level 3 are
+superseded. Prefix bytes prove 118 distinct keys; services use level 9.
+Global radix, icon stretch/ROP, exact brush masks and query protection
+are now implemented. D-40 supersedes the source-icon clipboard limitation
+in D-38/39. See ../crosswalk-audit.md for current boundaries.
+
+D-45 INDEPENDENT GRAPHICS STYLE SELECTION (2026-09-25).
+
+     The pinned DLL's 2Y handler (46E41) calls styleSlotProtect (390E4)
+     before and after styleSwitch (394FE). The style manager is RIPINST+0A,
+     with 36 entries of 0x61 bytes, separate from the port manager at +22.
+     Style entry byte +21 bit 0 is protection and bit 1 is initialized.
+     Slot zero cannot be protected. Source protect/unprotect precedes the
+     switch; destination protect/unprotect follows it, so unprotect wins
+     when both bits for one side are present. Same-slot commands follow
+     the same order. Existing style data survives selection and port switches.
+
+     Unused destinations are initialized by copying the default record at
+     RVA 762E8, then setting the initialized bit. They do NOT inherit the
+     previous style. This conflicts with the historical prose in bbs-land
+     7.1-data-tables.md at reference commit
+     2fb17724b6122a5ad5cd1df38b69b8cce3a7079f; that page also describes a
+     one-digit reserved field. The DLL dispatch and executable handler win:
+     slot:1 flags:2, unchanged from RIPlib's existing three-character gate.
+
+     scripts/dll-style-fixtures.py executes 128 decoded cases: active style
+     0/7, destination 0/7/8/35, flags 0..15. Styles 0/7/35 have distinct
+     colors and ROPs, while 8 is unused. It checks selected foreground,
+     background, fill color, mode, protection mask, slot-zero diagnostics,
+     CreatePen arguments and SetROP2. It also asserts that selection leaves
+     all port-entry bytes (including nonzero cursors) untouched and that
+     switching ports leaves all style bytes and the selected style unchanged.
+     Native lock counters must balance. JSON and a generated C fixture
+     contain metadata and calls, not proprietary executable bytes.
+
+     Three more sequences execute styleSlotDelete(-2) (391FD) followed by
+     styleSwitch(0), the exact style primitives called by ResetAllWindows
+     at 163F8..16406. They preserve protected slot 7, reset unprotected 35,
+     and select default slot zero. The surrounding whole reset is not run.
+     Disassembly at 1626A..16277 separately proves that reset first enables
+     the active style's border, including when that style is protected.
+
+     RIPlib now stores 36 independent style snapshots. |2Y restores colors,
+     write mode, line/fill patterns, custom fill rows, font attributes and
+     spacing, and filled-object borders. Ports restore only cursor and
+     viewport. Existing public port style fields remain diagnostic mirrors,
+     never a source for restoring a style. First-use slots get portable
+     defaults. Reset-windows resets unprotected styles and selects zero;
+     disconnect clears styles and protection. Reactivation reapplies the
+     session's custom fill rows and spacing. No wire keys, widths, aliases
+     or tolerances change. The session layout grows: GCC measures each style
+     at 36 bytes (1,296-byte table plus 8 active custom-pattern bytes), with
+     no new heap allocation. Consumers must rebuild matching headers/library.
+
+     Two runtime regressions fail against the pre-fix working tree and pass
+     after correction. The generated matrix compares all 128 cases using
+     real wire commands, including slot 35. An additional regression covers
+     complete portable attributes, visible custom-fill restoration, soft
+     reset/protection, disconnect, truncation and base-64 out-of-range input.
+     Older port tests now check independent cursor/style behavior or use
+     explicit style selection to restore attributes. Instrument tests reject
+     seven fixture mutation classes; removing the native style-switch ROP
+     call at 39578 is detected. Directed fuzz seeds reach style swaps,
+     protection, reset and invalid selectors.
+
+     Scope: decoded arguments, inactive focus, modeled brush realization,
+     identity palette lookup, GDI and memory services. The native ROP and
+     pen setup execute; no live style/font pixel parity is claimed. Font
+     field round-trips are authored portable tests. Complete reset side
+     effects and other resource-table storage remain separate boundaries.
+
+     Validation: 359 parser, 43 drawing and 23 instrument tests; all six
+     CTest groups, Windows GCC/MSVC, Linux Clang ASan/UBSan, 100,000 seeded
+     mutations, nine coverage floors, GCC analyzer and RP2350 archive.
+     Conformance has zero defects; all 70 standing claims hold. All 35
+     corpus summaries match D-44, including requests, regions and passive
+     host silence. D-42's offscreen scene limitations remain unchanged.
+
+D-44 ACTIVE PORT REDEFINITION AND INDEPENDENT STYLES (2026-09-24).
+
+     dll-port-redefine-fixtures.py extends the D-43 oracle through the next
+     native line handler (1CB79), clipping helpers (342AD/34319), ROP setup
+     (E6B3/E6E9), pen selection (13CFC), and graphics-style lock/unlock
+     (3988F/398EE). The focus-off branch at 45038 now executes instead of
+     being stubbed. Sixteen cases vary initial active port (0/1), definition
+     flags (0..3) and protection. They seed port 1's position to (37,49),
+     select style slot 7 independently, and retain a digest of all 36 style
+     entries. Master backing bounds are supplied for the post-line restore.
+
+     PROVEN in this profile: successful redefinition resets the target's
+     drawing position to (0,0) whether or not flag 2 is set. Refused protected
+     definitions preserve the old position and viewport. The separately
+     selected style index and all seeded style bytes remain unchanged.
+     The next line applies the selected port's new clip, adds its origin
+     once, and uses that unchanged style's XOR ROP (SetROP2 value 7).
+     Shared (20,30)-(50,60) becomes exclusive device (20,34)-(50,68);
+     offscreen becomes (0,0)-(30,34). These extents are evidence for future
+     geometry work, not a claim that RIPlib's 2P now creates them exactly.
+
+     RIPlib's bounded correction handles redefinition of its active port:
+     preserve the current drawing style, reset drawing position, synchronize
+     the per-port mirror and apply the new stored viewport immediately.
+     Previously no activation flag left the old viewport active; using the
+     normal switch path could save the old position back into the new port.
+     Two runtime tests fail on f60270f and pass after the fix. They cover
+     both activation choices, offscreen-flag position reset, protected refusal,
+     switch-away/back persistence, style preservation and pixels inside the
+     new viewport versus the old one. Wire syntax and public layout do not
+     change. These tests validate application of stored portable viewports,
+     not independent offscreen pixels or driver rectangle parity.
+
+     New boundary clarified: RIPINST+0x0A selects a 0x61-byte graphics-style
+     table independently of the active port at RIPINST+0x22. The historical
+     "per-port drawing attributes" description conflated two selections.
+     RIPlib still saves/loads styles with ports and initializes other newly
+     activated ports to defaults. D-44 does not resolve that broader style-slot
+     model; it fixes the active-redefinition case without resetting its style.
+
+     Instrument repair: import addresses derived only from stub-table length
+     could collide after a subclass removed a native-function stub. Allocation
+     now skips occupied addresses. A DLL-free regression checks callback and
+     stack-cleanup preservation. Existing raster, port and lifetime fixtures
+     reproduce unchanged. A second instrument test rejects cursor/style/clip/
+     ROP/matrix mutations. Removing the native line ROP call at 1CC2A fails
+     the new oracle's contract predicate.
+
+     Boundaries: decoded commands, inactive focus rectangle, modeled GDI and
+     global-memory handles, caret services, invalidation and string release.
+     Real graphics-style lock counters return to zero. No live rasterization
+     or active-focus rendering is claimed. The fixture stores metadata and
+     calls, not proprietary executable bytes.
+
+     Validation: 356 parser, 43 drawing, 22 instrument tests; all six CTest
+     groups pass with Windows GCC/MSVC and Linux Clang ASan/UBSan. Another
+     100,000 seeded sanitizer mutations pass, as do nine coverage floors,
+     GCC static analysis, RP2350 archive build, 70 claims and conformance.
+     All 35 corpus metrics, asset requests, regions and host silence match
+     D-43. Remaining: independent style-slot semantics, 2P geometry and
+     optional bounded offscreen storage. D-42's visual limitations remain.
+
+D-43 PORT LIFETIME, PROTECTION AND DEFINITION FAILURE (2026-09-24).
+
+     dll-port-lifecycle-fixtures.py extends D-41's decoded-handler oracle
+     through real deletion (3302C/33112), protection (3378A/33821), portInit
+     and selection. It executes 18 lifetime sequences (34 command steps),
+     18 shared/offscreen definitions and eight allocation-failure cases.
+     JSON records active selection, allocated slots, protection, rectangles,
+     DC ownership, available pixel budget and modeled resource cleanup.
+     port_lifecycle.h exports 32 wire steps in 16 sequences; decoded port
+     index 36 cases remain in JSON, with separate base-64 runtime rejection.
+
+     D-17's deletion explanation was wrong: decoded RIP_PortDelete maps
+     source zero to internal -2 (delete all unprotected slots 1..35), not
+     a forbidden master-port deletion. After deleting, handler 46862 calls
+     port selection with its second argument even if deletion was refused
+     or the source did not exist. An empty/deleted destination is lazily
+     recreated. Both indices are validated before any mutation. Internal
+     sentinels -1/-2 are not additional one-digit wire values. The four-byte
+     payload gate and handling of the corpus's truncated !|2p00 are unchanged.
+
+     RIPlib now honors that destination and source-zero deletion rule.
+     Protected slots and their queries survive; deleted queries are cleared.
+     Selecting a deleted slot restores a clean default port. Driver 3378A
+     also refuses to change protection on port zero: RIPlib now guards both
+     source and destination protection flags for the permanent master.
+     Wire widths, aliases and public structure layout are unchanged.
+
+     Definition findings are recorded, not implemented as surface parity:
+     shared rectangles are exclusive with floor-scaled Y, and are not
+     clamped to the display. Empty dimensions reach portInit. Reversed
+     endpoint differences wrap through unsigned 16-bit dimensions: shared
+     reverse-X (110,20)-(10,90) records (110,22)-(65546,102). Offscreen
+     origins reset to zero; a 2,000,000-pixel budget rejects these wrapped
+     sizes but accepts FONTS 1280x290 and SPECLEFX 936x1097. Budget units
+     here are driver pixels, not a portable allocation-byte contract.
+
+     Four failure boundaries (budget, CreateCompatibleDC,
+     CreateCompatibleBitmap, SelectObject), each for a fresh slot and an
+     active replacement, preserve the pixel budget and release acquired
+     modeled resources. Replacement deletes the old port before trying to
+     allocate the new one. On failure, the saved active index is selected
+     again; a deleted active slot becomes a default shared 640x400 port.
+     A successful 100x80 offscreen allocation consumes 8,000 pixel units;
+     deletion releases its bitmap/DC and restores those units.
+
+     Instrument boundaries remain explicit: wire parsing, drawing-state
+     synchronization, strings, GDI resources, clipping and palette services
+     are modeled. The new oracle supplies initialized master bounds and a
+     configurable budget; it removes D-41's unprotected-slot lookup stub.
+     memset is a bounded memory-service model. Real DLL instructions decide
+     geometry, branch selection, slot membership and resource calls. Modeled
+     allocation success for zero dimensions does not prove Windows accepts
+     those bitmap sizes. No live-terminal pixels or renderer state parity
+     follows from these metadata fixtures.
+
+     Two new runtime regressions fail against a2f0eb3 and pass after fixing
+     deletion/protection. They compare allocation/protection/selection after
+     every exported step and test query cleanup, preserved destination state,
+     same-slot recreation, truncation and base-64 out-of-range indices.
+     One instrument regression rejects seven classes of fixture mutation.
+     Removing the native post-delete selection call at 468D6 also fails the
+     oracle's independent selection predicate. Totals: 354 parser, 43 drawing,
+     20 instrument tests; all six CTest groups pass. Windows GCC/MSVC, Linux
+     Clang ASan/UBSan, 100,000 seeded mutations, nine coverage floors, GCC
+     static analysis and RP2350 archive build pass. All 70 existing claims
+     hold and conformance reports zero defects. All 35 corpus metrics,
+     asset requests, region counts and passive host silence match D-42.
+
+     Remaining work: 2P geometry and active-definition synchronization,
+     independent offscreen storage, and its bounded host allocation policy.
+     D-42's FONTS/SPECLEFX visual-fidelity limitation remains open.
+
+D-42 PORT COPY RECTANGLES, SAMPLING AND VIEWPORT CLIPPING (2026-09-24).
+
+     The complete-handler oracle adds 84 boundary cases: 21 input shapes
+     across zero/nonzero origins and shared/offscreen ports. It executes
+     all-zero source/destination rectangles, position-only destinations,
+     reversed/empty endpoints, the left/top boundary, right/bottom trimming,
+     unequal extents and disjoint rectangles. Existing D-41 cases remain.
+     GDI calls are recorded, not rasterized; native sampling evidence remains
+     the bounded D-40 memory-DIB profile. port_copy.h contains 50 shared-port
+     cases derived from driver arguments; runtime tests inject the same
+     viewport geometry, expressed in RIPlib's inclusive representation.
+     They do not claim to validate RIPlib's separate 2P creation semantics.
+
+     2C now resolves explicit coordinates relative to each stored port,
+     floor-scales both Y endpoints and uses exclusive copy extents. All-zero
+     destination means scale to that whole viewport, not copy at its upper
+     left at native size. Reversed/empty rectangles and write modes above 4
+     do nothing. A position-only destination retains source size. Right/bottom
+     trimming shortens both rectangles for originally equal-size copies;
+     scaled copies trim only the affected rectangle. The scaled/native choice
+     is made before trimming, as in 134D0. Remaining renderer clipping also
+     applies to native COPY, whose former memmove shortcut bypassed it.
+
+     Scaled port copies now use D-40's measured sampler. Scratch snapshots
+     preserve overlapping source pixels for every image ROP; draw color,
+     mode and clipping survive the operation. Native COPY retains the
+     memmove fast path without scratch allocation, including clipped copies.
+     Intermediate endpoint arithmetic is 32-bit; unrepresentable dimensions
+     and scratch captures above the
+     existing clipboard capacity are rejected. Wire widths, short-form
+     tolerances and public structure layout remain unchanged.
+
+     Two added runtime regressions check all 50 fixtures across modes 0..5
+     (five supported ROPs plus invalid mode 5), overlapping samples, all four
+     active clip edges and state restoration. Both fail with 4d24ce6's
+     ripscrip2.c and pass with this change. Three older tests had zero-area
+     wire rectangles; their inputs now express the intended nonempty shapes.
+     One new instrument test checks rejection and scaling boundary evidence.
+     Generation also rejects unexpected errors, missing copy events,
+     duplicated boundary inputs and mismatched DCs; mutation tests cover them.
+     Totals: 352 parser, 43 drawing, 19 audit-instrument tests. Windows GCC/
+     MSVC and Clang ASan/UBSan pass all six CTest groups. All 70 existing
+     claims and nine coverage floors hold; static analysis and the RP2350
+     build pass. Another 100,000 seeded sanitizer mutations pass.
+
+     Corpus impact is explicit, not called pixel parity: all 35 scenes replay
+     cleanly; 33 retain their metrics. FONTS foreground changes 15,494 -> 2,092
+     and colors 3 -> 2. SPECLEFX foreground changes 82,788 -> 129,372, retaining
+     7 colors. Asset requests, regions and passive host silence are unchanged.
+     These are the two scenes using 2C and independent offscreen ports.
+     FONTS requests a 1280x290 device surface. SPECLEFX requests two surfaces
+     of 936x187 and 936x1097. RIPlib clamps these definitions to its one display;
+     their copies therefore operate on different storage and viewport geometry
+     than RIPtel. D-42 fixes copy semantics given matching geometry, not this
+     pre-existing offscreen limitation. A full-frame canvas cannot establish
+     correct rendering for those scenes. Port definition/storage is next.
+
+     Reproduce dll-port-fixtures.py <pinned DLL> --check and the normal CTests.
+     Keep both corpus metric snapshots when assessing subsequent port work.
+
+D-41 PORT CREATION, COMPLETE ICON HANDLER AND PORT COPY (2026-09-24).
+
+     scripts/dll-port-fixtures.py executes decoded 2P (466EC), 2s (468EB),
+     portInit (3326F), port selection (3393C/343E4), coordinate conversion
+     (31084), and then 1I (CB38) or 2C (46372), through their real returns.
+     Unlike D-39's helper experiment, show_bmp_file resumes from its display
+     boundary through its real epilogue. The 32 cases cover zero/nonzero
+     origins, shared/offscreen ports, icon stretch/capture flags and both
+     port-copy directions with equal/unequal sizes. No executable DLL bytes
+     are committed. Results live in tests/fixtures/port_calls.json.
+
+     Boundaries: the wire parser and live terminal are not executed. File
+     availability/bitmap metadata, string services, drawing synchronization,
+     initial protection lookup, allocation handles and GDI calls are modeled.
+     The fixture starts with an initialized master port, empty other slots,
+     ample bitmap capacity, no palette remapping and an unprotected session.
+     Port geometry and DC choice come from driver code, not the allocation
+     stub used in D-39. GDI is recorded, not rasterized. An allowlist rejects
+     unexpected execution; missing display/copy events and driver diagnostics
+     fail generation rather than becoming apparently successful fixtures.
+
+     PROVEN call contracts in this profile:
+       * 2P flag bit 0 selects offscreen storage. A shared port defined at
+         logical (10,20)-(110,90) retains device clip (10,22)-(110,102)
+         and uses the master DC. An offscreen port has kind 4, its own DC,
+         and clip (0,0)-(100,80), regardless of the requested origin.
+       * 1I at logical (3,7) draws at (13,30) on that shared port, with
+         native 2x7 size or stretched 2x8. Capture receives that displayed
+         rectangle unchanged, allocates 3x8/3x9, but reads from (23,52).
+         Thus D-40's extra-origin observation survives real port setup and
+         the complete successful handler path. Offscreen capture reads
+         (3,8) from its own DC because its stored origin is zero.
+       * Explicit 2C source/destination coordinates are port-relative.
+         Logical source (3,7)-(5,14) copies 2x8 pixels, using exclusive
+         endpoints and floor scaling on both Y endpoints. Shared source
+         coordinates become (13,30); offscreen source stays (3,8).
+         Reverse copies similarly add the destination shared-port origin.
+         In contrast to 1I capture, 2C applies that origin once.
+
+     RIPlib still treats explicit port-copy coordinates as absolute and adds
+     one to its copy extents, while scaling bottom Y with ceiling. Offscreen
+     selection remains informational in its single-framebuffer model. These
+     are remaining semantic differences, not syntax defects. D-41 changes
+     no runtime behavior; it prevents an isolated icon-offset patch from
+     concealing the shared coordinate/storage problem. The next bounded
+     experiment is 2C's all-zero source/destination, clipping and reversed
+     rectangles before correcting copy extents. Independent storage requires
+     a separate memory/API design; 35 extra 640x400 8-bit surfaces alone would
+     consume 8,960,000 bytes, so eager full-size allocation is not proposed.
+
+     Validation: 18 audit-instrument tests, including four adversarial fixture
+     mutations (display origin, source DC, capture origin, duplicate case).
+     Removing the real handler's X-coordinate add at CDD4 in emulator memory
+     is also rejected by the independent fixture-contract checker. The DLL
+     file remains unchanged. Existing 350 parser and 43 drawing tests and
+     all 70 driver/source claims remain green. No new runtime parity claim
+     follows merely from those existing tests.
+
+     Reproduce: python scripts/dll-port-fixtures.py <pinned DLL> --check.
+
+D-40 NATIVE MEMORY-DIB SAMPLING AND ICON SCREEN CAPTURE (2026-09-24).
+
+     The bounded DLL oracle now includes nine rectangle cases: right-only
+     clipping, negative left/top coordinates and nonzero port origins join
+     the six D-39 cases. scripts/gdi-raster-fixtures.py replays their recorded
+     GDI arguments on native Windows memory DIBs without loading the DLL or
+     reading the desktop. Measurements ran on Windows NT 10.0.26300.0.
+     Top-down 8-bit DIBs have identical source/destination color tables, with
+     both identity and permuted grayscale palettes. GdiFlush precedes CPU
+     access, and every memory DC/bitmap is released. Three stretch modes
+     and COPY/XOR/NOTSRCCOPY produce 162 capture configurations; the tested
+     palettes/modes yield identical index values. JSON retains 27 canonical
+     results; C fixtures exclude the three port-origin boundary cases.
+
+     An additional 1,024 one-dimensional size pairs and 360 two-dimensional
+     grids distinguish the native sampling rule: when BOTH size differences
+     are within one pixel, samples copy in order and the final edge repeats
+     on expansion. Otherwise each axis uses integer center sampling:
+     (position * source + source / 2) / destination. An initial per-axis
+     shortcut hypothesis failed mixed-ratio grids; the two-dimensional
+     fixtures guard that distinction. This is measured behavior for the
+     stated DIB profile, not a claim about every Windows raster backend.
+
+     Standard 1I stretch now uses that sampler. Its clipboard flag captures
+     the displayed framebuffer after the ROP, instead of caching the source
+     asset. It uses actual rendered/style bounds and the driver's expanded
+     width+1, height+1 allocation. Right/bottom clipping shrinks the source
+     while retaining the allocation; left/top coordinates remain intact.
+     Initialized zero padding defines offscreen/disjoint results. Ordinary
+     captures use row copies and repeated edges, avoiding per-pixel division.
+     Full 640x400 capture needs 641x401 bytes: RIP_CLIPBOARD_MAX increases by
+     1,041 bytes to 257,041, allocated only on first clipboard use. Oversized
+     captures preserve the previous clipboard. Other extension blitters keep
+     their existing floor sampler. Wire syntax and structure layout do not
+     change in D-40.
+
+     Six added tests cover the native fixtures, size maps, mixed grids,
+     negative sources/capacity failure, all four icon styles and every byte
+     of a full-frame capture. The wire capture regression fails against
+     3780b18, which cached source pixels, and passes after correction. The
+     other five exercise the new helpers; no fail-before claim applies to
+     them. A directed fuzz seed draws, captures, writes a cached icon, loads
+     it with XOR/stretch/capture, then pastes with source inversion.
+
+     Boundary: with port origin (10,20), the bounded helper chain displays
+     at (10,20) but later adds that origin again, reading (20,40). Native
+     replay captures background there. Full handler/port setup has not been
+     executed, so this is a call-path discrepancy, not proof that every RIPtel
+     window behaves that way. RIPlib retains absolute framebuffer coordinates.
+     Independent port surfaces, unequal palette remapping, halftone, fonts
+     and historical display drivers remain outside this parity claim.
+
+     Reproduce with dll-raster-fixtures.py <pinned DLL> --check, followed by
+     gdi-raster-fixtures.py --check on Windows. Portable CTests consume the
+     checked-in hashes/pixels and require neither Windows GDI nor the DLL.
+     Synchronization and native API contracts:
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-createdibsection
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-setstretchbltmode
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-stretchblt
+
+D-39 IMAGE NOT SOURCE AND EXECUTABLE CAPTURE RECTANGLES (2026-09-24).
+
+     dll-raster-fixtures.py executes the pinned DLL's icon ROP selector
+     (CD5A..CD9A), show_bmp_file dimension/rectangle path (4A410), clipboard
+     allocation/copy path (02866), and native/scaled PortCopy (134D0).
+     It records six capture cases and eighteen ROP selections. File loading,
+     metadata, palette preparation, allocation, locking and invalidation are
+     stubbed; rectangle APIs are modeled; GDI calls are recorded, not drawn.
+     Driver arithmetic, trimming, translation and ROP selection execute
+     unchanged. An allowlist rejects unexpected execution. The checked-in
+     JSON and C fixtures contain results, no proprietary executable bytes.
+
+     All three image paths select 0x00330008 for mode 4: NOTSRCCOPY, which
+     copies the inverted source. RIPlib had reused generic DRAW_MODE_NOT,
+     inverting the destination instead. The shared image blitter now copies
+     complemented 8-bit source samples; Level 2 uses the same helper.
+     Native, stretched, tiled, clipboard and port-copy regressions distinguish
+     operands with different source/destination patterns. Three tests fail
+     against bc9e7e1 and pass after the change. Generic drawing NOT retains
+     its existing destination-inversion contract. Wire fields do not change.
+
+     The oracle resolves the earlier static capture hypothesis: a native
+     2x7 image allocates 3x8 and calls StretchBlt with source 2x7; stretch=1
+     displays 2x8 and captures into 3x9. A 4x7 image at (638,398) allocates
+     5x8 but trims its capture source to 2x2 before stretching. A completely
+     disjoint source reports errors and performs no GDI copy. These are call
+     contracts, NOT evidence of pixel equivalence. Palette remapping and GDI
+     resampling are unmodeled. RIPlib's 1I still caches the source asset;
+     no speculative capture-size/content change accompanies this correction.
+
+     Microsoft documents the operand distinction at:
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-bitblt
+     RIPlib operates on indexed 8-bit values; matching Boolean operands is
+     not a claim of color matching on arbitrary Windows palettes.
+
+D-38 CLIPPED RASTER VALUES AND CAPTURE INITIALIZATION (2026-09-24).
+
+     Evidence class: source inspection and executable pixel/buffer tests,
+     not a claim of Windows GDI pixel parity. Native-size blits used
+     draw_restore_region, which ignored the viewport that scaled blits
+     obeyed. Tile rendering also replaced the viewport with its own box.
+     Restore now intersects the viewport and framebuffer with wide endpoint
+     arithmetic, retains source stride, and reports only modified dirty rows.
+     Tiling intersects both clips, preserves phase, and skips invisible tiles.
+
+     draw_save_region intentionally leaves offscreen destination cells alone.
+     Clipboard reuse and a malloc-backed port-copy scratch buffer therefore
+     exposed stale/uninitialized cells. Capture now initializes its buffer;
+     Level 2 uses that shared helper, and scaled port copies use zeroed
+     scratch storage. Store rejects widths/heights above INT16_MAX before
+     changing the existing image. The public save-region contract is intact.
+
+     Five new regressions fail against 7f773bd and pass with the correction.
+     A sixth exercises partial-offscreen scaled port copying through its wire
+     command. All 35 scene metrics are unchanged. This changes no wire syntax
+     or public structure layout. Generic NOT still means invert destination.
+
+     Open driver boundary, established by static disassembly: 1I calls
+     show_bmp_file at 4A410, then clipBoardGetImage at 02866 when requested.
+     The former returns right=x+width, bottom=y+height (4A53F..4A591); the
+     latter allocates right-left+1, bottom-top+1 (02880..02894). PortCopy at
+     134D0 compares these unequal extents and selects its scaled path.
+     Actual GDI output from that path has NOT been executed or compared.
+     RIPlib still caches the source icon. A rectangle/copy-call oracle is
+     the next instrument; do not silently call this exact capture parity.
+
+D-34 LITERAL PREFIXES AND SESSION RADIX (2026-09-24).
+
+     The old census inferred levels from slot runs. That assumption was
+     shared by every checker, so agreement between them concealed the error.
+     Each 40-byte record actually contains a NUL-terminated prefix at +5;
+     dispatcher RVA 039F63..03A00B compares it. Slots 122/123 carry '3',
+     slots 124..128 carry '9'. There is no duplicate 3D: slot 125 is 9D.
+     All eight table readers now use dll_record.dispatch_level. An adversarial
+     test changes a prefix without moving its slot; documentation checks
+     compare the literal prefix as well as letter, handler, types and arity.
+
+     Canonical 9ESC/9D/9G/9R/9U now dispatch. Existing 3ESC/3G/3R/3U aliases
+     remain accepted; 3D remains delay. 9D stores its host expression and
+     optionally delegates through rip_set_host_command_handler. No shell is
+     invoked. 9U's bounded handler 0252C0..0252F2 reads type, resets cursor
+     state and rejects type >1; it does not read length or decode a payload.
+     Calling that absent decoder an unrecovered format overstated the evidence.
+
+     J/N retain flag-1 base 36; D/d/h/y retain flag-2 base 64. All other
+     numeric decoders now follow the session's selected base, including
+     level 2 and negotiated-width normalization. Disconnect restores 36.
+     Existing wire forms are retained. J10 always selects 36; J1S selects 64.
+
+D-35 LOAD ICON FIELD MEANINGS AND STRETCH (2026-09-24).
+
+     Slot 97's seven fields are XY XY 1 1 1 1 1. The older field-width
+     correction still read the wrong single-digit column as its ROP.
+     Handler CB38..CEF8 loads args[3] into ESI; CD5A selects COPY/XOR/OR/
+     AND/NOT from that register. RIPlib now reads p[5], not p[4]. Filename
+     still starts at 9, clipboard is p[6], boolean stretch p[7], and args[6]
+     is unused in the bounded handler. args[2] participates in the host
+     macro-return branch; RIPlib's direct asset lookup does not emulate it.
+
+     show_bmp_file (4A410) passes stretch to 49340, which calls 31084 to
+     multiply native dimensions by device/logical resolution. RIPlib's
+     fixed 640x400 device over 640x350 logical coordinates therefore leaves
+     width unchanged and computes height*8/7. It does not fill the viewport.
+     Raster-op and seven-to-eight-row tests distinguish both old defects.
+     Existing RIPlib icon-style extensions retain their path when stretch=0.
+     Clipboard caching still stores source pixels, not the driver's screen
+     capture; exact clipboard/GDI compositing is a separate renderer boundary.
+
+D-36 EXACT BUILT-IN BRUSH MASKS (2026-09-24).
+
+     RVA 7AFD8 contains twelve sets of eight WORD rows. EMPTY/SOLID were
+     already recovered; patterns 2..11 were still approximated by generic
+     card patterns. All 80 rows are now copied exactly, using internal IDs
+     12..21 so public card IDs 0..11 keep their meaning. Both filled spans
+     and flood fill select the same masks. A literal 640-bit rendering test
+     and a predicate comparing all 80 source rows with the DLL guard this.
+     Four old tests expected the approximate LINE mask; their background/
+     foreground probes now use rows 6/5 from the actual driver bitmap.
+
+D-37 DEFERRED QUERY DEFINITIONS AND PROTECTION (2026-09-24).
+
+     Handler D3DA..D64C distinguishes immediate mode 0 from definitions
+     1..6. Mode 3 checks port existence/protection at 338BC/33821; mode 4
+     checks text-window existence/protection at E028/27642. The resident
+     helper 13E61..13ED0 recognizes $OFF$. RIPlib now stores definitions
+     without transmission, checks their target slots, clears them on OFF,
+     port replacement/deletion or disconnect, and expands them at the event.
+     Mouse fields suppress resident click queries. Port queries precede
+     text-window queries, then floating viewport/text queries. Entry/exit
+     expressions use modes 5/6. Hosts may trigger additional windows via
+     rip_trigger_query; automatic hit testing retains the existing active
+     text-window model, not a new 36-window compositor.
+
+     Query templates bypass receipt-time preprocessing. Nested conditionals
+     evaluate at the event, quoted operands compare as strings, malformed
+     templates do not transmit partial text, and compound macros/control
+     escapes are handled. Exact-length OVERFLOW queries no longer require
+     an extra character. Unknown host macros remain silent. Full host macro
+     and compressed-prefix emulation are not claimed by this correction.
+
+     The nine new regression functions all fail against baseline 024032a
+     (using inert link stubs only for the two newly introduced public APIs)
+     and pass after correction. Their predicates distinguish presence,
+     field meaning, timing, target protection and observable output.
+
 
 =====================================================================
 ==       SEGMENT 12: BINARY PROVENANCE & EVIDENCE CLASSES          ==
@@ -1997,6 +2535,11 @@ D-17 LEVEL 2 WAS NEVER AUDITED AT ALL.  Recorded 2026-08-13.
      upstream against bbs-land's six-character reading.  The single
      2-character '|2p' in the corpus targets port 0, which is protected
      and refused either way, so rejecting it costs nothing.
+
+     D-43 CORRECTION: this explanation was false. A complete source-zero
+     record deletes secondary ports and then selects its destination.
+     The four-character gate remains; decoded-handler evidence does not
+     establish what the DLL wire parser does with the truncated record.
 
      VERIFIED CORRECT, and worth recording as checked rather than
      assumed: '|2C' RIP_PortCopy matches slot 113 field for field

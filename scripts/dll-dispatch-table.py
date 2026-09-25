@@ -20,6 +20,7 @@ failure is reported rather than papered over.
 Usage:
     python scripts/dll-dispatch-table.py <path>/Ripscrip.dll [-o OUT.json]
 """
+from dll_record import dispatch_level
 import argparse
 import json
 import struct
@@ -109,15 +110,15 @@ def main():
         if ok:
             valid += 1
         argtypes = []
-        for b in raw[20:]:
+        for b in raw[20:38]:
             if b == 0:
                 break
             argtypes.append(ARGTYPE.get(b, f"0x{b:02x}"))
         rows.append(dict(
-            slot=i, index=index,
+            slot=i, index=index, level=dispatch_level(raw),
             handler=f"0x{handler:08x}", handler_rva=f"0x{handler_rva:06x}",
             handler_in_text=ok,
-            letter=chr(letter) if 0x20 <= letter < 0x7F else None,
+            letter=chr(letter) if letter == 27 or 0x20 <= letter < 0x7F else None,
             letter_byte=f"0x{letter:02x}",
             argc=argc, variable_length=argc < 0,
             argtypes=argtypes,
@@ -140,9 +141,9 @@ def main():
         print("anchor RIP_BOUNDED_TEXT ('\"'): letter not found in table")
 
     printable = [r for r in rows if r["letter"] and r["handler_in_text"]]
-    print(f"\n{'SLOT':>4} {'LTR':>4} {'HANDLER':>10} {'ARGC':>5}  ARGTYPES")
+    print(f"\n{'SLOT':>4} {'LEVEL':>5} {'LTR':>4} {'HANDLER':>10} {'ARGC':>5}  ARGTYPES")
     for r in printable:
-        print(f"{r['slot']:>4} {r['letter']!r:>4} {r['handler_rva']:>10} {r['argc']:>5}  "
+        print(f"{r['slot']:>4} {r['level']:>5} {r['letter']!r:>4} {r['handler_rva']:>10} {r['argc']:>5}  "
               f"{','.join(r['argtypes'])}")
 
     Path(args.out).write_text(json.dumps(rows, indent=1))

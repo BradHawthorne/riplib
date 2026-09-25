@@ -13,6 +13,11 @@
 #include "../src/rip_affine_oval.h"
 #include "../src/rip_clipboard.h"
 #include "fixtures/affine_oval.h"
+#include "fixtures/image_rops.h"
+#include "fixtures/gdi_raster.h"
+#include "fixtures/port_copy.h"
+#include "fixtures/port_lifecycle.h"
+#include "fixtures/style_slots.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -101,6 +106,431 @@ static void feed_upload_bytes(rip_state_t *s, const uint8_t *data, size_t len) {
         rip_file_upload_byte_state(s, data[i]);
 }
 
+static void test_tiled_blit_intersects_viewport(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t pixels[6] = {1, 2, 3, 4, 5, 6};
+    TEST("tiled blit intersects viewport without moving tile phase");
+    init_fixture(&s, &ctx);
+    draw_set_clip(3, 3, 6, 6);
+    rip_blit_pixels_tiled(&s, 1, 1, 8, 8, pixels, 3, 2, DRAW_MODE_COPY);
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            uint8_t expected = (x >= 3 && x <= 6 && y >= 3 && y <= 6)
+                ? pixels[((y - 1) % 2) * 3 + (x - 1) % 3] : 0;
+            if (fb[y * W + x] != expected) {
+                FAIL("tile escaped viewport or its phase changed"); return;
+            }
+        }
+    }
+    rip_blit_pixels_tiled(&s, 20, 20, 25, 25, pixels, 3, 2, DRAW_MODE_COPY);
+    if (fb[20 * W + 20] || draw_get_clip_x0() != 3 ||
+        draw_get_clip_y0() != 3 || draw_get_clip_x1() != 6 ||
+        draw_get_clip_y1() != 6) {
+        FAIL("disjoint tile wrote pixels or lost viewport"); return;
+    }
+    PASS();
+}
+
+static void test_clipboard_capture_clears_padding(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t old[9] = {9,9,9,9,9,9,9,9,9};
+    static const uint8_t expected[9] = {0,0,0,0,1,2,0,3,4};
+    TEST("clipboard capture clears offscreen padding on reuse");
+    init_fixture(&s, &ctx);
+    fb[0] = 1; fb[1] = 2; fb[W] = 3; fb[W + 1] = 4;
+    if (!rip_clipboard_store_pixels(&s, old, 3, 3) ||
+        !rip_clipboard_capture(&s, -1, -1, 3, 3) ||
+        memcmp(s.clipboard.data, expected, sizeof(expected))) {
+        FAIL("offscreen cells retained bytes from the old capture"); return;
+    }
+    /* The Level 2 extension must use the same capture contract. */
+    (void)rip_clipboard_store_pixels(&s, old, 3, 3);
+    {
+        const int16_t params[5] = {1, -1, -1, 3, 3};
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_CLIPBOARD,
+                         "", 0, params, 5);
+    }
+    if (memcmp(s.clipboard.data, expected, sizeof(expected))) {
+        FAIL("Level 2 capture retained old padding"); return;
+    }
+    if (!rip_clipboard_capture(&s, W, H, 3, 3)) {
+        FAIL("offscreen capture failed"); return;
+    }
+    for (int i = 0; i < 9; i++) {
+        if (s.clipboard.data[i]) { FAIL("offscreen capture was not blank"); return; }
+    }
+    PASS();
+}
+
+static void test_clipboard_rejects_unrepresentable_dimensions(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t pixels[32768] = {7};
+    TEST("clipboard rejects dimensions its metadata cannot represent");
+    init_fixture(&s, &ctx);
+    if (!rip_clipboard_store_pixels(&s, pixels, 1, 1) ||
+        rip_clipboard_store_pixels(&s, pixels, 32768, 1) ||
+        rip_clipboard_store_pixels(&s, pixels, 1, 32768) ||
+        !s.clipboard.valid || s.clipboard.width != 1 ||
+        s.clipboard.height != 1 || s.clipboard.data[0] != 7) {
+        FAIL("invalid dimensions were accepted or destroyed the old image"); return;
+    }
+    PASS();
+}
+
+static void test_scaled_port_copy_trims_source(void) {
+    rip_state_t s;
+    comp_context_t ctx;
+    static const uint8_t expected[8] = {5,5,5,5,6,6,6,6};
+    TEST("scaled port copy trims source but retains destination extent");
+    init_fixture(&s, &ctx);
+    memset(fb, 0xA7, sizeof(fb));
+    fb[638] = 5; fb[639] = 6;
+    /* Exclusive source (638,0)..(642,1), destination (10,10)..(18,11).
+     * The driver shrinks the source to two pixels, then stretches to eight. */
+    feed_script(&s, &ctx, "!|2C" "0HQ00HU01" "00A0A0I0B" "000000|");
+    if (memcmp(&fb[11 * W + 10], expected, sizeof(expected)) ||
+        fb[11 * W + 9] != 0xA7 || fb[11 * W + 18] != 0xA7) {
+        FAIL("scaled copy exposed scratch bytes or changed its extent"); return;
+    }
+    PASS();
+}
+
+/* Evaluate the binary driver's ROP3 truth table (pattern bit = 0).
+ * This independently derives expected values for the indexed renderer. */
+static uint8_t image_rop_expected(int mode, uint8_t source, uint8_t dest) {
+    uint8_t truth = (uint8_t)(image_rop_fixtures[mode] >> 16);
+    uint8_t result = 0;
+    for (int bit = 0; bit < 8; bit++) {
+        unsigned index = (((source >> bit) & 1u) << 1) | ((dest >> bit) & 1u);
+        result |= (uint8_t)(((truth >> index) & 1u) << bit);
+    }
+    return result;
+}
+
+static void test_image_blit_driver_rops(void) {
+    rip_state_t s; comp_context_t ctx;
+    static const uint8_t source[4] = {0x12, 0x34, 0x56, 0x78};
+    TEST("native/scaled image ROPs match driver truth tables");
+    init_fixture(&s, &ctx);
+    for (int mode = 0; mode < 6; mode++) {
+        for (int scaled = 0; scaled < 2; scaled++) {
+            int size = scaled ? 4 : 2;
+            memset(fb, 0xA5, sizeof(fb));
+            s.write_mode = DRAW_MODE_XOR;
+            draw_set_color(0x39);
+            draw_set_clip(11, 10, 12, 12);
+            rip_blit_pixels(&s, 10, 10, source, 2, 2,
+                            (int16_t)size, (int16_t)size, (uint8_t)mode);
+            for (int y = 9; y <= 14; y++) {
+                for (int x = 9; x <= 14; x++) {
+                    uint8_t expected = 0xA5;
+                    if (x >= 11 && x <= 12 && y >= 10 && y <= 12 &&
+                        x < 10 + size && y < 10 + size) {
+                        int index = ((y - 10) * 2 / size) * 2 + (x - 10) * 2 / size;
+                        expected = image_rop_expected(mode, source[index], 0xA5);
+                    }
+                    if (fb[y * W + x] != expected) {
+                        FAIL("native/scaled image changed wrong operand or escaped clip"); return;
+                    }
+                }
+            }
+            if (draw_get_color() != 0x39) { FAIL("image blit lost color"); return; }
+            draw_reset_clip(); draw_set_color(3); draw_pixel(0, 0);
+            if (fb[0] != (0xA5 ^ 3)) { FAIL("image blit lost drawing mode"); return; }
+        }
+    }
+    PASS();
+}
+
+static void test_icon_and_clipboard_not_source(void) {
+    rip_state_t s; comp_context_t ctx;
+    static uint8_t source[14] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14};
+    TEST("wire icon and clipboard NOT invert source pixels");
+    init_fixture(&s, &ctx);
+    if (!rip_icon_cache_pixels(&s.icon_state, "ROP", 3, source, 2, 7) ||
+        !rip_clipboard_store_pixels(&s, source, 2, 7)) {
+        FAIL("asset setup failed"); return;
+    }
+    memset(fb, 0xA5, sizeof(fb));
+    feed_script(&s, &ctx, "!|1I000004000ROP|1I040004010ROP|1P0800040|");
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 2; x++) {
+            /* Native GDI's 7->8 shortcut repeats the final sample. */
+            uint8_t scaled = image_rop_expected(4, source[(y < 7 ? y : 6) * 2 + x], 0xA5);
+            uint8_t native = y < 7 ? image_rop_expected(4, source[y * 2 + x], 0xA5) : 0xA5;
+            if (fb[y * W + x] != native || fb[y * W + 4 + x] != scaled ||
+                fb[y * W + 8 + x] != native) {
+                FAIL("LOAD_ICON or PUT_IMAGE inverted the destination"); return;
+            }
+        }
+    }
+    draw_set_clip(10, 10, 12, 12);
+    rip_blit_pixels_tiled(&s, 9, 9, 14, 14, source, 2, 7, DRAW_MODE_NOT);
+    if (fb[10 * W + 10] != image_rop_expected(4, source[3], 0xA5) ||
+        fb[9 * W + 9] != 0xA5) { FAIL("tiled NOT differs"); return; }
+    PASS();
+}
+
+static void test_port_copy_not_source(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("wire port copies invert source in native and scaled paths");
+    init_fixture(&s, &ctx);
+    memset(fb, 0xA5, sizeof(fb));
+    fb[0] = 0x12; fb[1] = 0x34;
+    /* Native 2x1, then scaled 4x1 copy, followed by Level 2 clipboard. */
+    feed_script(&s, &ctx, "!|2C" "000000201" "00A000C01" "400000|"
+                          "2C" "000000201" "00K000O01" "400000|");
+    if (fb[10] != 0xED || fb[11] != 0xCB || fb[20] != 0xED ||
+        fb[21] != 0xED || fb[22] != 0xCB || fb[23] != 0xCB) {
+        FAIL("port copy inverted destination or scaled incorrectly"); return;
+    }
+    (void)rip_clipboard_capture(&s, 0, 0, 2, 1);
+    {
+        const int16_t params[4] = {2, 30, 0, 4};
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_CLIPBOARD, "", 0, params, 4);
+    }
+    if (fb[30] != 0xED || fb[31] != 0xCB) { FAIL("Level 2 paste differs"); return; }
+    PASS();
+}
+
+static void test_port_copy_driver_rectangles(void) {
+    static uint8_t original[W * H], expected[W * H];
+    static const char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    rip_state_t s; comp_context_t ctx;
+    TEST("wire port copies match 50 driver rectangles, five ROPs and invalid mode");
+    init_fixture(&s, &ctx);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+        original[y * W + x] = (uint8_t)(x * 13 + y * 29);
+    s.ports[1].allocated = true;
+    for (size_t f = 0; f < sizeof(port_copy_fixtures) / sizeof(port_copy_fixtures[0]); f++) {
+        const int16_t *p = port_copy_fixtures[f].port;
+        const int16_t *b = port_copy_fixtures[f].blit;
+        s.ports[1].vp_x0 = p[0]; s.ports[1].vp_y0 = p[1];
+        s.ports[1].vp_x1 = (int16_t)(p[2] - 1); s.ports[1].vp_y1 = (int16_t)(p[3] - 1);
+        for (int mode = 0; mode <= 5; mode++) {
+            char command[40] = "!|2C"; int n = 4;
+            memcpy(fb, original, sizeof(fb)); memcpy(expected, original, sizeof(expected));
+            for (int i = 0; i < 12; i++) {
+                int value = i == 10 ? mode : port_copy_fixtures[f].args[i];
+                int width = (i == 0 || i == 5 || i == 10) ? 1 : i == 11 ? 5 : 2;
+                for (int j = width - 1; j >= 0; j--) {
+                    command[n + j] = digits[value % 36]; value /= 36;
+                }
+                n += width;
+            }
+            command[n++] = '|'; command[n] = 0;
+            if (port_copy_fixtures[f].valid && mode <= 4) {
+                bool copy_samples = abs(b[2] - b[6]) <= 1 && abs(b[3] - b[7]) <= 1;
+                for (int y = 0; y < b[7]; y++) for (int x = 0; x < b[6]; x++) {
+                    int sx = b[0] + rip_gdi_sample((uint16_t)x, (uint16_t)b[2], (uint16_t)b[6], copy_samples);
+                    int sy = b[1] + rip_gdi_sample((uint16_t)y, (uint16_t)b[3], (uint16_t)b[7], copy_samples);
+                    int dest = (b[5] + y) * W + b[4] + x;
+                    expected[dest] = image_rop_expected(mode, original[sy * W + sx], original[dest]);
+                }
+            }
+            feed_script(&s, &ctx, command);
+            if (memcmp(fb, expected, sizeof(fb))) {
+                printf("fixture=%u mode=%d ", (unsigned)f, mode);
+                FAIL("copy pixels/extent differ from driver call"); return;
+            }
+        }
+    }
+    PASS();
+}
+
+static void test_port_copy_clip_and_overlap(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("port copies preserve active clip, overlapping samples and draw state");
+    init_fixture(&s, &ctx);
+    for (int mode = 0; mode <= 4; mode++) {
+        uint8_t before[16];
+        for (int x = 0; x < 16; x++) fb[x] = before[x] = (uint8_t)(x * 17);
+        s.write_mode = DRAW_MODE_OR; draw_set_write_mode(DRAW_MODE_OR); draw_set_color(73);
+        draw_set_clip(3, 0, 4, 0);
+        char command[] = "!|2C000000801002000A01000000|";
+        command[22] = (char)('0' + mode);
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_COPY,
+                          command + 4, 24, NULL, 0);
+        for (int x = 0; x < 16; x++) {
+            uint8_t expected = x >= 3 && x <= 4 ? image_rop_expected(mode, before[x - 2], before[x]) : before[x];
+            if (fb[x] != expected) { FAIL("overlap or viewport changed the sampled source"); return; }
+        }
+        if (draw_get_color() != 73 ||
+            draw_get_clip_x0() != 3 || draw_get_clip_x1() != 4) {
+            FAIL("copy leaked drawing state"); return;
+        }
+        uint8_t prior = fb[3];
+        draw_set_color(2); draw_pixel(3, 0);
+        if (fb[3] != (uint8_t)(prior | 2)) { FAIL("copy leaked write mode"); return; }
+    }
+    {
+        static uint8_t before[W * H];
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+            fb[y * W + x] = before[y * W + x] = (uint8_t)(x * 13 + y * 29);
+        draw_set_clip(3, 3, 4, 4);
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_COPY,
+                          "000000707002020909000000", 24, NULL, 0);
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            uint8_t expected = x >= 3 && x <= 4 && y >= 3 && y <= 4
+                ? before[(y - 2) * W + x - 2] : before[y * W + x];
+            if (fb[y * W + x] != expected) { FAIL("native copy escaped a clip edge"); return; }
+        }
+    }
+    PASS();
+}
+
+static void test_icon_capture_native_gdi_fixtures(void) {
+    static const char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    TEST("wire icon capture matches native memory-DIB values");
+    for (size_t i = 0; i < sizeof(gdi_capture_fixtures) / sizeof(gdi_capture_fixtures[0]); i++) {
+        rip_state_t s; comp_context_t ctx;
+        uint8_t pixels[64]; char command[40];
+        int x = gdi_capture_fixtures[i].x, y = gdi_capture_fixtures[i].y;
+        int w = gdi_capture_fixtures[i].w, h = gdi_capture_fixtures[i].h;
+        int cw = gdi_capture_fixtures[i].cw, ch = gdi_capture_fixtures[i].ch;
+        if (x < 0 || y < 0) continue; /* signed helper cases are checked separately */
+        init_fixture(&s, &ctx);
+        memset(fb, 0xA5, sizeof(fb));
+        for (int k = 0; k < w * h; k++) pixels[k] = (uint8_t)(k * 11 + 7);
+        if (!rip_icon_cache_pixels(&s.icon_state, "GDI", 3, pixels, (uint16_t)w, (uint16_t)h)) {
+            FAIL("asset setup failed"); return;
+        }
+        y = (y * 7 + 7) / 8;
+        snprintf(command, sizeof(command), "!|1I%c%c%c%c0%d1%d0GDI|",
+                 digits[x / 36], digits[x % 36], digits[y / 36], digits[y % 36],
+                 gdi_capture_fixtures[i].mode, gdi_capture_fixtures[i].stretch);
+        feed_script(&s, &ctx, command);
+        if (!s.clipboard.valid || s.clipboard.width != cw || s.clipboard.height != ch ||
+            memcmp(s.clipboard.data, gdi_capture_fixtures[i].pixels, (size_t)cw * ch)) {
+            FAIL("clipboard dimensions, raster result or samples differ from native GDI"); return;
+        }
+    }
+    {
+        rip_state_t s; comp_context_t ctx;
+        init_fixture(&s, &ctx);
+        /* The directed fuzz seed must reach capture through the wire cache path. */
+        feed_script(&s, &ctx,
+            "!|c05|B00000A0A|1C000003060|1W0GDI|1I000001110GDI|1P0404040|");
+        if (!s.clipboard.valid || s.clipboard.width != 5 || s.clipboard.height != 10 ||
+            s.icon_state.request_count != 0 || s.clipboard.data[0] != 0) {
+            printf("valid=%d size=%dx%d requests=%d first=%d ", s.clipboard.valid,
+                   s.clipboard.width, s.clipboard.height, s.icon_state.request_count,
+                   s.clipboard.data ? s.clipboard.data[0] : -1);
+            FAIL("cached-icon fuzz seed did not reach screen capture"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_gdi_sampling_maps(void) {
+    TEST("GDI sampler matches 1024 native size-pair hashes");
+    for (size_t i = 0; i < sizeof(gdi_axis_fixtures) / sizeof(gdi_axis_fixtures[0]); i++) {
+        uint32_t hash = 2166136261u;
+        for (uint16_t p = 0; p < gdi_axis_fixtures[i].dest; p++)
+            hash = (hash ^ rip_gdi_sample(p, gdi_axis_fixtures[i].source, gdi_axis_fixtures[i].dest,
+                    abs((int)gdi_axis_fixtures[i].source - gdi_axis_fixtures[i].dest) <= 1)) * 16777619u;
+        if (hash != gdi_axis_fixtures[i].hash) { FAIL("sample map differs from GDI"); return; }
+    }
+    PASS();
+}
+
+static void test_gdi_sampling_grids(void) {
+    rip_state_t s; comp_context_t ctx;
+    uint8_t source[64];
+    TEST("GDI blitter matches 360 native two-dimensional grids");
+    init_fixture(&s, &ctx);
+    for (int i = 0; i < 64; i++) source[i] = (uint8_t)i;
+    for (size_t i = 0; i < sizeof(gdi_grid_fixtures) / sizeof(gdi_grid_fixtures[0]); i++) {
+        int dw = gdi_grid_fixtures[i].dw, dh = gdi_grid_fixtures[i].dh;
+        uint32_t hash = 2166136261u;
+        memset(fb, 0xA5, sizeof(fb));
+        rip_blit_pixels_gdi(&s, 0, 0, source, gdi_grid_fixtures[i].w, gdi_grid_fixtures[i].h,
+                            (int16_t)dw, (int16_t)dh, DRAW_MODE_COPY);
+        for (int y = 0; y < dh; y++) for (int x = 0; x < dw; x++)
+            hash = (hash ^ fb[y * W + x]) * 16777619u;
+        if (hash != gdi_grid_fixtures[i].hash) { FAIL("2D sample map differs from GDI"); return; }
+    }
+    PASS();
+}
+
+static void test_icon_capture_signed_and_capacity(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("icon capture handles negative origins and rejects excess capacity");
+    init_fixture(&s, &ctx);
+    for (size_t i = 0; i < sizeof(gdi_capture_fixtures) / sizeof(gdi_capture_fixtures[0]); i++) {
+        uint8_t pixels[64];
+        rip_image_rect_t r = {gdi_capture_fixtures[i].x, gdi_capture_fixtures[i].y,
+                             gdi_capture_fixtures[i].w, gdi_capture_fixtures[i].h};
+        if (r.x >= 0) continue;
+        memset(fb, 0xA5, sizeof(fb));
+        for (int k = 0; k < r.width * r.height; k++) pixels[k] = (uint8_t)(k * 11 + 7);
+        rip_blit_pixels_gdi(&s, r.x, r.y, pixels, (uint16_t)r.width, (uint16_t)r.height,
+                            r.width, r.height, (uint8_t)gdi_capture_fixtures[i].mode);
+        if (!rip_clipboard_capture_icon(&s, &r) ||
+            memcmp(s.clipboard.data, gdi_capture_fixtures[i].pixels,
+                   (size_t)s.clipboard.width * s.clipboard.height)) {
+            FAIL("negative source capture differs from native GDI"); return;
+        }
+    }
+    {
+        uint8_t old[64];
+        size_t bytes = (size_t)s.clipboard.width * s.clipboard.height;
+        int16_t old_w = s.clipboard.width, old_h = s.clipboard.height;
+        const rip_image_rect_t oversized = {0, 0, 641, 401};
+        const rip_image_rect_t overflow = {0, 0, INT16_MAX, 1};
+        memcpy(old, s.clipboard.data, bytes);
+        if (rip_clipboard_capture_icon(&s, &oversized) || rip_clipboard_capture_icon(&s, &overflow) ||
+            s.clipboard.width != old_w || s.clipboard.height != old_h ||
+            memcmp(old, s.clipboard.data, bytes)) { FAIL("failed capture destroyed the previous image"); return; }
+    }
+    PASS();
+}
+
+static void test_icon_capture_full_frame(void) {
+    rip_state_t s; comp_context_t ctx;
+    const rip_image_rect_t rect = {0, 0, W, H};
+    TEST("full-frame capture fits expanded clipboard capacity");
+    init_fixture(&s, &ctx);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) fb[y * W + x] = (uint8_t)(x ^ y);
+    if (!rip_clipboard_capture_icon(&s, &rect) || s.clipboard.width != W + 1 || s.clipboard.height != H + 1) {
+        FAIL("full-frame capture no longer fits"); return;
+    }
+    for (int y = 0; y <= H; y++) for (int x = 0; x <= W; x++) {
+        uint8_t expected = (uint8_t)((x < W ? x : W - 1) ^ (y < H ? y : H - 1));
+        if (s.clipboard.data[y * (W + 1) + x] != expected) { FAIL("expanded edge differs"); return; }
+    }
+    PASS();
+}
+
+static void test_icon_style_capture_bounds(void) {
+    static uint8_t pixels[4] = {0x11, 0x22, 0x33, 0x44};
+    TEST("icon-style capture uses the rendered rectangle and ROP result");
+    for (int mode = 0; mode < 4; mode++) {
+        rip_state_t s; comp_context_t ctx;
+        init_fixture(&s, &ctx); memset(fb, 0xA5, sizeof(fb));
+        (void)rip_icon_cache_pixels(&s.icon_state, "BOX", 3, pixels, 2, 2);
+        s.icon_style_active = true; s.icon_style_style = (uint16_t)mode;
+        s.icon_style_x0 = s.icon_style_y0 = 10;
+        s.icon_style_x1 = s.icon_style_y1 = 16;
+        feed_script(&s, &ctx, "!|1I000001100BOX|");
+        int extent = mode == 2 ? 2 : 7, origin = mode == 2 ? 12 : 10;
+        if (!s.clipboard.valid || s.clipboard.width != extent + 1 || s.clipboard.height != extent + 1) {
+            FAIL("capture retained source dimensions or ignored style bounds"); return;
+        }
+        for (int y = 0; y <= extent; y++) for (int x = 0; x <= extent; x++) {
+            int sx = origin + (x < extent ? x : extent - 1);
+            int sy = origin + (y < extent ? y : extent - 1);
+            if (s.clipboard.data[y * (extent + 1) + x] != draw_get_pixel((int16_t)sx, (int16_t)sy)) {
+                FAIL("capture did not contain the displayed ROP result"); return;
+            }
+        }
+    }
+    PASS();
+}
+
 static void test_preproc_gt_handling(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -160,18 +590,21 @@ static void test_port_text_justification_roundtrip(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("port switch preserves text justification");
+    TEST("style switch preserves text justification across ports");
     init_fixture(&s, &ctx);
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
                       "100", 3, NULL, 0);
+    feed_script(&s, &ctx, "!|2Y100|");
     s.font_hjust = 2;
     s.font_vjust = 3;
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
                       "000", 3, NULL, 0);
+    feed_script(&s, &ctx, "!|2Y000|");
     s.font_hjust = 0;
     s.font_vjust = 0;
     ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_SWITCH,
                       "100", 3, NULL, 0);
+    feed_script(&s, &ctx, "!|2Y100|");
     if (s.font_hjust == 2 && s.font_vjust == 3)
         PASS();
     else
@@ -491,14 +924,14 @@ static void test_bgi_fill_mapping(void) {
     int ok = 1;
     if (rip_bgi_fill_to_card(0)  != -1) ok = 0;  /* EMPTY */
     if (rip_bgi_fill_to_card(1)  !=  0) ok = 0;  /* SOLID */
-    if (rip_bgi_fill_to_card(2)  !=  4) ok = 0;  /* LINE → horizontal */
-    if (rip_bgi_fill_to_card(3)  !=  7) ok = 0;  /* LTSLASH */
-    if (rip_bgi_fill_to_card(4)  !=  3) ok = 0;  /* SLASH */
-    if (rip_bgi_fill_to_card(5)  !=  2) ok = 0;  /* BKSLASH */
-    if (rip_bgi_fill_to_card(7)  !=  6) ok = 0;  /* HATCH */
-    if (rip_bgi_fill_to_card(9)  !=  8) ok = 0;  /* INTERLEAVE */
-    if (rip_bgi_fill_to_card(10) !=  9) ok = 0;  /* WIDE_DOT */
-    if (rip_bgi_fill_to_card(11) != 10) ok = 0;  /* CLOSE_DOT */
+    if (rip_bgi_fill_to_card(2)  != 12) ok = 0;  /* LINE → horizontal */
+    if (rip_bgi_fill_to_card(3)  != 13) ok = 0;  /* LTSLASH */
+    if (rip_bgi_fill_to_card(4)  != 14) ok = 0;  /* SLASH */
+    if (rip_bgi_fill_to_card(5)  != 15) ok = 0;  /* BKSLASH */
+    if (rip_bgi_fill_to_card(7)  != 17) ok = 0;  /* HATCH */
+    if (rip_bgi_fill_to_card(9)  != 19) ok = 0;  /* INTERLEAVE */
+    if (rip_bgi_fill_to_card(10) != 20) ok = 0;  /* WIDE_DOT */
+    if (rip_bgi_fill_to_card(11) != 21) ok = 0;  /* CLOSE_DOT */
     if (rip_bgi_fill_to_card(12) != 11) ok = 0;  /* USER */
     if (ok) PASS(); else FAIL("BGI fill style maps to wrong pattern");
 }
@@ -1190,6 +1623,103 @@ static void test_l1_audio_off_sentinel(void) {
         PASS();
     else
         FAIL("1w treated $OFF$ as a filename");
+}
+
+static void test_style_driver_matrix(void) {
+    rip_state_t s; comp_context_t ctx;
+    const char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    TEST("128 native style selection/protection cases survive port switches");
+    init_fixture(&s, &ctx);
+    for (size_t i = 0; i < sizeof(style_cases)/sizeof(style_cases[0]); ++i) {
+        char select[] = "!|2Y000|";
+        rip_session_reset(&s);
+        feed_script(&s, &ctx, "!|c02|k03|W01|S0104|2Y700|c05|k06|W02|S0109|"
+                              "2YZ00|c0A|k0B|W03|S010C|");
+        select[4] = digits[style_cases[i].active];
+        feed_script(&s, &ctx, select);
+        select[4] = digits[style_cases[i].dest];
+        select[6] = digits[style_cases[i].flags];
+        feed_script(&s, &ctx, select);
+        feed_script(&s, &ctx, "!|2s100|2s000|");
+        if (s.rip2_state.cur_style_slot != style_cases[i].dest ||
+            s.rip2_state.protected_style != style_cases[i].protected_mask ||
+            s.draw_color != style_cases[i].color || s.back_color != style_cases[i].back ||
+            s.write_mode != style_cases[i].mode || s.fill_color != style_cases[i].fill) {
+            printf("case %zu: ", i); FAIL("native style contract differs"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_style_port_independence(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("styles preserve port position and port changes preserve styles");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|c05|W01|m0A0E|2Y100|");
+    if (s.draw_x != 10 || s.draw_y != 16 || s.draw_color != 15 || s.write_mode != 0) {
+        FAIL("new style did not default independently of cursor"); return;
+    }
+    feed_script(&s, &ctx, "!|c03|2P100000A0A00020000|");
+    if (s.draw_color != 3 || s.draw_x != 0 || s.draw_y != 0) {
+        FAIL("port activation changed style or inherited cursor"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y000|2s000|");
+    if (s.draw_color != 5 || s.write_mode != 1 || s.draw_x != 10 || s.draw_y != 16) {
+        FAIL("independent style/cursor restoration failed"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y100|2Y101|c09|2s100|2p1100|");
+    if (s.draw_color != 3 || s.rip2_state.cur_style_slot != 1) {
+        FAIL("protection or port recreation lost selected style"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y001|c07|");
+    if (s.draw_color != 7 || (s.rip2_state.protected_style & 1)) {
+        FAIL("style zero incorrectly protected"); return;
+    }
+    PASS();
+}
+
+static void test_style_attributes_and_reset(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("style snapshots restore patterns/fonts and reset honors protection");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2Y100|c05|k03|s737373737373737309|=041BEO03|N00|");
+    s.font_id = 3; s.font_size = 4; s.font_dir = 1;
+    s.font_hjust = 2; s.font_vjust = 3; s.font_attrib = 5;
+    s.font_ext_id = 6; s.font_ext_attr = 7; s.font_ext_size = 1234;
+    s.char_spacing = 150;
+    feed_script(&s, &ctx, "!|2Y200|c0C|k04|s000000000000000002|2Y100|");
+    if (s.draw_color != 5 || s.back_color != 3 || s.fill_color != 9 || s.fill_pattern != 12 ||
+        s.line_pattern != 0x000F || s.line_thick != 3 || s.filled_borders_enabled ||
+        s.font_id != 3 || s.font_size != 4 || s.font_dir != 1 || s.font_hjust != 2 ||
+        s.font_vjust != 3 || s.font_attrib != 5 || s.font_ext_id != 6 ||
+        s.font_ext_attr != 7 || s.font_ext_size != 1234 || s.char_spacing != 150) {
+        FAIL("style attributes failed to round-trip"); return;
+    }
+    /* A restored all-on user pattern must not retain slot 2's all-off bits. */
+    feed_script(&s, &ctx, "!|B00000707|");
+    if (draw_get_pixel(2, 2) != s.palette[9]) {
+        FAIL("restored custom fill was not applied to the renderer"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y101|*|2Y200|");
+    if (s.draw_color != 15 || s.font_size != 1 || s.char_spacing != 0) {
+        FAIL("reset resurrected an unprotected style"); return;
+    }
+    feed_script(&s, &ctx, "!|2Y100|");
+    if (s.draw_color != 5 || s.font_ext_size != 1234 || s.char_spacing != 150 ||
+        !s.filled_borders_enabled || !(s.rip2_state.protected_style & 2)) {
+        FAIL("reset lost a protected style"); return;
+    }
+    rip_session_reset(&s);
+    feed_script(&s, &ctx, "!|2Y100|");
+    if (s.draw_color != 15 || s.rip2_state.protected_style || s.char_spacing ||
+        s.font_ext_size || s.user_fill_pattern[0] != 255) {
+        FAIL("disconnect retained old styles"); return;
+    }
+    feed_script(&s, &ctx, "!|c06|2Y20|J1S|2Ya00|");
+    if (s.draw_color != 6 || s.rip2_state.cur_style_slot != 1) {
+        FAIL("truncated or out-of-range style changed selection"); return;
+    }
+    PASS();
 }
 
 static void test_slot_protection_round_trip(void) {
@@ -2034,7 +2564,7 @@ static void test_port_switch_preserves_color_and_pos(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("port switch saves/restores color, position, line style, fill");
+    TEST("port switch restores position and keeps selected style");
     init_fixture(&s, &ctx);
     /* Define port 1.  Set state on port 0 first. */
     s.draw_color = 7;
@@ -2048,9 +2578,9 @@ static void test_port_switch_preserves_color_and_pos(void) {
     /* Mutate state inside port 1. */
     s.draw_color = 2;
     s.draw_x = 30;
-    /* Switch back to port 0 — state should be restored. */
+    /* Restore port 0 position while retaining the current graphics style. */
     feed_script(&s, &ctx, "!|2s000|");
-    if (s.draw_color == 7 &&
+    if (s.draw_color == 2 &&
         s.fill_color == 11 &&
         s.draw_x == 100 &&
         s.draw_y == 80 &&
@@ -2502,13 +3032,13 @@ static void test_back_color_visible_in_pattern_fill(void) {
     /* k5: back_color=5 (palette slot 245).
      * S 02 0C: BGI LINE_FILL pattern, fill_color=12 (palette slot 252).
      * B 05 05 0F 0F: bar (5,5)-(15,15).
-     * Pattern 4 (horizontal) row 5 (y&7=5) = 0x00 → all OFF → back_color
-     * Pattern 4 row 6 (y&7=6) = 0xFF → all ON → fill_color */
+     * Driver LINE row 6 (y&7=6) = 0x00 → all OFF → back_color
+     * Driver LINE row 5 (y&7=5) = 0xFF → all ON → fill_color */
     feed_script(&s, &ctx, "!|k5|");
     feed_script(&s, &ctx, "!|S020C|");
     feed_script(&s, &ctx, "!|B05050F0F|");
-    if (draw_get_pixel(10, 5) == 245 &&
-        draw_get_pixel(10, 6) == 252)
+    if (draw_get_pixel(10, 6) == 245 &&
+        draw_get_pixel(10, 5) == 252)
         PASS();
     else
         FAIL("pattern fill did not use back_color for OFF bits");
@@ -2539,7 +3069,7 @@ static void test_back_color_command_propagates_to_draw_layer(void) {
     feed_script(&s, &ctx, "!|S020C|");
     feed_script(&s, &ctx, "!|k3|");      /* back_color = 3 → palette slot 243 */
     feed_script(&s, &ctx, "!|B05050F0F|");
-    if (draw_get_pixel(10, 5) == 243)    /* OFF bit row */
+    if (draw_get_pixel(10, 6) == 243)    /* OFF bit row */
         PASS();
     else
         FAIL("back_color change did not propagate");
@@ -2717,6 +3247,120 @@ static void test_l2_port_delete(void) {
         PASS();
     else
         FAIL("2p did not deallocate");
+}
+
+static void test_port_lifecycle_driver_states(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("port lifetime wire sequences match native allocation/protection/selection");
+    for (size_t i = 0; i < sizeof(port_lifecycle_fixtures) / sizeof(port_lifecycle_fixtures[0]); i++) {
+        uint64_t allocated = 0, protected_ports = 0;
+        if (port_lifecycle_fixtures[i].reset) {
+            init_fixture(&s, &ctx);
+            feed_script(&s, &ctx, "!|2P100002S1Y00020000|");
+        }
+        feed_script(&s, &ctx, port_lifecycle_fixtures[i].wire);
+        for (int p = 0; p < RIP_MAX_PORTS; p++) {
+            if (s.ports[p].allocated) allocated |= UINT64_C(1) << p;
+            if (s.ports[p].flags & RIP_PORT_FLAG_PROTECTED) protected_ports |= UINT64_C(1) << p;
+        }
+        if (s.active_port != port_lifecycle_fixtures[i].active ||
+            allocated != port_lifecycle_fixtures[i].allocated ||
+            protected_ports != port_lifecycle_fixtures[i].protected_ports) {
+            printf("step=%u wire=%s ", (unsigned)i, port_lifecycle_fixtures[i].wire);
+            FAIL("port membership, protection or selection differs from driver"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_port_delete_all_query_and_destination_state(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("delete-all clears removed queries and preserves selected style");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2s100|1\x1b" "3100one|2s200|1\x1b" "3200two|c05|"
+                          "2s201|2s300|1\x1b" "3300three|c07|2p0200|");
+    if (s.active_port != 2 || s.draw_color != 7 || s.ports[1].allocated || s.ports[3].allocated ||
+        !s.ports[0].allocated || !s.ports[2].allocated ||
+        rip_trigger_query(&s, 3, 1) || rip_trigger_query(&s, 3, 3) ||
+        !rip_trigger_query(&s, 3, 2) || tx_len != 3 || memcmp(tx_capture, "two", 3)) {
+        FAIL("bulk deletion lost protected state or retained removed queries"); return;
+    }
+    /* Deleting and selecting the same slot must recreate a fresh full-screen port. */
+    feed_script(&s, &ctx, "!|2s202|2p2200|");
+    if (s.active_port != 2 || !s.ports[2].allocated || s.draw_color != 7 ||
+        s.vp_x0 != 0 || s.vp_y0 != 0 || s.vp_x1 != 639 || s.vp_y1 != 399 ||
+        rip_trigger_query(&s, 3, 2)) {
+        FAIL("same-slot destination did not recreate a clean default port"); return;
+    }
+    feed_script(&s, &ctx, "!|2p00|J1S|2p2a00|2pa000|");
+    if (s.active_port != 2 || !s.ports[2].allocated) {
+        FAIL("truncated or base-64 out-of-range deletion changed state"); return;
+    }
+    PASS();
+}
+
+static void test_active_port_redefine_applies_viewport(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("active redefinition applies its stored viewport and preserves drawing style");
+    for (int flag = 0; flag <= 2; flag += 2) {
+        char redefine[] = "!|2P10K0U1E1O00000000|";
+        init_fixture(&s, &ctx);
+        feed_script(&s, &ctx, "!|2P100000A0A00020000|c05|S0109|k03|W01|");
+        s.font_id = 2; s.font_size = 3; s.font_dir = 1;
+        s.font_hjust = 1; s.font_vjust = 2; s.font_attrib = 5;
+        s.line_pattern = 0xA5A5; s.line_thick = 3;
+        redefine[16] = (char)('0' + flag);
+        feed_script(&s, &ctx, redefine);
+        const rip_port_t *p = &s.ports[1];
+        if (s.active_port != 1 || s.vp_x0 != p->vp_x0 || s.vp_y0 != p->vp_y0 ||
+            s.vp_x1 != p->vp_x1 || s.vp_y1 != p->vp_y1 ||
+            draw_get_clip_x0() != p->vp_x0 || draw_get_clip_y0() != p->vp_y0 ||
+            draw_get_clip_x1() != p->vp_x1 || draw_get_clip_y1() != p->vp_y1) {
+            FAIL("active or applied viewport still describes the old port"); return;
+        }
+        /* Check persistence through the portable port-state mirror as well. */
+        feed_script(&s, &ctx, "!|2s000|2s100|");
+        if (s.draw_color != 5 || s.fill_color != 9 || s.back_color != 3 || s.write_mode != 1 ||
+            s.font_id != 2 || s.font_size != 3 || s.font_dir != 1 ||
+            s.font_hjust != 1 || s.font_vjust != 2 || s.font_attrib != 5 ||
+            s.line_pattern != 0xA5A5 || s.line_thick != 3) {
+            FAIL("redefinition reset or failed to retain the active style"); return;
+        }
+        /* These points distinguish the old and new viewport without claiming
+         * driver geometry parity for the existing inclusive port definition. */
+        draw_set_write_mode(DRAW_MODE_COPY); draw_set_color(6);
+        draw_pixel(5, 5); draw_pixel(25, 40);
+        if (fb[5 * W + 5] != 0 || fb[40 * W + 25] != 6) {
+            FAIL("drawing used the stale viewport"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_active_port_redefine_resets_position(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("active redefinition resets position with either flag and preserves refused state");
+    for (int flag = 0; flag < 4; flag++) {
+        char redefine[] = "!|2P10K0U1E1O00000000|";
+        init_fixture(&s, &ctx);
+        feed_script(&s, &ctx, "!|2s100|c05|m1117|");
+        redefine[16] = (char)('0' + flag);
+        feed_script(&s, &ctx, redefine);
+        if (s.draw_x || s.draw_y || s.ports[1].draw_x || s.ports[1].draw_y) {
+            FAIL("old drawing position was saved back into the redefined port"); return;
+        }
+        feed_script(&s, &ctx, "!|2s000|2s100|");
+        if (s.draw_x || s.draw_y) { FAIL("reset position did not survive switching"); return; }
+        feed_script(&s, &ctx, "!|m1117|2s101|");
+        rip_port_t before = s.ports[1];
+        int16_t x = s.draw_x, y = s.draw_y;
+        feed_script(&s, &ctx, redefine);
+        if (memcmp(&before, &s.ports[1], sizeof(before)) || s.draw_x != x || s.draw_y != y ||
+            s.vp_x0 != before.vp_x0 || s.vp_y0 != before.vp_y0) {
+            FAIL("refused redefinition changed the protected port"); return;
+        }
+    }
+    PASS();
 }
 
 static void test_l2_port_switch_changes_active(void) {
@@ -2927,7 +3571,7 @@ static void test_l2_port_copy_scales_destination_rect(void) {
     init_fixture(&s, &ctx);
     draw_set_color(55);
     draw_rect(2, 2, 1, 2, true);
-    feed_script(&s, &ctx, "!|2C00202020200K0K0M0M0|");
+    feed_script(&s, &ctx, "!|2C00202030400K0K0N0N0|");
     if (draw_get_pixel(20, 22) == 55 &&
         draw_get_pixel(22, 25) == 55)
         PASS();
@@ -2975,7 +3619,7 @@ static void test_port_switch_restores_pattern_back_color(void) {
     feed_script(&s, &ctx, "!|2s100|");
     feed_script(&s, &ctx, "!|2s000|");
     feed_script(&s, &ctx, "!|B05050F0F|");
-    if (draw_get_pixel(10, 5) == 243)
+    if (draw_get_pixel(10, 6) == 243)
         PASS();
     else
         FAIL("port restore used fill_color as patterned-fill background");
@@ -2985,14 +3629,14 @@ static void test_port_switch_restores_custom_line_pattern(void) {
     rip_state_t s;
     comp_context_t ctx;
 
-    TEST("port restore keeps custom line pattern");
+    TEST("style restore keeps custom line pattern across ports");
     init_fixture(&s, &ctx);
     feed_script(&s, &ctx, "!|c0F|");
     feed_script(&s, &ctx, "!|=041BEO01|"); /* user_pat 0xF000: first 4 pixels on */
     feed_script(&s, &ctx, "!|2P1000A140U00|");
     feed_script(&s, &ctx, "!|2s100|");
-    feed_script(&s, &ctx, "!|=01000001|"); /* unrelated temporary port style */
-    feed_script(&s, &ctx, "!|2s000|");
+    feed_script(&s, &ctx, "!|2Y100|=01000001|"); /* separate graphics style */
+    feed_script(&s, &ctx, "!|2s000|2Y000|");
     feed_script(&s, &ctx, "!|L0A0A140A|");
 
     if (draw_get_pixel(10, 11) != 0 &&
@@ -3355,15 +3999,15 @@ static void test_font_load_resolves_path_and_case(void) {
         FAIL("1O did not strip path/lowercase to SANS font");
 }
 
-/* COVERAGE: rip_clipboard_store_pixels. 1I LOAD_ICON with the
- * clipboard flag set must mirror the loaded icon into s->clipboard. */
+/* LOAD_ICON captures the displayed rectangle into its expanded clipboard. */
 static void test_load_icon_clipboard_flag_stores_pixels(void) {
     rip_state_t s;
     comp_context_t ctx;
     static const uint8_t px[4] = { 1, 2, 3, 4 };
     uint8_t *cached;
 
-    TEST("1I clipboard flag stores icon pixels in clipboard");
+    static const uint8_t captured[9] = {1,2,2,3,4,4,3,4,4};
+    TEST("1I clipboard flag captures expanded displayed pixels");
     init_fixture(&s, &ctx);
     cached = (uint8_t *)psram_arena_alloc(&s.psram_arena, 4);
     if (!cached) { FAIL("setup: arena alloc"); return; }
@@ -3375,9 +4019,9 @@ static void test_load_icon_clipboard_flag_stores_pixels(void) {
     /* 1I  x:00 y:00 mode:00 clip:1 res:00 name:FOO */
     feed_script(&s, &ctx, "!|1I000000100FOO|");
     if (s.clipboard.valid &&
-        s.clipboard.width == 2 && s.clipboard.height == 2 &&
+        s.clipboard.width == 3 && s.clipboard.height == 3 &&
         s.clipboard.data &&
-        memcmp(s.clipboard.data, px, 4) == 0)
+        memcmp(s.clipboard.data, captured, sizeof(captured)) == 0)
         PASS();
     else
         FAIL("clipboard not populated from 1I clipboard flag");
@@ -5678,8 +6322,8 @@ static void test_state_stack_pop_reapplies_fill_style(void) {
     feed_script(&s, &ctx, "!|~|");
     feed_script(&s, &ctx, "!|B05050F0F|");
 
-    if (draw_get_pixel(10, 5) == s.palette[3] &&
-        draw_get_pixel(10, 6) == s.palette[4])
+    if (draw_get_pixel(10, 6) == s.palette[3] &&
+        draw_get_pixel(10, 5) == s.palette[4])
         PASS();
     else
         FAIL("|~ left temporary fill pattern/back color active");
@@ -6311,7 +6955,196 @@ static void test_block_transfer_commands(void) {
     else FAIL("batch download announcement failed");
 }
 
+
+static void test_session_radix_and_fixed_exceptions(void) {
+    rip_state_t a,b; comp_context_t ctx;
+    TEST("session radix reaches all levels and preserves fixed-base commands");
+    init_fixture(&a,&ctx); init_fixture(&b,&ctx);
+    feed_script(&a,&ctx,"!|J1S|f0a0A|N010a|3D000a|");
+    feed_script(&b,&ctx,"!|f0a0A|");
+    if(a.mega_base!=64 || a.world_w!=36 || b.world_w!=10 || rip_take_delay(&a)!=36) {
+        FAIL("radix leaked between sessions or fixed-base decoding changed"); return;
+    }
+    feed_script(&a,&ctx,"!|2P10a000b0A00000000|");
+    if(!a.ports[1].allocated || a.ports[1].vp_x0!=36 || a.ports[1].vp_x1!=37) {
+        FAIL("Level 2 ignored base 64"); return;
+    }
+    feed_script(&a,&ctx,"!|J10|f0a0A|");
+    if(a.mega_base!=36 || a.world_w!=10) { FAIL("J cannot restore base 36"); return; }
+    PASS();
+}
+
+static void test_radix_negotiated_widths(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("base-64 coordinate normalization preserves lowercase digit values");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|J1S|n3000|c0F|X00a000|");
+    if(draw_get_pixel(36,0)!=s.palette[15] || draw_get_pixel(10,0)!=0) { FAIL("width normalization used base 36"); return; }
+    PASS();
+}
+
+static void test_level9_dispatch_and_aliases(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("literal level 9 dispatch is separate from level 3 delay");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|9G00000000https://example.com/nine|3D000a|9D0000literal|");
+    if(strcmp(s.goto_url,"https://example.com/nine") || rip_take_delay(&s)!=10 || tx_len) {
+        FAIL("level 9 routing collided with delay or emitted host text"); return;
+    }
+    feed_script(&s,&ctx,"!|9\x1b" "01020000demo.icn<>|9U010000|");
+    if(!s.block_transfer.pending || strcmp(s.block_transfer.filename,"demo.icn") || s.encoded_stream_type!=1) {
+        FAIL("driver level-9 services were not accepted"); return;
+    }
+    feed_script(&s,&ctx,"!|9U020000|3G00000000https://example.com/alias|");
+    if(s.encoded_stream_type!=1 || strcmp(s.goto_url,"https://example.com/alias")) {
+        FAIL("invalid stream type accepted or old alias broken"); return;
+    }
+    PASS();
+}
+
+static void test_deferred_queries_and_protection(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("query definitions defer output and respect target-slot protection");
+    init_fixture(&s,&ctx);
+    strcpy(s.app_vars[0],"first"); strcpy(s.app_vars[1],"second");
+    feed_script(&s,&ctx,"!|2P100000A0A00000000|1\x1b" "3100$APP0$|");
+    if(tx_len || !s.port_query[1].text) { FAIL("definition sent immediately or was dropped"); return; }
+    s.ports[1].flags |= RIP_PORT_FLAG_PROTECTED;
+    feed_script(&s,&ctx,"!|1\x1b" "3100$APP1$|1\x1b" "3200$APP1$|");
+    if(s.port_query[2].text || !rip_trigger_query(&s,3,1) || tx_len!=5 || memcmp(tx_capture,"first",5)) {
+        FAIL("protected/nonexistent target accepted a query"); return;
+    }
+    tx_reset(); s.rip2_state.protected_text_window=1;
+    feed_script(&s,&ctx,"!|1\x1b" "4000$APP1$|");
+    if(s.text_query[0].text) { FAIL("protected text window accepted query"); return; }
+    s.rip2_state.protected_text_window=0;
+    feed_script(&s,&ctx,"!|1\x1b" "4000$APP1$|");
+    if(tx_len || !rip_trigger_query(&s,4,0) || tx_len!=6 || memcmp(tx_capture,"second",6)) {
+        FAIL("valid text-window query did not defer"); return;
+    }
+    s.ports[1].flags &= (uint8_t)~RIP_PORT_FLAG_PROTECTED;
+    feed_script(&s,&ctx,"!|2p1000000|2P100000A0A00000000|");
+    if(rip_trigger_query(&s,3,1)) { FAIL("recreated port inherited old query"); return; }
+    rip_session_reset(&s);
+    if(rip_trigger_query(&s,3,1) || rip_trigger_query(&s,4,0)) { FAIL("query survived arena reset"); return; }
+    PASS();
+}
+
+static void test_query_templates_and_mouse_events(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("query templates expand on the event and conditionals never leak text");
+    init_fixture(&s,&ctx); strcpy(s.app_vars[0],"old");
+    feed_script(&s,&ctx,"!|1\x1b" "1000Hello $APP0$^m|");
+    strcpy(s.app_vars[0],"new"); rip_mouse_event_state(&s,5,5,true);
+    if(tx_len!=10 || memcmp(tx_capture,"Hello new\r",10)) { FAIL("floating viewport query was not deferred"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "0000<<IF 0>>wrong<<ELSE>>right<<ENDIF>>|");
+    if(tx_len!=5 || memcmp(tx_capture,"right",5)) { FAIL("conditional template leaked markers or false branch"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "0000<<IF 1>>unterminated|");
+    if(tx_len) { FAIL("malformed template sent a partial response"); return; }
+    PASS();
+}
+
+
+static void test_driver_fill_masks(void) {
+    static const uint8_t rows[10][8] = {
+        {255,255,0,0,255,255,0,0}, {1,2,4,8,16,32,64,128},
+        {224,193,131,7,14,28,56,112}, {240,120,60,30,15,135,195,225},
+        {165,210,105,180,90,45,150,75}, {255,136,136,136,255,136,136,136},
+        {129,66,36,24,24,36,66,129}, {204,51,204,51,204,51,204,51},
+        {128,0,8,0,128,0,8,0}, {136,0,34,0,136,0,34,0}
+    };
+    rip_state_t s; comp_context_t ctx;
+    TEST("all ten patterned brushes match the DLL's 640 literal mask bits");
+    init_fixture(&s,&ctx);
+    for (int p=0;p<10;++p) {
+        char wire[32]; snprintf(wire,sizeof(wire),"!|k03|S0%c04|B00000707|","23456789AB"[p]);
+        feed_script(&s,&ctx,wire);
+        for (int y=0;y<8;++y) for (int x=0;x<8;++x) {
+            uint8_t want=s.palette[(rows[p][y] & (0x80>>x)) ? 4 : 3];
+            if(draw_get_pixel((int16_t)x,(int16_t)y)!=want) { FAIL("brush mask differs"); return; }
+        }
+    }
+    PASS();
+}
+
+static void test_load_icon_rop_and_stretch(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("load-icon ROP uses args[3]; stretch scales native logical dimensions");
+    init_fixture(&s,&ctx);
+    uint8_t *pixels=psram_arena_alloc(&s.psram_arena,14);
+    if(!pixels) { FAIL("fixture allocation"); return; }
+    memset(pixels,5,14);
+    if(!rip_icon_cache_pixels(&s.icon_state,"MASK",4,pixels,2,7)) { FAIL("cache fixture"); return; }
+    feed_script(&s,&ctx,"!|1I000010000MASK|"); /* args[2]=1, ROP=COPY */
+    if(draw_get_pixel(0,0)!=5 || draw_get_pixel(0,7)!=0) { FAIL("native icon or ROP field wrong"); return; }
+    feed_script(&s,&ctx,"!|1I000001010MASK|"); /* ROP=XOR, stretch=1 */
+    if(draw_get_pixel(0,0)!=0 || draw_get_pixel(0,7)!=5 || draw_get_pixel(0,8)!=0) {
+        FAIL("XOR or logical stretch wrong"); return;
+    }
+    PASS();
+}
+
+static void test_query_event_order_off_and_quotes(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("queries honor event ordering, quoted expressions, OFF and mouse fields");
+    init_fixture(&s,&ctx); s.tw_active=true;
+    feed_script(&s,&ctx,"!|1\x1b" "3000P|1\x1b" "4000T|1\x1b" "1000V|1\x1b" "2000W|");
+    rip_mouse_event_state(&s,5,5,true);
+    if(tx_len!=4 || memcmp(tx_capture,"PTVW",4)) { FAIL("query order"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "1000$OFF$|");
+    if(rip_trigger_query(&s,1,0)) { FAIL("OFF did not clear definition"); return; }
+    feed_script(&s,&ctx,"!|1\x1b" "1000<<IF $APP0$=\"new\">>yes<<ELSE>>no<<ENDIF>>|");
+    strcpy(s.app_vars[0],"new"); rip_trigger_query(&s,1,0);
+    if(tx_len!=3 || memcmp(tx_capture,"yes",3)) { FAIL("quoted condition evaluated early or incorrectly"); return; }
+    tx_reset();
+    feed_script(&s,&ctx,"!|1\x1b" "5000E|1\x1b" "6000L|");
+    s.num_mouse_regions=1;
+    s.mouse_regions[0].x0=0; s.mouse_regions[0].y0=0;
+    s.mouse_regions[0].x1=10; s.mouse_regions[0].y1=10;
+    s.mouse_regions[0].flags=RIP_MF_ACTIVE|RIP_MF_TOGGLE;
+    s.mouse_regions[0].active=true;
+    rip_mouse_event_state(&s,5,5,true);
+    rip_mouse_event_state(&s,20,20,false);
+    if(tx_len!=2 || memcmp(tx_capture,"EL",2)) { FAIL("field click triggered resident queries or hover missed"); return; }
+    tx_reset(); s.rip2_state.overflow_total=3;
+    feed_script(&s,&ctx,"!|1\x1b" "0000$OVERFLOW(NEXT)$|1\x1b" "0000$OVERFLOW$|");
+    if(s.rip2_state.overflow_page!=1 || tx_len!=3 || memcmp(tx_capture,"2/3",3)) {
+        FAIL("exact-length overflow query ignored"); return;
+    }
+    rip_session_reset(&s);
+    if(s.mega_base!=36 || s.host_command[0] || rip_trigger_query(&s,5,0)) { FAIL("session state leaked"); return; }
+    PASS();
+}
+
+static void capture_host_command(void *user, const char *text, int len) {
+    int *calls=(int *)user;
+    if(len==7 && memcmp(text,"$APP0$!",7)==0) ++*calls;
+}
+static void test_host_command_delegation(void) {
+    rip_state_t s; comp_context_t ctx; int calls=0;
+    TEST("9D stores a host expression and delegates only when opted in");
+    init_fixture(&s,&ctx);
+    feed_script(&s,&ctx,"!|9D0000$APP0$!|");
+    if(strcmp(s.host_command,"$APP0$!") || tx_len) { FAIL("host expression not preserved"); return; }
+    rip_set_host_command_handler(&s,capture_host_command,&calls);
+    feed_script(&s,&ctx,"!|9D0000$APP0$!|");
+    if(calls!=1 || tx_len) { FAIL("host callback not invoked once"); return; }
+    PASS();
+}
+
 int main(void) {
+    test_driver_fill_masks();
+    test_load_icon_rop_and_stretch();
+    test_query_event_order_off_and_quotes();
+    test_host_command_delegation();
+    test_session_radix_and_fixed_exceptions();
+    test_radix_negotiated_widths();
+    test_level9_dispatch_and_aliases();
+    test_deferred_queries_and_protection();
+    test_query_templates_and_mouse_events();
     test_empty_fill_family();
     test_poly_polygon_brush();
     test_copy_scroll_exposed_modes();
@@ -6380,6 +7213,10 @@ int main(void) {
     test_l2_port_define_ignores_unread_flag_bits();
     test_l2_port_zero_protected();
     test_l2_port_delete();
+    test_port_lifecycle_driver_states();
+    test_port_delete_all_query_and_destination_state();
+    test_active_port_redefine_applies_viewport();
+    test_active_port_redefine_resets_position();
     test_l2_port_switch_changes_active();
     test_l2_port_flags_set_alpha();
     test_l2_scale_text();
@@ -6465,6 +7302,21 @@ int main(void) {
     test_write_icon_replaces_cached_name();
     test_runtime_icon_supersedes_flash();
     test_tiled_icon_coordinates_do_not_wrap();
+    test_tiled_blit_intersects_viewport();
+    test_clipboard_capture_clears_padding();
+    test_clipboard_rejects_unrepresentable_dimensions();
+    test_scaled_port_copy_trims_source();
+    test_image_blit_driver_rops();
+    test_icon_and_clipboard_not_source();
+    test_port_copy_not_source();
+    test_port_copy_driver_rectangles();
+    test_port_copy_clip_and_overlap();
+    test_icon_capture_native_gdi_fixtures();
+    test_gdi_sampling_maps();
+    test_gdi_sampling_grids();
+    test_icon_capture_signed_and_capacity();
+    test_icon_capture_full_frame();
+    test_icon_style_capture_bounds();
     test_clipboard_op_5_capture_op_6_paste();
     test_save_icon_slot_out_of_range_is_noop();
     test_stamp_icon_unset_slot_falls_back_to_clipboard();
@@ -6476,6 +7328,9 @@ int main(void) {
     test_l1_audio_pushes_marker();
     test_l1_audio_off_sentinel();
     test_slot_protection_round_trip();
+    test_style_driver_matrix();
+    test_style_port_independence();
+    test_style_attributes_and_reset();
     test_query_prefix_is_four();
     test_query_unknown_variable_is_silent();
     test_zero_viewport_suppresses_drawing();

@@ -145,6 +145,7 @@ void    draw_copy_rect(int16_t sx, int16_t sy, int16_t dx, int16_t dy,
                        int16_t w, int16_t h);
 void    draw_save_region(int16_t x, int16_t y, int16_t w, int16_t h,
                          uint8_t *dest);
+/* Restore obeys the active clip; source rows always have stride w. */
 void    draw_restore_region(int16_t x, int16_t y, int16_t w, int16_t h,
                             const uint8_t *src);
 uint8_t draw_get_pixel(int16_t x, int16_t y);

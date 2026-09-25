@@ -16,6 +16,7 @@ Exits non-zero on any disagreement, so it can gate a build.
 
     python scripts/check-dll-table.py <path>/RIPSCRIP.DLL
 """
+from dll_record import dispatch_level
 import argparse
 import hashlib
 import pathlib
@@ -64,7 +65,7 @@ def load_records(dll_path):
             types.append("XY" if b == 0xFF else "color" if b == 0xFE
                          else "mega%d" % b if b in (1, 2, 4) else "0x%02x" % b)
         out.append({"slot": i, "handler": handler & 0xFFFFFF,
-                    "letter": letter, "argc": argc, "types": types})
+                    "letter": letter, "level": dispatch_level(raw), "argc": argc, "types": types})
     return out, hashlib.md5(d).hexdigest()
 
 
@@ -97,10 +98,11 @@ def parse_doc():
         if cmd == "0x00":
             letter = 0x00
         else:
-            bare = cmd[1:] if (len(cmd) > 1 and cmd[0] in "123") else cmd
+            bare = cmd[1:] if (len(cmd) > 1 and cmd[0] in "1239") else cmd
             letter = 27 if bare == "ESC" else ord(bare)
         rows.append({
             "line": n, "slot": int(slot), "letter": letter, "cmd": cmd,
+            "level": int(cmd[0]) if cmd != "0x00" and cmd[0] in "1239" else (cur["level"] if cmd == "0x00" else 0),
             "handler": int(handler, 16),
             "argc": argc,
             "types": [t.strip() for t in types.split(",") if t.strip() and t.strip() != "-"],
@@ -144,6 +146,8 @@ def main():
         seen.add(r["slot"])
         rec = recs[r["slot"]]
         where = "line %d slot %-3d (%s)" % (r["line"], r["slot"], r["cmd"])
+        if r["level"] != rec["level"]:
+            defects.append("%s: prefix doc=%d binary=%d" % (where,r["level"],rec["level"]))
         if r["letter"] != rec["letter"]:
             defects.append("%s: letter doc=0x%02x binary=0x%02x"
                            % (where, r["letter"], rec["letter"]))
@@ -177,7 +181,7 @@ def main():
                        % (total, ENTRIES))
 
     # The prose quotes a split; it must match the sections it introduces.
-    split = re.search(r"resulting split is (\d+)/(\d+)/(\d+)/(\d+)", text)
+    split = re.search(r"resulting split is (\d+)/(\d+)/(\d+)/(\d+)/(\d+)", text)
     if split:
         quoted = [int(g) for g in split.groups()]
         actual = [s["rows"] for s in sorted(sections, key=lambda x: x["level"])]
@@ -225,7 +229,7 @@ def main():
             if spell == "0x00":
                 continue
             want = "" if s["level"] == 0 else str(s["level"])
-            got = spell[0] if spell[0] in "123" else ""
+            got = spell[0] if spell[0] in "1239" else ""
             if got != want:
                 defects.append("line %d: '%s' is filed under LEVEL %d but is "
                                "spelled for level %s"

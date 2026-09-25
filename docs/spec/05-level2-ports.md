@@ -4,8 +4,8 @@
 =====================================================================
 
 Level 2 commands manage the Drawing Port system introduced in
-RIPscrip v2.0. Ports provide independent drawing contexts with
-separate viewport, color, fill, font, and line state. They are
+RIPscrip v2.0. Ports provide independent viewports and drawing cursors. Colors, fills,
+fonts and line attributes belong to separately selected graphics styles. They are
 prefixed with '2' after the '|' delimiter.
 
      Format: !|2<cmd><parameters>|
@@ -14,9 +14,8 @@ The port system enables multi-region rendering: a BBS can create
 separate drawing areas (e.g., a menu bar, content area, and status
 bar), switch between them, and copy pixels between port viewports.
 
-On the original DLL, each port had its own GDI Device Context and
-off-screen bitmap.  In RIPlib, all ports share a single framebuffer
-with per-port state save/restore and clip-region management.
+The DLL supports shared-screen and independent offscreen ports. RIPlib
+currently shares one framebuffer, with per-port cursor and clip management.
 
 
 ---------------------------------------------------------------------
@@ -26,13 +25,15 @@ with per-port state save/restore and clip-region management.
 The port system provides up to 36 drawing port slots (0-35).
 
      Port 0:   Permanent full-screen port. Cannot be deleted.
-               Always exists. Protected by default.
+               Always exists. Permanent, but not protectable.
 
      Ports 1-35: User-created ports with arbitrary viewport
                  rectangles. Created on demand, explicitly
                  deleted, or auto-created on switch.
 
-Each port stores:
+Each port stores the following fields. Color/fill/line/font fields remain
+legacy diagnostic snapshots; they are never restored by port switching
+(D-45). The current style is selected by |2Y independently of the port.
 
      Field          Type     Default    Description
      ----------     ------   -------    --------------------------
@@ -98,23 +99,25 @@ be redefined. Protected ports reject redefinition.
      mega2 - dispatch slot 111 records mega1, XY, XY, XY, XY, mega4,
      mega4.  RIPlib reads the first of those two mega4s and ignores
      the second, so it consumes 13 of the record's 17 characters.
-     Only bits 1..3 exist; bits 2 and 3 of an earlier RIPlib reading
-     were invented and have been removed.
+     Only bits 0 and 1 are used. Bits 2 and 3 of an earlier RIPlib
+     reading were invented and have been removed.
 
 Creation flags:
 
      Bit   Value   Effect
      ---   -----   ------
+     0     0x01    Request independent offscreen storage (DLL only)
      1     0x02    Make active immediately after creation
-     2     0x04    Set PORT_FULLSCREEN flag
-     3     0x08    Set PORT_PROTECTED flag
 
 Viewport coordinates are Y-scaled (EGA 350→card 400):
      vp_y0 = scale_y(y0)       (floor)
      vp_y1 = scale_y1(y1)      (ceiling)
 
-On creation, all drawing state is initialized to defaults
-(white color, solid fill, bitmap font, COPY mode).
+New ports start at drawing position (0,0). Successful redefinition of the
+active port resets that position and immediately applies the new stored
+viewport, even without flag 2. Port creation, selection and deletion do
+not change the graphics style. D-44 and D-45 verify these distinctions;
+independent offscreen storage and exact 2P geometry remain open.
 
 
 ---------------------------------------------------------------------
@@ -123,29 +126,32 @@ On creation, all drawing state is initialized to defaults
 
      Function:     Delete Drawing Port
      Command:      |2p     (lowercase)
-     Arguments:    port:1 res:1 res:2
-     Format:       !|2p<port><res><res>|
+     Arguments:    port:1 dest_port:1 res:2
+     Format:       !|2p<port><dest_port><res>|
 
-Deletes a port and frees its slot. Port 0 cannot be deleted.
-Protected ports reject deletion unless force-deleted.
+Deletes a port and selects the destination. Port 0 remains permanent;
+source value zero deletes all unprotected ports 1..35. Protected ports
+survive deletion. No force-delete flag is exposed by this wire command.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     port        1       0-35      Port slot (or special index)
-     res         1       0         Reserved
+     port        1       0-35      Source slot; zero means all secondary ports
+     dest_port   1       0-35      Port selected after deletion
      res         2       0         Reserved
 
      Note: dispatch slot 116 records mega1 + mega1 + mega2, so the
      payload is FOUR characters, not one.  RIPlib gates on that
-     length; it reads the port index and ignores both reserved
-     fields.
+     length. Both port indices are validated before changing any state.
 
-Special values:
+The destination is selected even if the source is missing or protected.
+If the destination was deleted or did not exist, switching creates a
+default shared-screen port. Selecting the same slot that was just deleted
+therefore recreates it. Deleted queries are cleared; protected ones survive.
 
-     0xFE (PORT_IDX_ALL):     Delete all non-protected ports
-     0xFF (PORT_IDX_CURRENT): Delete the active port
-
-When the active port is deleted, the system falls back to port 0.
+The DLL maps wire source zero to internal sentinel -2. Its internal -1
+(current) and -2 (all) values are not additional one-digit wire values.
+D-43 verifies decoded handler 0x046862 and native lifetime helpers, with
+portable wire regressions for allocation, protection and active selection.
 
 
 ---------------------------------------------------------------------
@@ -169,15 +175,17 @@ When the active port is deleted, the system falls back to port 0.
           0     protect the slot being ENTERED
           1     unprotect the slot being ENTERED
 
-     RIPlib honours these for ports only; for the other five families
-     the flags are ignored.  See 14-divergence-register.md 14.3.6.
+     RIPlib honors protection for all six families. Graphics styles and
+     ports have backing tables; other resource storage remains limited.
+     Port zero and graphics-style zero cannot be protected.
 
      All three '|2s' commands in the shipped corpus are exactly three
      characters -- "000", "002", "100" -- so the field is not
      optional in practice either.
 
 Switches the active drawing port. Saves the current port's
-state and loads the target port's state.
+cursor and restores the target cursor and viewport. The graphics style
+remains unchanged.
 
      Parameter      Width   Range   Description
      -----------    -----   -----   -----------
@@ -195,16 +203,30 @@ Switch flags:
 
 Switch process:
      1. Apply source protection flags (if specified)
-     2. Save current port's drawing state (12 fields)
+     2. Save current port's cursor (and legacy diagnostic snapshots)
      3. Auto-create target port if not allocated (full-screen)
      4. Apply destination protection flags (if specified)
      5. Set active port to target
-     6. Load target port's drawing state
+     6. Load target port's cursor
      7. Apply target's viewport as hardware clip rectangle
 
-If port == PORT_IDX_CURRENT (0xFF), the current port's state
-is reloaded (useful for re-applying viewport after changes).
+The internal 0xFF/0xFE/0xFD sentinels are not one-digit wire indices.
+Wire selectors accept only slots 0 through 35.
 
+
+
+Graphics style selection: !|2Y<style:1><flags:2>|
+
+D-45 implements 36 independent style slots with colors, write mode, line
+and fill patterns (including custom rows), font attributes and spacing,
+and filled-object borders. Unused slots start from defaults, as the pinned
+DLL does; they do not copy the prior style as older reference prose says.
+Style selection preserves the port cursor and viewport. Reset-windows
+selects style zero and resets unprotected styles; protected styles survive.
+The active border flag is set before reset, even for a protected style.
+Disconnect clears all styles and their protection. Other reset side effects
+and historical font/GDI rendering are not claimed as complete parity.
+The table extends rip_state_t; consumers must rebuild with matching headers.
 
 ---------------------------------------------------------------------
 5.5  RIP_PORT_COPY — Copy Between Ports

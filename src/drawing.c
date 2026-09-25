@@ -62,6 +62,20 @@ static const uint8_t fill_patterns[11][8] = {
     {0x80,0x00,0x08,0x00,0x80,0x00,0x08,0x00}, /* 9: wide dot (BGI 10) */
     {0xAA,0x00,0xAA,0x00,0xAA,0x00,0xAA,0x00}, /* 10: close dot (BGI 11) */
 };
+/* Driver brush table at RVA 0x7AFD8, BGI 2..11 (D-36).
+ * Generic card patterns 0..11 retain their existing public meanings. */
+static const uint8_t rip_fill_patterns[10][8] = {
+    {0xFF,0xFF,0x00,0x00,0xFF,0xFF,0x00,0x00},
+    {0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80},
+    {0xE0,0xC1,0x83,0x07,0x0E,0x1C,0x38,0x70},
+    {0xF0,0x78,0x3C,0x1E,0x0F,0x87,0xC3,0xE1},
+    {0xA5,0xD2,0x69,0xB4,0x5A,0x2D,0x96,0x4B},
+    {0xFF,0x88,0x88,0x88,0xFF,0x88,0x88,0x88},
+    {0x81,0x42,0x24,0x18,0x18,0x24,0x42,0x81},
+    {0xCC,0x33,0xCC,0x33,0xCC,0x33,0xCC,0x33},
+    {0x80,0x00,0x08,0x00,0x80,0x00,0x08,0x00},
+    {0x88,0x00,0x22,0x00,0x88,0x00,0x22,0x00},
+};
 static uint8_t user_pattern[8] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
 /* ── Dirty-row callback ──────────────────────────────────────────── */
@@ -360,6 +374,8 @@ static void fill_span(int16_t x, int16_t y, int16_t len) {
     /* Pattern + write mode path */
     const uint8_t *pat = (g_fill_pattern >= 1 && g_fill_pattern <= 10)
                          ? fill_patterns[g_fill_pattern]
+                         : (g_fill_pattern >= 12 && g_fill_pattern <= 21)
+                         ? rip_fill_patterns[g_fill_pattern - 12]
                          : (g_fill_pattern == 11) ? user_pattern
                          : fill_patterns[0];
     uint8_t pat_row = pat[y & 7];
@@ -863,7 +879,9 @@ void draw_flood_fill(int16_t x, int16_t y, uint8_t border_color) {
     if (g_fill_pattern != 0 && fill != g_fill_color) {
         const uint8_t *pat = (g_fill_pattern >= 1 && g_fill_pattern <= 10)
                              ? fill_patterns[g_fill_pattern]
-                             : (g_fill_pattern == 11) ? user_pattern
+                             : (g_fill_pattern >= 12 && g_fill_pattern <= 21)
+                         ? rip_fill_patterns[g_fill_pattern - 12]
+                         : (g_fill_pattern == 11) ? user_pattern
                              : NULL;
         if (pat) {
             for (int16_t py = dirty_y0; py <= dirty_y1; py++) {
@@ -1025,43 +1043,33 @@ void draw_save_region(int16_t x, int16_t y, int16_t w, int16_t h,
 
 void draw_restore_region(int16_t x, int16_t y, int16_t w, int16_t h,
                          const uint8_t *src) {
-    int16_t dst_x = x;
-    int16_t dst_y = y;
-    int16_t copy_w = w;
-    int16_t copy_h = h;
-    int16_t src_x_off = 0;
-    int16_t src_y_off = 0;
-    int16_t src_stride = w;
+    int32_t left = x, top = y;
+    int32_t right = (int32_t)x + w, bottom = (int32_t)y + h;
 
     if (!draw_ready() || !src || w <= 0 || h <= 0) return;
-    if (dst_x < 0) {
-        src_x_off = (int16_t)(-dst_x);
-        copy_w += dst_x;
-        dst_x = 0;
-    }
-    if (dst_y < 0) {
-        src_y_off = (int16_t)(-dst_y);
-        copy_h += dst_y;
-        dst_y = 0;
-    }
-    if (dst_x + copy_w > g_width)  copy_w = (int16_t)(g_width - dst_x);
-    if (dst_y + copy_h > g_height) copy_h = (int16_t)(g_height - dst_y);
-    if (copy_w <= 0 || copy_h <= 0) return;
-    if (g_write_mode == DRAW_MODE_COPY) {
-        for (int16_t r = 0; r < copy_h; r++) {
-            size_t src_off = (size_t)(r + src_y_off) * (size_t)src_stride + (size_t)src_x_off;
-            memcpy(&g_fb[(dst_y + r) * g_pitch + dst_x], &src[src_off], (size_t)copy_w);
-        }
-    } else {
-        for (int16_t r = 0; r < copy_h; r++) {
-            size_t src_off = (size_t)(r + src_y_off) * (size_t)src_stride + (size_t)src_x_off;
-            uint8_t *dst_row = &g_fb[(dst_y + r) * g_pitch + dst_x];
-            const uint8_t *src_row = &src[src_off];
-            for (int16_t c = 0; c < copy_w; c++)
+    /* Intersect without normalizing: an inverted clip means empty. Keep
+     * endpoints wide until clipped, and retain the original source stride. */
+    if (left < g_clip_x0) left = g_clip_x0;
+    if (top < g_clip_y0) top = g_clip_y0;
+    if (right > (int32_t)g_clip_x1 + 1) right = (int32_t)g_clip_x1 + 1;
+    if (bottom > (int32_t)g_clip_y1 + 1) bottom = (int32_t)g_clip_y1 + 1;
+    if (left < 0) left = 0;
+    if (top < 0) top = 0;
+    if (right > g_width) right = g_width;
+    if (bottom > g_height) bottom = g_height;
+    if (left >= right || top >= bottom) return;
+    for (int32_t row = top; row < bottom; row++) {
+        size_t src_off = (size_t)(row - y) * (size_t)w + (size_t)(left - x);
+        uint8_t *dst_row = &g_fb[row * g_pitch + left];
+        const uint8_t *src_row = &src[src_off];
+        if (g_write_mode == DRAW_MODE_COPY) {
+            memcpy(dst_row, src_row, (size_t)(right - left));
+        } else {
+            for (int32_t c = 0; c < right - left; c++)
                 dst_row[c] = apply_write_mode(dst_row[c], src_row[c]);
         }
     }
-    mark_dirty(dst_y, (int16_t)(dst_y + copy_h - 1));
+    mark_dirty((int16_t)top, (int16_t)(bottom - 1));
 }
 
 uint8_t draw_get_pixel(int16_t x, int16_t y) {

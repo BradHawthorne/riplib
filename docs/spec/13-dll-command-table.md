@@ -24,7 +24,7 @@ it is NOT a claim that the command is nameless.  Five further handlers
 are unnamed because the address bound swept in neighbouring helpers and
 attribution was ambiguous; those are left blank rather than guessed.
 
-Entry layout:  [+0] index  [+1..4] handler ptr  [+15] letter
+Entry layout:  [+0] index  [+1..4] handler ptr  [+5..14] prefix string  [+15] letter
                [+16..19] argc (signed; negative = variable-length)
                [+20..] argument type codes
 
@@ -59,24 +59,20 @@ Validation: all 129 handler pointers resolve inside .text, and the
 independently recorded anchor RIP_BOUNDED_TEXT ('"' -> RVA 0x01A0DA)
 matches slot 1 exactly.
 
-Levels below are assigned by CONTIGUOUS SLOT RUN, which is an
-inference, not a field in the record - the entry format carries no
-level byte.  The resulting split is 85/25/12/7:
+Levels are literal NUL-terminated strings at entry+5, compared by the
+dispatcher at RVA 0x039F63..0x03A00B. The resulting split is 85/25/12/2/5:
 
      level 0    slots   0 ..  84     85 records
      level 1    slots  85 .. 109     25 records
      level 2    slots 110 .. 121     12 records
-     level 3    slots 122 .. 128      7 records
+     level 3    slots 122 .. 123      2 records
+     level 9    slots 124 .. 128      5 records
 
-It is not identical with the 80/25/19/5 reported by the original
-reconstruction, so treat the level column as provisional and the
-letter/handler/arity columns as the actual evidence.
-
-Record counts exceed distinct command keys because level 0 carries
-eleven continuation rows and level 3 names '|3D' twice with different
-handlers.  ESC is a nonzero command byte at levels 1, 2 and 3, NOT a
-continuation.  Thus 129 rows comprise 118 named rows / 117 distinct
-keys plus 11 continuation rows.  See D-30 and the generated crosswalk.
+D-34 RETRACTION: earlier versions inferred levels from slot runs and
+incorrectly assigned slots 124..128 to level 3. The alleged duplicate
+'|3D' never existed: slot 122 is '|3D', slot 125 is '|9D'. All checkers
+now read prefix bytes. The table contains 118 distinct named keys and
+11 continuation rows; ESC is a command byte at levels 1, 2 and 9.
 
 A HANDLER ADDRESS BAND was tried first and rejected.  It agrees with
 the slot runs on 128 of 129 records and disagrees on exactly one:
@@ -252,21 +248,27 @@ Verify this file against the binary with:
 
 
 ---------------------------------------------------------------------
-13.4  LEVEL 3 (prefix '3')   (7 commands)
+13.4  LEVEL 3 (prefix '3')   (2 commands)
 ---------------------------------------------------------------------
 
    SLOT  CMD    HANDLER    ARGC  NAME                     ARGUMENT TYPES
     122  |3D    0x038bd2     1  -                        mega4
     123  |3e    0x038be1     1  -                        mega2
-    124  |3ESC  0x024b4e     5  -                        mega1, mega1, mega2, mega2, mega2
-    125  |3D    0x024af4     1  -                        mega4
-    126  |3G    0x0251cb     1  RIP_GotoURL              0x08
-    127  |3R    0x0252f2     3  -                        mega4, mega2, 0x08
-    128  |3U    0x0252c0     2  RIP_BeginEncodedStream   mega2, mega4
+
+---------------------------------------------------------------------
+13.5  LEVEL 9 (prefix '9')   (5 commands)
+---------------------------------------------------------------------
+
+   SLOT  CMD    HANDLER    ARGC  NAME                     ARGUMENT TYPES
+    124  |9ESC  0x024b4e     5  -                        mega1, mega1, mega2, mega2, mega2
+    125  |9D    0x024af4     1  -                        mega4
+    126  |9G    0x0251cb     1  RIP_GotoURL              0x08
+    127  |9R    0x0252f2     3  -                        mega4, mega2, 0x08
+    128  |9U    0x0252c0     2  RIP_BeginEncodedStream   mega2, mega4
 
 
 ---------------------------------------------------------------------
-13.5  RECOVERED FIELD SEMANTICS
+13.6  RECOVERED FIELD SEMANTICS
 ---------------------------------------------------------------------
 
 Each handler validates its arguments and, on failure, pushes a

@@ -249,16 +249,15 @@ before any global setting:
 forcing 36 for anything else.  It is itself permanently base 36 — the
 command that SETS the radix must decode unambiguously.  A consequence
 worth knowing: '|J10' means 36 in base 36 and 64 in base 64, so it
-ASSERTS the current radix rather than changing it.  Every '|J' in
+always restores base 36; '|J1S' selects 64.  Every '|J' in
 TeleGrafix's shipped content is '|J10'.
 
 A single file may mix both.  TUNNEL.RIP carries base-64 '|d' palette
 payloads and '|fZKQO', which is 1280x960 only in base 36.
 
-RIPlib decodes the four always-64 commands with the base-64 helpers in
-src/rip_meganum.h and everything else in base 36.  It does not
-implement a global switch to base 64, because no known content selects
-one; see docs/spec/12-dll-provenance.md D-12.
+RIPlib now honors the session radix across levels 0/1/2/3/9, including
+negotiated-width normalization. Fixed flags still override it. D-34
+supersedes the historical D-12 limitation.
 
 
 ---------------------------------------------------------------------

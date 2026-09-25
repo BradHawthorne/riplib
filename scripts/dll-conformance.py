@@ -39,6 +39,7 @@ Exit status is 1 if any check reports a defect, so this can gate a build.
 Usage:
     python scripts/dll-conformance.py <path>/Ripscrip.dll [--verbose]
 """
+from dll_record import dispatch_level
 import argparse
 import collections
 import contextlib
@@ -100,22 +101,17 @@ def _blocks(src_text):
     lines = src_text.split("\n")
     mark = {}
     for i, l in enumerate(lines, 1):
-        for key, pat in (("l3", r"if \(s->is_level3\)"),
+        for key, pat in (("l9", r"/\* Level 9 commands \*/"), ("l3", r"if \(s->is_level3\)"),
                          ("l2", r"if \(s->is_level2\)"),
                          ("l1", r"if \(s->is_level1\)"),
                          ("l0", r"/\* Level 0 commands \*/")):
             if key not in mark and re.search(pat, l):
                 mark[key] = i
-    if len(mark) != 4:
+    if not {"l3", "l2", "l1", "l0"} <= set(mark):
         raise SystemExit("cannot locate switch blocks: found %s" % sorted(mark))
-    return ((mark["l3"], mark["l2"]),
+    return (((mark["l9"], mark["l3"]),) if "l9" in mark else ()) + ((mark["l3"], mark["l2"]),
             (mark["l1"], mark["l0"]),
             (mark["l0"], 10 ** 9))
-
-def level_of(slot):
-    """Level 0 runs to slot 84.  Handler ADDRESS regions confirm it: the
-    sustained move into the Level 1 region happens at slot 85, not 84."""
-    return 0 if slot <= 84 else 1 if slot <= 109 else 2 if slot <= 121 else 3
 
 
 def dispatch_rows(d, secs):
@@ -134,7 +130,7 @@ def dispatch_rows(d, secs):
         types = list(raw[20:38])
         if 0 in types:
             types = types[:types.index(0)]
-        rows.append(dict(slot=i, level=level_of(i), letter=raw[15],
+        rows.append(dict(slot=i, level=dispatch_level(raw), letter=raw[15],
                          handler=struct.unpack_from("<I", raw, 1)[0],
                          argc=struct.unpack_from("<i", raw, 16)[0],
                          radix=struct.unpack_from("<H", raw, 38)[0] & 3,
@@ -153,7 +149,7 @@ def read_table(d, secs):
         if argc > 0 and widths:
             by_handler.setdefault(rva, []).append(widths)
         if letter != 0:
-            key = (level_of(i), chr(letter))
+            key = (row["level"], chr(letter))
             named.setdefault(key, rva)
             meta.setdefault(key, (i, argc, radix))
     sigs = {k: by_handler.get(rva, []) for k, rva in named.items()}
@@ -209,12 +205,12 @@ def handler_bodies(lines):
         if m.group().startswith(("/*", "//")) else m.group(), source)
     switches = list(re.finditer(
         r"^\s*switch\s*\(s->cmd_char\)\s*\{", clean, re.M))
-    if len(switches) != 3:
-        raise SystemExit("expected 3 command switches, found %d" % len(switches))
+    if len(switches) != len(blocks):
+        raise SystemExit("expected %d command switches, found %d" % (len(blocks),len(switches)))
     seen_levels = set()
     for switch in switches:
         line = clean.count("\n", 0, switch.end()) + 1
-        levels = [lvl for lvl, (start, end) in zip((3, 1, 0), blocks)
+        levels = [lvl for lvl, (start, end) in zip((9, 3, 1, 0) if len(blocks)==4 else (3, 1, 0), blocks)
                   if start < line < end]
         if len(levels) != 1 or levels[0] in seen_levels:
             raise SystemExit("cannot classify command switch at line %d" % line)
@@ -418,7 +414,7 @@ def check_coverage(sigs, meta, lines, verbose):
     impl = set()
     for lvl, ch, _, _ in handler_bodies(lines):
         impl.add((lvl, ch))
-    print("    %d complete source handlers (levels 0/1/3; no line cap)" % len(impl))
+    print("    %d complete source handlers (levels 0/1/3/9; no line cap)" % len(impl))
     print("    level 2 bodies and called helpers are outside these source checks")
     l2 = set()
     if os.path.exists(HDR2) and os.path.exists(SRC2):
@@ -575,8 +571,8 @@ def crosswalk_markdown(rows, inventory, image, corpus, checks, reference=None, r
            "Scope: the RIPSCRIP.DLL shipped with the local RIPtel 3.1 installation, "
            "not the entire RIPtel terminal application. The DLL self-reports 3.00.04. "
            "Its MD5 is `%s`; %d bytes." % (hashlib.md5(image).hexdigest(), len(image)), "",
-           "Level assignment follows the documented slot runs 0–84 / 85–109 / 110–121 / 122–128; "
-           "levels are inferred, not stored in the records. See [binary provenance](spec/13-dll-command-table.md).", "",
+           "Level assignment reads each record’s literal prefix at bytes 5–14; "
+           "no slot-range inference is used. See [binary provenance](spec/13-dll-command-table.md).", "",
            "**Present means a source handler exists. It does not mean equivalent rendering, "
            "parameter handling, host behavior, or test coverage.** No live RIPtel-versus-RIPlib "
            "pixel or callback comparison was performed.", "",
@@ -593,15 +589,15 @@ def crosswalk_markdown(rows, inventory, image, corpus, checks, reference=None, r
            "- Missing source handlers: %s." % (", ".join(code(spell(k)) for k in sorted(missing)) or "none"),
            "- Command identities and behavioral fixes are evaluated separately from this "
            "inventory. See the [audit report](crosswalk-audit.md) and "
-           "[D-31 through D-33](spec/12-dll-provenance.md) for driver geometry fixtures, "
+           "[D-31 through D-37](spec/12-dll-provenance.md) for driver geometry fixtures, "
            "host-service contracts, fill and move semantics, and their validation limits.",
-           "- `|3D` occurs twice, at slots 122 and 125, with different handlers. "
-           "RIPlib implements the slot-122 delay interpretation; the other handler is not "
-           "established as equivalent. [D-4](spec/12-dll-provenance.md).",
+           "- The former duplicate `|3D` finding is retracted: slot 122 is `|3D` "
+           "(delay), slot 125 is `|9D` (host expression). Literal prefix recovery "
+           "corrected all five service keys. [D-34](spec/12-dll-provenance.md).",
            "- Host-mediated operations and deliberate extensions/tolerances are documented "
            "in the [divergence register](spec/14-divergence-register.md). "
            "Handler coverage does not close those separate behavioral questions.",
-           "- The static offset/gate/radix checks cover subsets of levels 0/1/3. "
+           "- The static offset/gate/radix checks cover subsets of levels 0/1/3/9. "
            "Level 2 bodies, helper implementations, computed offsets, and pixel parity "
            "are outside those checks. The tables below inventory those handlers without "
            "claiming they passed these checks.", "",

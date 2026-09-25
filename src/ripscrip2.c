@@ -25,11 +25,11 @@
  *
  * Port implementation notes (single-framebuffer architecture):
  *
- *   The spec defines 36 independent drawing surfaces; RIPlib runs
+ *   The driver supports shared-screen and offscreen ports; RIPlib runs
  *   against a single shared framebuffer with no off-screen surfaces.
  *   The port system instead:
- *     - Stores per-port drawing state (clip region, color, fill, etc.)
- *     - Saves/restores that state on port switch
+ *     - Stores per-port cursor and viewport state
+ *     - Saves/restores that state without changing the graphics style
  *     - Applies the new port's viewport as the hardware clip rectangle
  *       via draw_set_clip()
  *     - draw_copy_rect() implements port-to-port pixel copy within the
@@ -42,6 +42,9 @@
 #include "ripscrip2.h"
 #include "riplib_platform.h"
 #include "drawing.h"
+#include "bgi_font.h"
+#include "rip_meganum.h"
+#include "rip_clipboard.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -107,69 +110,6 @@ static uint8_t rip2_nearest_palette_index(const ripscrip2_state_t *s,
     return (uint8_t)best_idx;
 }
 
-static bool rip2_clipboard_alloc(rip_state_t *rs) {
-    if (!rs)
-        return false;
-    if (!rs->clipboard.data) {
-        rs->clipboard.data = (uint8_t *)psram_arena_alloc(&rs->psram_arena,
-                                                          RIP_CLIPBOARD_MAX);
-    }
-    return rs->clipboard.data != NULL;
-}
-
-static bool rip2_clipboard_capture(rip_state_t *rs,
-                                   int16_t x, int16_t y,
-                                   int16_t w, int16_t h) {
-    size_t bytes;
-
-    if (!rs || w <= 0 || h <= 0)
-        return false;
-    bytes = (size_t)(uint16_t)w * (size_t)(uint16_t)h;
-    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
-        return false;
-    if (!rip2_clipboard_alloc(rs))
-        return false;
-
-    draw_save_region(x, y, w, h, rs->clipboard.data);
-    rs->clipboard.width = w;
-    rs->clipboard.height = h;
-    rs->clipboard.valid = true;
-    return true;
-}
-
-static void rip2_blit_pixels(rip_state_t *rs,
-                             int16_t dx, int16_t dy,
-                             const uint8_t *pixels,
-                             uint16_t src_w, uint16_t src_h,
-                             int16_t dst_w, int16_t dst_h,
-                             uint8_t write_mode) {
-    uint8_t old_color;
-
-    if (!pixels || src_w == 0 || src_h == 0 || dst_w <= 0 || dst_h <= 0)
-        return;
-    if (write_mode > DRAW_MODE_NOT)
-        write_mode = DRAW_MODE_COPY;
-
-    old_color = draw_get_color();
-    draw_set_write_mode(write_mode);
-    if (dst_w == (int16_t)src_w && dst_h == (int16_t)src_h) {
-        draw_restore_region(dx, dy, dst_w, dst_h, pixels);
-    } else {
-        for (int16_t yy = 0; yy < dst_h; yy++) {
-            uint16_t sy = (uint16_t)(((uint32_t)(uint16_t)yy * src_h) /
-                                     (uint16_t)dst_h);
-            for (int16_t xx = 0; xx < dst_w; xx++) {
-                uint16_t sx = (uint16_t)(((uint32_t)(uint16_t)xx * src_w) /
-                                         (uint16_t)dst_w);
-                draw_set_color(pixels[(size_t)sy * src_w + sx]);
-                draw_pixel((int16_t)(dx + xx), (int16_t)(dy + yy));
-            }
-        }
-    }
-    draw_set_write_mode(rs ? rs->write_mode : DRAW_MODE_COPY);
-    draw_set_color(old_color);
-}
-
 static void rip2_copy_scaled(rip_state_t *rs,
                              int16_t sx, int16_t sy,
                              int16_t sw, int16_t sh,
@@ -182,23 +122,34 @@ static void rip2_copy_scaled(rip_state_t *rs,
     if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
         return;
     if (write_mode > DRAW_MODE_NOT)
-        write_mode = DRAW_MODE_COPY;
+        return;
 
     if (sw == dw && sh == dh && write_mode == DRAW_MODE_COPY) {
-        draw_copy_rect(sx, sy, dx, dy, sw, sh);
+        int32_t left = dx, top = dy, right = (int32_t)dx + dw, bottom = (int32_t)dy + dh;
+        if (left < draw_get_clip_x0()) left = draw_get_clip_x0();
+        if (top < draw_get_clip_y0()) top = draw_get_clip_y0();
+        if (right > (int32_t)draw_get_clip_x1() + 1) right = (int32_t)draw_get_clip_x1() + 1;
+        if (bottom > (int32_t)draw_get_clip_y1() + 1) bottom = (int32_t)draw_get_clip_y1() + 1;
+        if (left >= right || top >= bottom) return;
+        /* Clip paired source/destination coordinates before the memmove path;
+         * native COPY needs no temporary allocation even for a tiny viewport. */
+        draw_copy_rect((int16_t)(sx + left - dx), (int16_t)(sy + top - dy),
+                       (int16_t)left, (int16_t)top, (int16_t)(right - left), (int16_t)(bottom - top));
         return;
     }
 
     bytes = (size_t)(uint16_t)sw * (size_t)(uint16_t)sh;
-    if (bytes == 0)
+    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
         return;
-    scratch = (uint8_t *)malloc(bytes);
+    /* Source rectangles may cross the framebuffer edge. The capture
+     * leaves those cells untouched, so initialize them before scaling. */
+    scratch = (uint8_t *)calloc(bytes, 1);
     if (!scratch)
         return;
 
     draw_save_region(sx, sy, sw, sh, scratch);
-    rip2_blit_pixels(rs, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
-                     dw, dh, write_mode);
+    rip_blit_pixels_gdi(rs, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
+                         dw, dh, write_mode);
     free(scratch);
 }
 
@@ -206,30 +157,10 @@ static void rip2_copy_scaled(rip_state_t *rs,
  * MegaNum helpers (local -- not exported from ripscrip.c)
  * ===================================================================== */
 
-static inline int mega_dig(char ch) {
-    if (ch >= '0' && ch <= '9') return ch - '0';
-    if (ch >= 'A' && ch <= 'Z') return ch - 'A' + 10;
-    if (ch >= 'a' && ch <= 'z') return ch - 'a' + 10;
-    return 0;
-}
-
-/* 1-digit MegaNum: single base-36 character, value 0-35 */
-static inline int mega1(const char *p) {
-    return mega_dig(p[0]);
-}
-
-/* 2-digit MegaNum: two base-36 characters, value 0-1295 */
-static inline int mega2l(const char *p) {
-    return mega_dig(p[0]) * 36 + mega_dig(p[1]);
-}
-
-/* Four-digit MegaNum.  Needed because several Level 2 records type a field
- * as mega4, and reading only its first two digits takes the HIGH half --
- * the opposite of the low-order bits a flags word actually carries. */
-static inline long mega4l(const char *p) {
-    return ((long)mega_dig(p[0]) * 46656L) + ((long)mega_dig(p[1]) * 1296L)
-         + ((long)mega_dig(p[2]) * 36L)    + (long)mega_dig(p[3]);
-}
+/* Level 2 has no fixed-radix exceptions in the shipped dispatch table. */
+#define mega1(p) ((int)rip_mega_decode((p),1,rs->mega_base==64 ? 64 : 36))
+#define mega2l(p) ((int)rip_mega_decode((p),2,rs->mega_base==64 ? 64 : 36))
+#define mega4l(p) ((long)rip_mega_decode((p),4,rs->mega_base==64 ? 64 : 36))
 
 /* Scale RIPscrip EGA Y-coordinate (0-349) to card display Y (0-399).
  * MUST match ripscrip.c::scale_y so the same EGA coord lands on the
@@ -329,8 +260,8 @@ void ripscrip2_init(ripscrip2_state_t *s) {
 /*
  * port_save_state -- snapshot rip_state_t drawing fields into ports[idx].
  *
- * Called before switching away from the active port so its drawing
- * state is preserved for when it becomes active again.
+ * Saves the per-port cursor and legacy diagnostic style mirrors. Only the
+ * cursor is restored on activation; styles are selected separately by |2Y.
  *
  * The viewport rect (vp_x0/y0/x1/y1) is authoritative in rip_port_t
  * and is NOT copied back from rip_state_t -- all viewport-setting
@@ -373,24 +304,6 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
 
     rs->draw_x       = p->draw_x;
     rs->draw_y       = p->draw_y;
-    rs->draw_color   = p->draw_color;
-    rs->fill_color   = p->fill_color;
-    rs->fill_pattern = p->fill_pattern;
-    rs->back_color   = p->back_color;
-    rs->write_mode   = p->write_mode;
-    rs->line_style   = p->line_style;
-    rs->line_pattern = p->line_pattern;
-    rs->line_thick   = p->line_thick;
-    rs->font_id      = p->font_id;
-    rs->font_size    = p->font_size;
-    rs->font_dir     = p->font_dir;
-    rs->font_hjust   = p->font_hjust;
-    rs->font_vjust   = p->font_vjust;
-    rs->font_attrib  = p->font_attrib;
-    rs->font_ext_id   = p->font_ext_id;
-    rs->font_ext_attr = p->font_ext_attr;
-    rs->font_ext_size = p->font_ext_size;
-
     /* Sync rip_state_t viewport from port */
     rs->vp_x0 = p->vp_x0;
     rs->vp_y0 = p->vp_y0;
@@ -400,14 +313,98 @@ static void port_load_state(rip_state_t *rs, uint8_t idx)
     /* Apply viewport as hardware clip rectangle */
     draw_set_clip(p->vp_x0, p->vp_y0, p->vp_x1, p->vp_y1);
 
-    /* Sync draw layer state */
-    draw_set_color(rs->palette[p->draw_color & 0x0F]);
-    draw_set_write_mode(p->write_mode);
-    draw_set_pos(p->draw_x, p->draw_y);
-    draw_set_line_style(p->line_pattern, p->line_thick);
-    card_pat = bgi_fill_to_card(p->fill_pattern);
+    /* Legacy diagnostic mirrors are snapshots, not independent styles. */
+    port_save_state(rs, idx);
+    draw_set_color(rs->palette[rs->draw_color & 0x0F]);
+    draw_set_write_mode(rs->write_mode);
+    draw_set_pos(rs->draw_x, rs->draw_y);
+    draw_set_line_style(rs->line_pattern, rs->line_thick);
+    card_pat = bgi_fill_to_card(rs->fill_pattern);
     draw_set_fill_style((card_pat >= 0) ? (uint8_t)card_pat : 0,
-                        rs->palette[p->back_color & 0x0F]);
+                        rs->palette[rs->back_color & 0x0F]);
+}
+
+/* D-45: the DLL's style manager is separate from its port manager. */
+static void style_save(rip_state_t *rs) {
+    rip_graphics_style_t *p = &rs->styles[rs->rip2_state.cur_style_slot];
+    p->initialized = true;
+    p->draw_color = rs->draw_color;
+    p->back_color = rs->back_color;
+    p->write_mode = rs->write_mode;
+    p->line_off_draw = rs->line_off_draw;
+    p->line_style = rs->line_style;
+    p->line_thick = rs->line_thick;
+    p->line_pattern = rs->line_pattern;
+    p->fill_pattern = rs->fill_pattern;
+    p->fill_color = rs->fill_color;
+    p->font_id = rs->font_id;
+    p->font_dir = rs->font_dir;
+    p->font_size = rs->font_size;
+    p->font_hjust = rs->font_hjust;
+    p->font_vjust = rs->font_vjust;
+    p->font_attrib = rs->font_attrib;
+    p->font_ext_id = rs->font_ext_id;
+    p->font_ext_attr = rs->font_ext_attr;
+    p->font_ext_size = rs->font_ext_size;
+    p->char_spacing = rs->char_spacing;
+    p->filled_borders_enabled = rs->filled_borders_enabled;
+    memcpy(p->user_fill_pattern, rs->user_fill_pattern, 8);
+}
+
+static void style_switch(rip_state_t *rs, uint8_t slot) {
+    style_save(rs);
+    rip_graphics_style_t *p = &rs->styles[slot];
+    if (!p->initialized) {
+        memset(p, 0, sizeof(*p));
+        p->initialized = true;
+        p->draw_color = p->fill_color = 15;
+        p->fill_pattern = p->line_thick = p->font_size = 1;
+        p->line_pattern = 0xFFFF;
+        p->filled_borders_enabled = true;
+        memset(p->user_fill_pattern, 0xFF, 8);
+    }
+    rs->draw_color = p->draw_color;
+    rs->back_color = p->back_color;
+    rs->write_mode = p->write_mode;
+    rs->line_off_draw = p->line_off_draw;
+    rs->line_style = p->line_style;
+    rs->line_thick = p->line_thick;
+    rs->line_pattern = p->line_pattern;
+    rs->fill_pattern = p->fill_pattern;
+    rs->fill_color = p->fill_color;
+    rs->font_id = p->font_id;
+    rs->font_dir = p->font_dir;
+    rs->font_size = p->font_size;
+    rs->font_hjust = p->font_hjust;
+    rs->font_vjust = p->font_vjust;
+    rs->font_attrib = p->font_attrib;
+    rs->font_ext_id = p->font_ext_id;
+    rs->font_ext_attr = p->font_ext_attr;
+    rs->font_ext_size = p->font_ext_size;
+    rs->char_spacing = p->char_spacing;
+    rs->filled_borders_enabled = p->filled_borders_enabled;
+    memcpy(rs->user_fill_pattern, p->user_fill_pattern, 8);
+    rs->rip2_state.cur_style_slot = slot;
+    draw_set_color(rs->palette[rs->draw_color & 15]);
+    draw_set_write_mode(rs->write_mode);
+    draw_set_line_style(rs->line_pattern, rs->line_thick);
+    int8_t pat = bgi_fill_to_card(rs->fill_pattern);
+    draw_set_fill_style(pat >= 0 ? (uint8_t)pat : 0, rs->palette[rs->back_color & 15]);
+    draw_set_user_fill_pattern(rs->user_fill_pattern);
+    bgi_font_set_char_spacing(rs->char_spacing ? rs->char_spacing : 100);
+}
+
+/* Called before reset-windows overwrites the active drawing fields. */
+void rip_style_reset_windows(rip_state_t *rs) {
+    /* ResetAllWindows writes the active border flag before deleting slots,
+     * including when the current slot is protected (RVA 0x1626A..0x16277). */
+    rs->filled_borders_enabled = true;
+    style_save(rs);
+    for (unsigned i = 0; i < RIP_MAX_PORTS; ++i)
+        if (!(rs->rip2_state.protected_style & (UINT64_C(1) << i)))
+            memset(&rs->styles[i], 0, sizeof(rs->styles[i]));
+    /* The caller installs defaults; saving again would resurrect old state. */
+    rs->rip2_state.cur_style_slot = 0;
 }
 
 /*
@@ -446,7 +443,7 @@ static void port_set_defaults(rip_port_t *p)
 /*
  * rip_port_create -- allocate a port and set its viewport rectangle.
  *
- * Mirrors DLL portInit / sub_03326F behavior:
+ * Implements a subset of DLL portInit / sub_03326F behavior (see D-41):
  *   - Rejects port 0 (permanent, cannot be redefined by BBS)
  *   - Rejects protected ports
  *   - If the slot is already allocated, clears existing state first
@@ -455,8 +452,7 @@ static void port_set_defaults(rip_port_t *p)
  * port_flags bits (from !|2P command, 4-digit MegaNum):
  *   bit 0 (1) = clipboard/offscreen port (informational on single-framebuffer targets)
  *   bit 1 (2) = make active immediately  (handled by caller)
- *   bit 2 (4) = deactivate viewport on create (set fullscreen flag)
- *   bit 3 (8) = protect immediately
+ *   other bits are ignored by the measured driver handler
  *
  * Returns true on success.
  */
@@ -476,6 +472,7 @@ static bool rip_port_create(rip_state_t *rs, uint8_t idx,
     memset(p, 0, sizeof(*p));
     port_set_defaults(p);
     p->allocated = true;
+    if (rs->port_query[idx].text) rs->port_query[idx].text[0] = '\0';
 
     /* Scale EGA (640x350) viewport to card (640x400) pixel coords */
     clamp_ega_rect(&x0, &y0, &x1, &y1);
@@ -502,10 +499,10 @@ static bool rip_port_create(rip_state_t *rs, uint8_t idx,
      * the wrong half and always came out zero (D-17); with the field read
      * correctly the invented bits would start firing.
      *
-     * Wire bit 0 IS consumed -- it reaches port initialisation as a boolean
-     * -- but what it selects there is not recovered, so it is not acted on.
-     * Every '|2P' in the shipped corpus sets exactly this bit and nothing
-     * else, and those scenes render correctly without it.  D-22.
+     * D-41 recovers bit 0: it allocates an independent offscreen surface
+     * and resets its origin to zero. RIPlib still uses a shared framebuffer.
+     * D-42 records the resulting FONTS/SPECLEFX rendering boundary; passing
+     * corpus replay does not prove correct offscreen rendering.
      *
      * '|2s' bits 2 and 3 remain protect/unprotect: that handler really does
      * test bl,4 and test bl,8, and RIPlib matches it. */
@@ -541,6 +538,7 @@ static bool rip_port_destroy(rip_state_t *rs, uint8_t idx, bool force)
     memset(p, 0, sizeof(*p));
 
     /* If the destroyed port was active, fall back to port 0 */
+    if (rs->port_query[idx].text) rs->port_query[idx].text[0] = '\0';
     if (rs->active_port == idx) {
         rs->active_port = 0;
         port_load_state(rs, 0);
@@ -575,9 +573,9 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
     uint8_t old_idx = rs->active_port;
 
     /* Apply source-port protection flags before saving state */
-    if (switch_flags & 0x04)
+    if (old_idx != 0 && (switch_flags & 0x04))
         rs->ports[old_idx].flags |= RIP_PORT_FLAG_PROTECTED;
-    if (switch_flags & 0x08)
+    if (old_idx != 0 && (switch_flags & 0x08))
         rs->ports[old_idx].flags &= (uint8_t)~RIP_PORT_FLAG_PROTECTED;
 
     /* Snapshot current port's drawing state */
@@ -597,9 +595,9 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
     }
 
     /* Apply destination-port protection flags */
-    if (switch_flags & 0x01)
+    if (new_idx != 0 && (switch_flags & 0x01))
         rs->ports[new_idx].flags |= RIP_PORT_FLAG_PROTECTED;
-    if (switch_flags & 0x02)
+    if (new_idx != 0 && (switch_flags & 0x02))
         rs->ports[new_idx].flags &= (uint8_t)~RIP_PORT_FLAG_PROTECTED;
 
     rs->active_port = new_idx;
@@ -608,19 +606,40 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
     return true;
 }
 
-/*
- * rip_port_copy -- copy pixels from one port's viewport to another.
- *
- * Maps to DLL RIP_PORT_COPY (!|2C).  On RIPlib's single-framebuffer
- * architecture both source and destination reside in the same framebuffer,
- * so draw_copy_rect() provides the necessary memmove-safe blit.
- *
- * Source/dest coords of all zeros = use entire viewport of that port.
- * If dx1,dy1 = 0 -- no scaling (verbatim copy to dx0,dy0 position).
- * If the destination rectangle has a different size, scale nearest-neighbor
- * through a scratch copy so overlapping source/dest regions remain stable.
- * Input coordinates are in EGA (640x350) space; scaled to card here.
- */
+typedef struct { int32_t left, top, right, bottom; } rip2_copy_rect_t;
+
+/* Public port viewports are inclusive; the driver copy contract is exclusive. */
+static rip2_copy_rect_t rip2_port_rect(const rip_port_t *port) {
+    rip2_copy_rect_t r = {port->vp_x0, port->vp_y0,
+                         (int32_t)port->vp_x1 + 1, (int32_t)port->vp_y1 + 1};
+    return r;
+}
+
+static bool rip2_copy_rect_empty(rip2_copy_rect_t r) {
+    return r.left >= r.right || r.top >= r.bottom;
+}
+
+/* RectTrimToFit only trims far edges. Native copies shorten the corresponding
+ * destination/source edge too; scaled copies keep the other rectangle intact. */
+static bool rip2_copy_trim(rip2_copy_rect_t *r, rip2_copy_rect_t clip,
+                           rip2_copy_rect_t *paired) {
+    if (r->right < clip.left || r->bottom < clip.top ||
+        r->left >= clip.right || r->top >= clip.bottom)
+        return false;
+    if (r->right > clip.right) {
+        if (paired) paired->right -= r->right - clip.right;
+        r->right = clip.right;
+    }
+    if (r->bottom > clip.bottom) {
+        if (paired) paired->bottom -= r->bottom - clip.bottom;
+        r->bottom = clip.bottom;
+    }
+    return true;
+}
+
+/* D-42: explicit coordinates are relative to each port; all-zero rectangles
+ * mean the entire respective viewport. Position-only destination means native
+ * size. Scratch capture keeps overlapping scaled/ROP copies stable. */
 static void rip_port_copy(rip_state_t *rs,
                           uint8_t src_idx,
                           int16_t sx0, int16_t sy0,
@@ -630,54 +649,50 @@ static void rip_port_copy(rip_state_t *rs,
                           int16_t dx1, int16_t dy1,
                           uint8_t write_mode)
 {
-    if (src_idx >= RIP_MAX_PORTS || dst_idx >= RIP_MAX_PORTS)
+    if (src_idx >= RIP_MAX_PORTS || dst_idx >= RIP_MAX_PORTS ||
+        write_mode > DRAW_MODE_NOT)
         return;
     if (!rs->ports[src_idx].allocated || !rs->ports[dst_idx].allocated)
         return;
 
-    rip_port_t *sp = &rs->ports[src_idx];
-    rip_port_t *dp = &rs->ports[dst_idx];
-
-    /* Resolve source rectangle (all-zero = entire source viewport) */
-    int16_t rsx0, rsy0, rsx1, rsy1;
-    if (sx0 == 0 && sy0 == 0 && sx1 == 0 && sy1 == 0) {
-        rsx0 = sp->vp_x0; rsy0 = sp->vp_y0;
-        rsx1 = sp->vp_x1; rsy1 = sp->vp_y1;
-    } else {
-        rsx0 = sx0;         rsy0 = scale_y(sy0);
-        rsx1 = sx1;         rsy1 = scale_y1(sy1);
-    }
-
-    /* Resolve destination position/rectangle (all-zero = upper-left). */
-    int16_t rdx, rdy, rdx1, rdy1;
-    bool dest_rect = false;
-    if (dx0 == 0 && dy0 == 0 && dx1 == 0 && dy1 == 0) {
-        rdx = dp->vp_x0; rdy = dp->vp_y0;
-        rdx1 = 0; rdy1 = 0;
-    } else {
-        rdx = dx0; rdy = scale_y(dy0);
-        rdx1 = dx1; rdy1 = scale_y1(dy1);
-        dest_rect = !(dx1 == 0 && dy1 == 0);
-    }
-
-    int16_t w = (int16_t)(rsx1 - rsx0 + 1);
-    int16_t h = (int16_t)(rsy1 - rsy0 + 1);
-    int16_t dw = w;
-    int16_t dh = h;
-    if (w <= 0 || h <= 0)
+    rip2_copy_rect_t sc = rip2_port_rect(&rs->ports[src_idx]);
+    rip2_copy_rect_t dc = rip2_port_rect(&rs->ports[dst_idx]);
+    rip2_copy_rect_t source = sc, dest = dc;
+    /* Wire coordinates are unsigned. Reject values that cannot be represented
+     * by the portable signed coordinate API instead of wrapping their scale. */
+    if (sx0 < 0 || sy0 < 0 || sx1 < 0 || sy1 < 0 ||
+        dx0 < 0 || dy0 < 0 || dx1 < 0 || dy1 < 0)
         return;
-
-    if (dest_rect) {
-        if (rdx > rdx1) { int16_t t = rdx; rdx = rdx1; rdx1 = t; }
-        if (rdy > rdy1) { int16_t t = rdy; rdy = rdy1; rdy1 = t; }
-        dw = (int16_t)(rdx1 - rdx + 1);
-        dh = (int16_t)(rdy1 - rdy + 1);
+    if (sx0 || sy0 || sx1 || sy1) {
+        source = (rip2_copy_rect_t){sc.left + sx0, sc.top + (int32_t)sy0 * 8 / 7,
+                                   sc.left + sx1, sc.top + (int32_t)sy1 * 8 / 7};
     }
-
-    rip2_copy_scaled(rs, rsx0, rsy0, w, h, rdx, rdy, dw, dh, write_mode);
-
-    /* Restore active port's write mode */
-    draw_set_write_mode(rs->ports[rs->active_port].write_mode);
+    if (dx0 || dy0 || dx1 || dy1) {
+        dest.left = dc.left + dx0;
+        dest.top = dc.top + (int32_t)dy0 * 8 / 7;
+        if (!dx1 && !dy1) {
+            dest.right = dest.left + source.right - source.left;
+            dest.bottom = dest.top + source.bottom - source.top;
+        } else {
+            dest.right = dc.left + dx1;
+            dest.bottom = dc.top + (int32_t)dy1 * 8 / 7;
+        }
+    }
+    if (rip2_copy_rect_empty(source) || rip2_copy_rect_empty(dest)) return;
+    bool scaled = source.right - source.left != dest.right - dest.left ||
+                  source.bottom - source.top != dest.bottom - dest.top;
+    if (!rip2_copy_trim(&source, sc, scaled ? NULL : &dest) ||
+        !rip2_copy_trim(&dest, dc, scaled ? NULL : &source) ||
+        rip2_copy_rect_empty(source) || rip2_copy_rect_empty(dest)) return;
+    int32_t sw = source.right - source.left, sh = source.bottom - source.top;
+    int32_t dw = dest.right - dest.left, dh = dest.bottom - dest.top;
+    if (source.left < INT16_MIN || source.top < INT16_MIN ||
+        dest.left < INT16_MIN || dest.top < INT16_MIN ||
+        source.right > INT16_MAX || source.bottom > INT16_MAX ||
+        dest.right > INT16_MAX || dest.bottom > INT16_MAX ||
+        sw > INT16_MAX || sh > INT16_MAX || dw > INT16_MAX || dh > INT16_MAX) return;
+    rip2_copy_scaled(rs, (int16_t)source.left, (int16_t)source.top, (int16_t)sw, (int16_t)sh,
+                     (int16_t)dest.left, (int16_t)dest.top, (int16_t)dw, (int16_t)dh, write_mode);
 }
 
 
@@ -735,9 +750,19 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         if (!ok)
             break;
 
-        /* Flag bit 1 (value 2) = make active immediately */
-        if (port_flags & 0x02)
+        /* D-44: replacing the active port preserves the selected style,
+         * resets its drawing position and applies its new viewport even
+         * without the activation flag. A normal switch would save the old
+         * position back into the freshly initialized port. */
+        if (port_num == rs->active_port) {
+            port_save_state(rs, port_num);
+            rs->ports[port_num].draw_x = 0;
+            rs->ports[port_num].draw_y = 0;
+            port_load_state(rs, port_num);
+        } else if (port_flags & 0x02) {
+            /* Flag bit 1 (value 2) = make active immediately */
             rip_port_switch(rs, port_num, 0);
+        }
         break;
     }
 
@@ -745,19 +770,30 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *
      * Wire format: !|2p<port_num:1><dest_port:1><reserved:2>|
      *
-     * port_num: specific port in the on-wire 0-35 range
-     * dest_port: ignored (DLL ignores it too)
+     * port_num: 1-35 selects one port; 0 deletes all unprotected secondary ports
+     * dest_port: selected after deletion, including when protection refuses it
      */
     case RIP2_CMD_PORT_DELETE: {
-        /* Slot 116 records mega1, mega1, mega2 -- four characters.  The one
-         * 2-character '|2p' in the corpus (SPECLEFX.RIP, "!|2p00") targets
-         * port 0, which is protected and refused either way, so rejecting a
-         * truncated record costs nothing and matches the driver.  D-17. */
+        /* Slot 116 records mega1, mega1, mega2 -- four characters. Keep the
+         * existing gate: the two-character SPECLEFX record is truncated.
+         * D-43 corrects D-17's explanation: a complete source-zero record
+         * deletes secondary ports, not the permanent master port. */
         if (raw_len < 4)
             break;
         uint8_t port_num = (uint8_t)mega1(raw + 0);
+        uint8_t dest_port = (uint8_t)mega1(raw + 1);
+        if (port_num >= RIP_MAX_PORTS || dest_port >= RIP_MAX_PORTS)
+            break;
 
-        rip_port_destroy(rs, port_num, false);
+        if (port_num == 0) {
+            for (uint8_t i = 1; i < RIP_MAX_PORTS; i++)
+                rip_port_destroy(rs, i, false);
+        } else {
+            rip_port_destroy(rs, port_num, false);
+        }
+        /* RIP_PortDelete ignores the deletion result, then selects dest.
+         * A deleted/empty destination is lazily recreated by the switch. */
+        rip_port_switch(rs, dest_port, 0);
         break;
     }
 
@@ -770,49 +806,16 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *   1 = protect dest, 2 = unprotect dest
      *   4 = protect src,  8 = unprotect src
      */
-    /* ── Resource-slot switching: !|2A !|2B !|2E !|2T !|2Y ──────────
-     *
-     * All five share the signature slot:1 flags:2.  The driver validates the
-     * slot ("Invalid palette slot number", "Illegal button style slot
-     * number", "Illegal environment slot number", "Illegal text window slot
-     * number") and switches a backing table.  RIPlib keeps one of each
-     * resource, so it validates identically and records the selection rather
-     * than pretending to swap a store it does not have.  Added 2026-08-12;
-     * see docs/spec §12.12 for the parity caveat. */
+    /* Resource selectors share slot:1 flags:2. Graphics styles have real
+     * independent storage (D-45); other resource families retain their
+     * existing selection/protection metadata and documented storage limits. */
     case RIP2_CMD_SWITCH_PALETTE:
     case RIP2_CMD_SWITCH_BUTTON_STYLE:
     case RIP2_CMD_SWITCH_ENVIRONMENT:
     case RIP2_CMD_SWITCH_TEXT_WINDOW:
     case RIP2_CMD_SWITCH_STYLE: {
-        /* Slots 111, 112, 114, 119 and 121 all record  mega1, mega2  -- three
-         * characters.  The gate was one character, so a truncated command was
-         * acted on where the driver rejects it; the corpus sends three
-         * ("!|2s000", "!|2s100").  Same defect class as '|1g' and '|1i' in
-         * D-14/D-16.  See D-17.
-         *
-         * THE SECOND FIELD IS NOT RESERVED.  This comment used to call it a
-         * "reserved pair", and 14.3.6 used to call slot protection inert on
-         * the strength of that.  Disassembly on 2026-08-14 showed the driver
-         * acting on four of its bits -- from slot 111:
-         *
-         *     test esi,4 -> paletteSlotProtect(inst,-1,1)   before switch
-         *     test esi,8 -> paletteSlotProtect(inst,-1,0)   before switch
-         *                   (the switch itself)
-         *     test esi,1 -> paletteSlotProtect(inst,-1,1)   after switch
-         *     test esi,2 -> paletteSlotProtect(inst,-1,0)   after switch
-         *
-         * so bits 2/3 protect and unprotect the slot being LEFT and bits 0/1
-         * the slot being ENTERED.  Each family has its own protector
-         * (styleSlotProtect, textWindowSlotProtect, environmentProtect,
-         * colorTableProtect, and 0x100454C4 for button styles).
-         *
-         * RIPlib honours these bits for '|2s' and ports only.  For the other
-         * five families the flags are still ignored, which means RIPlib
-         * completes writes the driver would refuse -- the tolerable
-         * direction under 14.6, but a real divergence.  Implementing it
-         * needs a protected flag per slot per family plus checks at the 24
-         * write sites the driver guards; that is a feature, not a patch, and
-         * it is recorded in 14.3.6 rather than half-done here. */
+        /* Preserve the three-character gate and source-before-destination
+         * protection ordering. Protect precedes unprotect for either side. */
         if (raw_len < 3)
             break;
         uint8_t slot = (uint8_t)mega1(raw + 0);
@@ -840,10 +843,11 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 uint8_t  fl   = (uint8_t)mega2l(raw + 1);
                 uint64_t from = (uint64_t)1u << *cur;
                 uint64_t to   = (uint64_t)1u << slot;
-                if (fl & 0x04) *mask |=  from;   /* protect the slot being left  */
+                if ((fl & 0x04) && (cmd != RIP2_CMD_SWITCH_STYLE || *cur != 0)) *mask |= from;   /* protect the slot being left  */
                 if (fl & 0x08) *mask &= ~from;   /* unprotect it                 */
-                *cur = slot;                      /* the switch itself            */
-                if (fl & 0x01) *mask |=  to;     /* protect the slot entered     */
+                if (cmd == RIP2_CMD_SWITCH_STYLE) style_switch(rs, slot);
+                else *cur = slot;
+                if ((fl & 0x01) && (cmd != RIP2_CMD_SWITCH_STYLE || slot != 0)) *mask |= to;     /* protect the slot entered     */
                 if (fl & 0x02) *mask &= ~to;     /* unprotect it                 */
             }
             break;
@@ -1243,7 +1247,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 int16_t y = scale_y(params[2]);
                 int16_t w = params[3];
                 int16_t h = scale_y(params[4]);
-                (void)rip2_clipboard_capture(rs, x, y, w, h);
+                (void)rip_clipboard_capture(rs, x, y, w, h);
             } else if (op == 2 && param_count >= 3 &&
                        rs->clipboard.valid && rs->clipboard.data) {
                 int16_t x = params[1];
@@ -1251,7 +1255,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 uint8_t mode = (param_count >= 4)
                              ? (uint8_t)(params[3] & 0xFF)
                              : DRAW_MODE_COPY;
-                rip2_blit_pixels(rs, x, y, rs->clipboard.data,
+                rip_blit_pixels(rs, x, y, rs->clipboard.data,
                                  (uint16_t)rs->clipboard.width,
                                  (uint16_t)rs->clipboard.height,
                                  rs->clipboard.width, rs->clipboard.height,
@@ -1265,7 +1269,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 uint8_t mode = (param_count >= 6)
                              ? (uint8_t)(params[5] & 0xFF)
                              : DRAW_MODE_COPY;
-                rip2_blit_pixels(rs, x, y, rs->clipboard.data,
+                rip_blit_pixels(rs, x, y, rs->clipboard.data,
                                  (uint16_t)rs->clipboard.width,
                                  (uint16_t)rs->clipboard.height,
                                  w, h, mode);

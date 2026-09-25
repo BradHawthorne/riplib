@@ -147,7 +147,7 @@ LEVEL 2 — Drawing Ports (prefix '2'):
      Cmd  Name                   Args  Format
      ---  --------------------   ----  ---------------------------
      P    DEFINE_PORT            var   !|2P<port><x0><y0>..[<fl>]|
-     p    DELETE_PORT            1     !|2p<port>|
+     p    DELETE_PORT            4     !|2p<port><dest><res:2>|
      s    SWITCH_PORT            var   !|2s<port>[<flags>]|
      C    PORT_COPY              var   !|2C<src><sx0>..<wm>|
      F    PORT_FLAGS             var   !|2F<port>[<a>][<cm>][<z>]|
@@ -268,7 +268,7 @@ RIPscrip sessions have three lifecycle states:
           Allocates PSRAM arena.
           Parses all 10 BGI stroke fonts from flash.
           Sets EGA default palette at indices 240-255.
-          Initializes port 0 (full-screen, protected).
+          Initializes port 0 (full-screen, permanent and unprotected).
           Seeds $RAND$ LCG from RTC timestamp.
 
      rip_activate() — Protocol switch-in

@@ -1,7 +1,9 @@
 """Regression tests for the conformance instrument; no proprietary DLL needed."""
 import contextlib
+import copy
 import importlib.util
 import io
+import json
 from pathlib import Path
 import sys
 import struct
@@ -13,6 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 # Keep instrument tests from generating cache files in the source tree.
 sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location(
     "dll_conformance", ROOT / "scripts" / "dll-conformance.py")
 CHECK = importlib.util.module_from_spec(SPEC)
@@ -31,6 +34,141 @@ def fixture(body):
 
 
 class HandlerCoverageTests(unittest.TestCase):
+    def test_style_instrument_and_mutations(self):
+        spec = importlib.util.spec_from_file_location('styles', ROOT / 'scripts/dll-style-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/style_slots.json').read_text(encoding='utf-8'))
+        module.validate(data)
+        self.assertEqual(module.c_header(data), (ROOT / 'tests/fixtures/style_slots.h').read_text(encoding='utf-8'))
+        for mutation in ('values', 'protection', 'errors', 'rop', 'pen', 'reset', 'duplicate'):
+            broken = copy.deepcopy(data)
+            r = broken['cases'][0]['result']
+            if mutation == 'values': r['values'][0] = 15
+            elif mutation == 'protection': r['protected'] = 1
+            elif mutation == 'errors': r['errors'] = [{'error_code': 30}]
+            elif mutation == 'rop': r['drawing'][0]['SetROP2'][1] = 13
+            elif mutation == 'pen': r['drawing'][1]['CreatePen'][2] = 15
+            elif mutation == 'reset': broken['resets'][0]['protected']['values'][0] = 15
+            else: broken['cases'][1] = broken['cases'][0]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError): module.validate(broken)
+
+    def port_instrument(self):
+        spec = importlib.util.spec_from_file_location('port_fixture', ROOT / 'scripts/dll-port-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/port_calls.json').read_text(encoding='utf-8'))
+        return module, data
+
+    def test_port_redefinition_instrument_and_mutations(self):
+        spec = importlib.util.spec_from_file_location('redefine', ROOT / 'scripts/dll-port-redefine-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/port_redefine.json').read_text(encoding='utf-8'))
+        module.validate(data)
+        for mutation in ('cursor', 'style', 'clip', 'rop', 'duplicate'):
+            broken = copy.deepcopy(data)
+            case = broken['cases'][8]
+            if mutation == 'cursor': case['target_cursor'][0] = 37
+            elif mutation == 'style': case['style']['selected'] = 1
+            elif mutation == 'clip': case['next_line'][0]['clip'][1] = 0
+            elif mutation == 'rop': case['next_line'][1]['SetROP2'][1] = 13
+            else: broken['cases'][0] = broken['cases'][1]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError): module.validate(broken)
+
+    def test_oracle_import_addresses_survive_stub_removal(self):
+        spec = importlib.util.spec_from_file_location('raster', ROOT / 'scripts/dll-raster-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        oracle = module.Oracle.__new__(module.Oracle)  # no Unicorn or DLL required
+        sentinel = (lambda a: 17, 0)
+        oracle.stubs = {0x130010: sentinel}
+        imports = {}
+        oracle.write = lambda address, values: imports.update({address: values[0]})
+        oracle.import_stub(0x10, 2, lambda a: 21)
+        oracle.import_stub(0x14, 3, lambda a: 22)
+        self.assertIs(oracle.stubs[0x130010], sentinel)
+        self.assertEqual(len(set(imports.values())), 2)
+        self.assertEqual(oracle.stubs[imports[module.IB + 0x10]][1], 8)
+        self.assertEqual(oracle.stubs[imports[module.IB + 0x14]][1], 12)
+
+    def test_port_lifecycle_instrument_and_mutations(self):
+        spec = importlib.util.spec_from_file_location('lifecycle', ROOT / 'scripts/dll-port-lifecycle-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/port_lifecycle.json').read_text(encoding='utf-8'))
+        module.validate(data)
+        self.assertEqual(module.c_header(data), (ROOT / 'tests/fixtures/port_lifecycle.h').read_text(encoding='utf-8'))
+        for mutation in ('active', 'protection', 'rectangle', 'cleanup', 'budget', 'duplicate', 'error'):
+            broken = copy.deepcopy(data)
+            if mutation == 'active': broken['lifetimes'][0]['steps'][0]['state']['active'] = 1
+            elif mutation == 'protection': broken['lifetimes'][0]['steps'][0]['state']['ports'][0]['protected'] = True
+            elif mutation == 'rectangle': broken['definitions'][0]['step']['state']['ports'][2]['clip'][2] += 1
+            elif mutation == 'cleanup': broken['failures'][-1]['step']['resources'].pop()
+            elif mutation == 'budget': broken['definitions'][1]['step']['state']['available_pixels'] += 1
+            elif mutation == 'duplicate': broken['lifetimes'][1] = broken['lifetimes'][0]
+            else: broken['lifetimes'][0]['steps'][0]['errors'] = [{'error_code': 30}]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError): module.validate(broken)
+
+    def test_full_port_fixtures_preserve_coordinate_and_dc_contracts(self):
+        module, data = self.port_instrument()
+        module.validate(data)
+
+    def test_port_copy_boundaries_preserve_rejection_and_scaling(self):
+        module, data = self.port_instrument()
+        module.validate(data)
+        cases = data['copy_edges']
+        self.assertEqual(len(cases), 84)
+        self.assertEqual(len({(c['name'], tuple(c['define_origin']), c['offscreen']) for c in cases}), 84)
+        for c in cases:
+            if c['name'].startswith(('reverse_', 'empty_')) or c['name'].endswith('_outside'):
+                self.assertTrue(c['events'])
+                self.assertTrue(all('error_code' in e for e in c['events']))
+        shared = {c['name']: c['events'][0] for c in cases
+                  if c['define_origin'] == [10, 20] and not c['offscreen']}
+        self.assertEqual(shared['zero_dest']['StretchBlt'][1:5], [0, 0, 640, 400])
+        self.assertEqual(shared['position_only']['BitBlt'][1:5], [30, 32, 2, 8])
+        self.assertEqual(shared['source_right_native']['BitBlt'][3:5], [2, 8])
+        self.assertEqual(shared['source_right_scaled']['StretchBlt'][3:5], [8, 8])
+        self.assertEqual(shared['source_right_scaled']['StretchBlt'][8:10], [2, 8])
+        for mutation in ('error', 'empty', 'duplicate', 'surface'):
+            broken = copy.deepcopy(data)
+            case = broken['copy_edges'][0]
+            if mutation == 'error': case['events'] = [{'error_code': 30}]
+            elif mutation == 'empty': case['events'] = []
+            elif mutation == 'duplicate': broken['copy_edges'][1] = case
+            else: next(iter(case['events'][0].values()))[0] = 999
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                module.validate(broken)
+
+    def test_port_fixture_checker_rejects_origin_surface_and_matrix_mutations(self):
+        module, original = self.port_instrument()
+        for mutation in ('origin', 'surface', 'capture', 'duplicate'):
+            data = copy.deepcopy(original)
+            case = next(c for c in data['load_icon']
+                        if c['define_origin'] == [10, 20] and not c['offscreen'] and c['args'][4])
+            if mutation == 'origin': case['events'][0]['display'][0] -= 10
+            elif mutation == 'surface': case['events'][-1]['StretchBlt'][5] = 201
+            elif mutation == 'capture': case['events'][-1]['StretchBlt'][6] -= 10
+            else: data['port_copy'][0] = data['port_copy'][1]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                module.validate(data)
+
+    def test_raster_fixtures_keep_source_not_and_capture_extents(self):
+        data = json.loads((ROOT / 'tests/fixtures/raster_calls.json').read_text(encoding='utf-8'))
+        rops = [0xCC0020, 0x660046, 0xEE0086, 0x8800C6, 0x330008, 0xCC0020]
+        self.assertEqual(data['icon_rops'], rops)
+        self.assertEqual(len(data['port_rops']), 12)
+        for case in data['port_rops']:
+            call = 'StretchBlt' if case['scaled'] else 'BitBlt'
+            self.assertEqual(case['events'][0][call][-1], rops[case['mode']])
+        captures = {c['name']: c['events'] for c in data['captures']}
+        self.assertEqual(captures['native'][1], {'allocation': [3, 8]})
+        self.assertEqual(captures['stretched'][1], {'allocation': [3, 9]})
+        self.assertEqual(captures['right_bottom_clip'][2]['StretchBlt'],
+                         [102, 0, 0, 5, 8, 101, 638, 398, 2, 2, 0xCC0020])
+        self.assertFalse(any('StretchBlt' in e for e in captures['outside']))
+
     def test_directed_fuzz_seeds_keep_adjacent_literals_and_escapes(self):
         spec = importlib.util.spec_from_file_location('fuzz_seeds', ROOT / 'scripts/fuzz-seeds.py')
         exporter = importlib.util.module_from_spec(spec)
@@ -149,6 +287,7 @@ class HandlerCoverageTests(unittest.TestCase):
         image = bytearray(129 * 40)
         for slot in range(129):
             offset = slot * 40
+            image[offset + 5] = 0 if slot<85 else ord("1") if slot<110 else ord("2") if slot<122 else ord("3") if slot<124 else ord("9")
             image[offset + 15] = 27 if slot in (85, 110, 124) else ord('A')
             struct.pack_into('<I', image, offset + 1, 0x10001000)
             struct.pack_into('<i', image, offset + 16, 1)
@@ -156,7 +295,7 @@ class HandlerCoverageTests(unittest.TestCase):
         sections = [(0x80820, len(image), 0, len(image))]
         rows = CHECK.dispatch_rows(image, sections)
         _, meta = CHECK.read_table(image, sections)
-        for level in (1, 2, 3):
+        for level in (1, 2, 9):
             self.assertIn((level, '\x1b'), meta)
         self.assertEqual(self.run_check(CHECK.check_dispatch_accounting, rows, meta, False)[0], 0)
         # Re-inject the historical printable-only filter: exactly three losses.
@@ -176,6 +315,21 @@ class HandlerCoverageTests(unittest.TestCase):
         self.assertIn('1 duplicate named row(s)', output)
         rows[2]['handler'] = 99
         self.assertEqual(self.run_check(CHECK.check_dispatch_accounting, rows, meta, False)[0], 1)
+
+    def test_prefix_is_read_from_record_not_inferred_from_slot(self):
+        image = bytearray(129 * 40)
+        for slot in range(129):
+            offset = slot * 40
+            image[offset+15] = ord('D')
+            struct.pack_into('<I',image,offset+1,0x10001000)
+        sections = [(0x80820,len(image),0,len(image))]
+        image[5:7] = b'9\0'
+        image[125*40+5:125*40+7] = b'3\0'
+        rows = CHECK.dispatch_rows(image,sections)
+        self.assertEqual((rows[0]['level'],rows[125]['level']), (9,3))
+        image[5] = ord('x')
+        with self.assertRaises(ValueError):
+            CHECK.dispatch_rows(image,sections)
 
     def test_short_dispatch_table_fails_closed(self):
         with self.assertRaises(SystemExit):

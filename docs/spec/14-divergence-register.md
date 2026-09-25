@@ -1,3 +1,9 @@
+CURRENT CORRECTION (2026-09-24, D-34..37): historical claims below
+about 117 keys, a duplicate |3D, or service commands at level 3 are
+superseded. Prefix bytes prove 118 distinct keys; services use level 9.
+Global radix, icon stretch/ROP, exact brush masks and query protection
+are now implemented. See ../crosswalk-audit.md for current boundaries.
+
 =====================================================================
 14.  DIVERGENCE REGISTER
 =====================================================================
@@ -48,7 +54,7 @@ tolerances in 14.3.3 by name rather than passing them silently.
 2026-09-24 FIX STATUS (D-31..33): the backtick length/offset defects
 are fixed. Tracing the geometry helper also corrected comma, period,
 colon and brace. Both missing ESC keys now have handlers, and refresh
-stores a host command. Coverage is 117/117 distinct DLL keys; this is
+stores a host command. Coverage is 118/118 distinct DLL keys (D-34 corrects the prefixes); this is
 not a claim of full terminal behavior or pixel parity. See the current
 audit report at ../crosswalk-audit.md for exact validation and limits.
 
@@ -493,11 +499,10 @@ rather than a slogan.
      after -- 91237 foreground pixels either way, checked rather than
      assumed.
 
-     ONE IS STILL NOT GUARDED.  '|1ESC' rip_query: its diagnostics --
-     "Port is protected - can't define query", "Text window is
-     protected - can't define query" -- are about DEFINING a query
-     rather than answering one, and which of RIPlib's query paths that
-     corresponds to has not been established.
+     D-37 closes the query-definition gap: mode 3 checks the target
+     port's protection and existence; mode 4 checks the target text
+     window. Modes 1..6 store expressions for later events; $OFF$ clears
+     them. This replaces the former immediate-only query behavior.
      Everything starts unprotected, so the guards are inert until a
      stream opts in -- which is why turning them on changed nothing for
      the 35 corpus scenes or the 315 assertions.  The driver reports a
@@ -509,10 +514,11 @@ rather than a slogan.
      switch with bit 0 and it is refused, switch with bit 1 and it lands
      again.  The unprotected leg is first on purpose -- a guard that is
      simply always-on fails there rather than passing quietly.
-     PORT protection RIPlib does implement -- port 0 permanently,
-     '|2s' bits 0..3 to protect and unprotect the destination and
-     source ports, and create/delete refusing a protected port.  The
-     bit assignment above is the same one.  See D-22.
+     PORT protection RIPlib implements: port 0 is permanent and cannot
+     be protected; '|2s' bits 0..3 protect/unprotect secondary destination
+     and source ports. Create/delete refuse a protected port. D-43 fixes
+     the master-port flag guard and confirms that deletion still selects
+     its destination after a protection refusal. See D-22 and D-43.
 
 14.3.7  WITHDRAWN MOUSE-REGION CLAIM
 
@@ -522,12 +528,13 @@ rather than a slogan.
 
 14.3.8  COMMAND COVERAGE AND REMAINING SEMANTIC LIMITS
 
-     D-32 implements '|2<ESC>' (SwitchDirectory) and '|3<ESC>'
+     D-32 implements '|2<ESC>' (SwitchDirectory) and '|9<ESC>'
      (EnterBlockMode) as validated host-service state/callbacks. D-31
      replaces backtick's wrong screen-compositing behavior with a chord.
-     All 117 distinct driver keys have source handlers. Host execution,
-     encoded-stream decoding, and duplicate '|3D' selection are separate
-     unresolved contracts, not established by handler coverage.
+     All 118 distinct driver keys have source handlers. D-34 corrects
+     the five service prefixes to level 9 (legacy level-3 aliases remain).
+     There is no duplicate key. The 9U driver handler validates a type
+     but has no payload decoder. Host execution is delegated explicitly.
      See ../crosswalk-audit.md for the precise remaining boundaries.
 
 14.3.9  RIPlib-ORIGINAL COMMANDS
@@ -616,6 +623,70 @@ rather than a slogan.
      itself.  Ten of the thirteen argc-0 entries have real bodies.
      Only a bare-RET body proves a command is inert.
 
+
+14.3.11  PORT COORDINATES, EXTENTS AND OFFSCREEN STORAGE (D-41)
+
+     Native port setup plus complete decoded 1I/2C execution establishes
+     shared-screen versus offscreen behavior; see D-41 and port_calls.json.
+     Shared ports retain their origin and use the master DC. Offscreen
+     ports reset their origin to zero and have an independent DC.
+
+     RIPlib's single framebuffer does not implement that storage separation.
+     Explicit 2C coordinates are currently absolute, with inclusive extents
+     and ceiling-scaled bottom Y. The measured driver uses port-relative
+     coordinates, exclusive extents and floor scaling on both endpoints.
+     A logical 2C source (3,7)-(5,14) therefore means 2x8 pixels in the driver.
+
+     1I has a further driver quirk: on the shared port defined at logical
+     (10,20), it draws a logical (3,7) icon at device (13,30), then its capture
+     reads (23,52). This extra offset survives actual port creation/switching;
+     it is absent in the tested offscreen case because that origin is zero.
+
+     D-42 fixes 2C relative coordinates, exclusive extents, floor rounding,
+     all-zero destination scaling, rejection and trimming for the stored
+     viewport geometry. Fifty driver-derived shared-port fixtures pass all
+     five ROPs and invalid mode 5. Viewport setup is injected equivalently;
+     this is not proof that 2P currently creates matching viewports.
+
+     Status: PARTIAL. Independent offscreen storage, 2P definition geometry
+     and 1I's shared-origin capture quirk remain open. FONTS and SPECLEFX
+     request surfaces larger than RIPlib's display; their foreground metrics
+     change under the corrected copy semantics, with rendering parity still
+     unproven. D-42 records exact deltas and source dimensions. These fixes
+     and remaining differences do not require changing wire field widths.
+
+14.3.12  PORT DELETION AND MASTER PROTECTION (D-43)
+
+     FIXED: '|2p' now reads its destination, validates both indices, maps
+     source zero to all unprotected secondary slots and selects destination
+     even after refused/missing-source deletion. Empty destinations are
+     recreated by switching. '|2s' protection flags cannot protect port 0.
+     Runtime checks compare 32 wire steps against native lifetime metadata,
+     plus query cleanup, state restoration and invalid/truncated inputs.
+
+     VERIFIED BOUNDARY: native 2P geometry and failure fixtures record
+     unbounded shared rectangles, unsigned wrapped dimensions and loss of
+     old storage before replacement allocation. RIPlib's bounded geometry,
+     active-definition synchronization and absent offscreen storage remain
+     separate work. These findings change no wire widths or length gates.
+
+14.3.13  ACTIVE REDEFINITION AND STYLE SELECTION (D-44)
+
+     FIXED: successful active 2P redefinition now applies the new stored
+     viewport, resets drawing position and preserves current style for
+     either activation flag value. Protected refusal remains unchanged.
+
+     FIXED (D-45): 36 graphics-style slots are independently selected by
+     |2Y. Switching ports restores only cursor/viewport, preserving style.
+     Style zero cannot be protected. Reset-windows clears unprotected
+     styles and selects zero; disconnect clears the whole style table.
+     128 native cases pin selection, defaults, protection order, ROP and
+     pen arguments. Three sequences execute native style-reset primitives.
+     Syntax widths and gates are unchanged; consumers must rebuild for the
+     expanded session struct. Full font/GDI equivalence is not claimed.
+
+     OPEN: 2P geometry, independent offscreen storage, other resource-table
+     storage, and complete reset side effects remain separate boundaries.
 
 14.4  WHAT THIS REGISTER IS FOR
 ---------------------------------------------------------------------
@@ -905,9 +976,10 @@ AUDIT LOG -- QUEUE COMPLETE.  All nine audited, four findings.
          reports "Invalid stretch parameter" above one, drawing nothing.
          RIPlib called that column reserved, "meaning not recovered",
          which was true only in the sense that nobody had looked.  The
-         refusal is now implemented; stretching itself is not, and
-         RIPlib still blits at native size.  args[3] at p[5] and args[6]
-         at p[8] remain genuinely unexamined.  FIXED.
+         refusal is implemented. D-35 additionally traces the dimension
+         scaling and corrects the ROP to args[3] at p[5]. args[6] is unused
+         by the bounded handler. The earlier FIXED label covered only
+         the value bound, not these semantics.
 
   '|2A' '|2B' '|2E' '|2T' '|2Y'  the second field is not a reserved
          pair but a flags word that WRITES protection state, refuting

@@ -25,8 +25,8 @@ extern "C" {
 /* Maximum mouse regions (RIPscrip spec: 128) */
 #define RIP_MAX_MOUSE_REGIONS 128
 
-/* Maximum clipboard size (640×400 = 256000 bytes, stored in PSRAM) */
-#define RIP_CLIPBOARD_MAX     (640 * 400)
+/* Full 640x400 image plus the driver's capture edge (257041 PSRAM bytes). */
+#define RIP_CLIPBOARD_MAX     (641 * 401)
 
 /* Numbered icon slots used by RIPlib extensions |3J SAVE_ICON / |3. STAMP_ICON. */
 #define RIP_ICON_SLOT_MAX     36
@@ -121,6 +121,12 @@ typedef struct {
     uint8_t  corner_col;        /* Corner color */
 } rip_button_style_t;
 
+/* Deferred RIP_Query text, allocated only when a stream defines it. */
+typedef struct {
+    char *text;
+    uint16_t capacity;
+} rip_query_slot_t;
+
 /* Clipboard for GET_IMAGE/PUT_IMAGE */
 typedef struct {
     uint8_t *data;              /* Pixel data (arena-allocated) */
@@ -128,7 +134,7 @@ typedef struct {
     bool     valid;             /* true if clipboard contains data */
 } rip_clipboard_t;
 
-/* Handler for '|3G' RIP_GotoURL.
+/* Handler for '|9G' RIP_GotoURL.
  *
  * RIPlib NEVER opens a URL or spawns a process itself.  A stream is untrusted
  * input, and a terminal that acts on it directly is a remote-code-execution
@@ -158,7 +164,12 @@ typedef struct rip_state_s rip_state_t;
 
 typedef void (*rip_url_handler_t)(const char *url, int len);
 
-/* |3ESC requests a host-owned file transfer. No transfer, file access or
+/* |9D carries a host-command expression. Stored even without a handler;
+ * RIPlib never executes a shell command. The callback owns host policy. */
+typedef void (*rip_host_command_handler_t)(void *user, const char *text, int len);
+void rip_set_host_command_handler(rip_state_t *s, rip_host_command_handler_t handler, void *user);
+
+/* |9ESC requests a host-owned file transfer. No transfer, file access or
  * protocol bytes are initiated by RIPlib. The callback receives untrusted
  * data valid only for the duration of the call. Also available for polling
  * in block_transfer; pending stays set until the host clears it. */
@@ -278,13 +289,15 @@ typedef struct {
 
 /* ── Drawing Ports (v2.0 / v3.0) ─────────────────────────────────── *
  *
- * The spec defines 36 independent drawing surfaces (one per port slot).
+ * The driver has 36 port slots, with shared-screen or offscreen storage.
  * RIPlib runs against a single shared framebuffer, so per-port pixel
- * data is not maintained — instead each port stores its drawing state
- * (clip region, color, line style, etc.) and that state is saved on
- * switch-away and restored on switch-in.  All drawing targets the
+ * data is not maintained. Ports store the cursor and viewport; graphics
+ * styles are selected independently by |2Y (D-45).  All drawing targets the
  * single framebuffer; the active port's viewport becomes the clip
  * rectangle.
+ * D-42 corrects port-copy coordinates/extents for the stored viewports;
+ * independent offscreen storage and port-definition geometry remain open
+ * (docs/spec/12-dll-provenance.md).
  *
  * Port 0 is permanent: full-screen viewport, cannot be deleted,
  * allocated at rip_init_first() time.
@@ -321,7 +334,8 @@ typedef struct {
     /* Coordinate origin offset (v2.0 world-space translation; 0,0 normally) */
     int16_t  origin_x, origin_y;
 
-    /* Saved drawing state — written on switch-away, loaded on switch-in */
+    /* Cursor is saved/restored. Style fields below are legacy diagnostic
+     * snapshots only; they do not select or restore graphics styles. */
     int16_t  draw_x, draw_y;     /* Per-port current drawing position */
     uint8_t  draw_color;
     uint8_t  fill_color;
@@ -379,6 +393,20 @@ typedef struct {
  *  of the public API.
  * ───────────────────────────────────────────────────────────────── */
 
+/* Independent graphics-style snapshots selected by |2Y (D-45). */
+typedef struct {
+    bool initialized;
+    uint8_t draw_color, back_color, write_mode;
+    uint8_t line_off_draw, line_style, line_thick;
+    uint16_t line_pattern;
+    uint8_t fill_pattern, fill_color, user_fill_pattern[8];
+    uint8_t font_id, font_dir, font_size, font_hjust, font_vjust, font_attrib;
+    uint8_t font_ext_id, font_ext_attr;
+    uint32_t font_ext_size;
+    uint16_t char_spacing;
+    bool filled_borders_enabled;
+} rip_graphics_style_t;
+
 /* RIPscrip parser state */
 struct rip_state_s {
     uint8_t  state;          /* Current FSM state (RIP_ST_* constants, 0-13) */
@@ -391,6 +419,7 @@ struct rip_state_s {
     bool     is_level1;      /* Currently parsing a Level 1 command */
     bool     is_level2;      /* Currently parsing a Level 2 command */
     bool     is_level3;      /* Currently parsing a Level 3 command */
+    bool     is_level9;      /* Driver host/service command prefix */
 
     /* Drawing state */
     int16_t  draw_x, draw_y; /* Current drawing position */
@@ -441,15 +470,18 @@ struct rip_state_s {
 
     /* Level 3 state (added 2026-08-12 with the Level 3 dispatch).
      *
-     * goto_url: the URL from '|3G' RIP_GotoURL, validated but NEVER acted on.
+     * goto_url: the URL from '|9G' RIP_GotoURL, validated but NEVER acted on.
      * RIPlib does not launch URLs or spawn processes -- see the $GOTOURL$
      * policy note in ripscrip.c.  An embedder that wants click-through reads
      * this and applies its own policy.  Empty means "none received". */
     char     goto_url[128];
     /* Opt-in handler; NULL (the default) means the URL is stored only. */
     rip_url_handler_t url_handler;
-    /* '|3U' RIP_BeginEncodedStream announcement. The payload format has not
-     * been recovered, so the announcement is recorded, not decoded. */
+    char host_command[256];
+    rip_host_command_handler_t host_command_handler;
+    void *host_command_user;
+    /* |9U announcement metadata; the inspected driver validates type but
+     * performs no payload decoding. The legacy |3U alias remains accepted. */
     uint16_t encoded_stream_type;
     uint32_t encoded_stream_len;
     /* '|3e' RIP_BAUD_EMULATION — requested playback rate.  The driver
@@ -614,6 +646,11 @@ struct rip_state_s {
      * one byte per call; on the NUL terminator the response is stored
      * in the target user variable and query_pending is cleared.
      * query_response is the staging accumulator. */
+    rip_query_slot_t deferred_query[4]; /* modes 1,2,5,6 */
+    rip_query_slot_t port_query[36];
+    rip_query_slot_t text_query[36];
+    uint64_t defined_text_windows;
+    int16_t query_hover_field;
     bool    query_pending;         /* true while waiting for host response */
     char    query_var_name[32];    /* $APPn$ or generic variable being queried */
     char    query_response[RIP_USER_VAR_VALUE_MAX + 1]; /* incoming response accumulator */
@@ -659,10 +696,8 @@ struct rip_state_s {
      * 2=center).  Stored so subsequent icon-load / PUT_IMAGE calls
      * can honour the BBS-requested presentation. */
     uint8_t image_style;
-    /* MegaNum radix selected by '|J' RIP_SET_BASE_MATH: 36 or 64.  Recorded
-     * for capability queries; the decoders are base 36 unconditionally
-     * because the base-64 digit alphabet has not been recovered.  See
-     * docs/spec/12-dll-provenance.md D-10. */
+    /* Session MegaNum radix selected by |J: 36 or 64. Per-command fixed
+     * radix flags take precedence (D-34). Reset to 36 on disconnect. */
     uint8_t mega_base;
     /* '|2R' RIP_SetRefresh reserved field (slot 117, one mega4). */
     uint32_t refresh_res;
@@ -693,9 +728,11 @@ struct rip_state_s {
      * Port 0 is always allocated (full-screen, permanent).
      * Ports 1-35 are created on demand by !|2P and destroyed by !|2p.
      * active_port tracks the current drawing port (0-35).
-     * On switch: active port's drawing fields are snapshotted into
-     * ports[active_port], then new port's fields are loaded back into
-     * the rip_state_t drawing fields and its viewport clip is applied. */
+     * Switching restores the target cursor and applies its viewport.
+     * The selected graphics style is unaffected. */
+    /* Active style fields above are authoritative until saved on switching. */
+    rip_graphics_style_t styles[RIP_MAX_PORTS];
+    uint8_t user_fill_pattern[8];
     rip_port_t ports[RIP_MAX_PORTS];
     uint8_t    active_port;           /* Index of current active port (0-35) */
 
@@ -760,6 +797,11 @@ void rip_process(rip_state_t *s, void *ctx, uint8_t ch);
 /* Stateful host-event helpers for multi-session integrations.  This is
  * the complete reentrant surface: every globals-based wrapper further
  * down has a fully reentrant *_state() form declared here. */
+/* Trigger a stored query on a host event: modes 1..6, slot used by 3/4.
+ * Mouse handling triggers port and current-window queries automatically;
+ * embedders owning additional text windows can trigger mode 4 explicitly. */
+bool rip_trigger_query(rip_state_t *s, uint8_t mode, uint8_t slot);
+
 void rip_mouse_event_state(rip_state_t *s, int16_t x, int16_t y, bool clicked);
 void rip_file_upload_begin_state(rip_state_t *s, uint8_t name_len);
 void rip_file_upload_byte_state(rip_state_t *s, uint8_t data_byte);

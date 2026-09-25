@@ -23,6 +23,7 @@ anywhere, so it can gate a build; a reference disagreeing is reported
 but never fails the run, since the reference is evidence and not the
 measure.
 """
+from dll_record import dispatch_level
 import argparse
 import pathlib
 import re
@@ -35,9 +36,7 @@ SRC2 = ROOT / "src" / "ripscrip2.c"      # Level 2 lives here
 HDR2 = ROOT / "include" / "ripscrip2.h"  # ...behind RIP2_CMD_* names
 TABLE_RVA, ENTRIES, STRIDE = 0x080820, 129, 40
 
-# Levels are contiguous slot runs, per 13-dll-command-table.md.  A handler
-# address band was tried and rejected -- it misplaces slot 48 ('|N').
-RUNS = ((0, 0, 84), (1, 85, 109), (2, 110, 121), (3, 122, 128))
+# Prefixes come from each record, never slot runs or handler address bands.
 
 FIELD = re.compile(r"\b([A-Za-z_][A-Za-z_0-9]*)\s*:\s*([A-Za-z0-9]+)")
 
@@ -76,7 +75,7 @@ def load_driver(dll):
             if b == 0:
                 break
             types.append("n" if b in (0xFF, 0xFE) else str(b))
-        lvl = next(l for l, lo, hi in RUNS if lo <= i <= hi)
+        lvl = dispatch_level(raw)
         out.setdefault((lvl, chr(letter)), (argc, types))
     return out
 
@@ -92,7 +91,7 @@ def switch_bounds(lines):
     past it.
     """
     marks = {}
-    pats = (("l3", "if (s->is_level3)"), ("l2", "if (s->is_level2)"),
+    pats = (("l9", "/* Level 9 commands */"), ("l3", "if (s->is_level3)"), ("l2", "if (s->is_level2)"),
             ("l1", "if (s->is_level1)"), ("l0", "/* Level 0 commands */"))
     for i, line in enumerate(lines, 1):
         for key, needle in pats:
@@ -197,6 +196,8 @@ def load_riplib():
     m = switch_bounds(lines)
 
     def level_at(n):
+        if m["l9"] < n < m["l3"]:
+            return 9
         if m["l3"] < n < m["l2"]:
             return 3
         if m["l1"] < n < m["l0"]:

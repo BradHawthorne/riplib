@@ -66,6 +66,18 @@ static int guards_intact(void) {
 /* One seed per command changed or added during the alignment work, plus the
  * malformed variants that exercise each length guard. */
 static const char *const seeds[] = {
+    "!|2P10A0K322I00000000|2C100000000000000000000000|2C12Q073A0E00U0S120Z000000|",
+    "!|2s100|2s201|2s300|2p0200|2s202|2p2200|2s001|",
+    "!|2s100|c05|m1117|2P10K0U1E1O00000000|2s000|2s100|2P10K0U1E1O00020000|",
+    "!|c05|B00000A0A|1C000003060|1W0GDI|1I000001110GDI|1P0404040|",
+    "!|c05|B00000A0A|1C000003030|1P0404040|2C00000010000A000B00400000|",
+    "!|J1S|f0a0A|2P10a000b0A00000000|3D000a|J10|",
+    "!|J1S|n5000|X&&&&&zzzzz|c&&|K0000000000&&&&&&&&&&|",
+    "!|9G00000000https://example.com/|9R00010000000000VAR|9U010000|",
+    "!|9D0000$APP0$^m|9\x1b" "01020000demo.icn<>|",
+    "!|1\x1b" "1000<<IF $APP0$=\"new\">>yes<<ELSE>>no<<ENDIF>>|",
+    "!|1\x1b" "3000resident|1\x1b" "4000text|1\x1b" "5000enter|1\x1b" "6000exit|",
+    "!|1\x1b" "1000$OFF$|1I000001010MASK|S0B04|B00000A0A|",
     "!|,2S2S462S2S1O462S2S1O|", "!|.2S2S462S2S1O|",
     "!|{2S2S462S2S1O|", "!|:2S2S462S2S1O462S2S1O1|",
     "!|`2S2S462S2S1O462S2S1O1|", "!|`ZZZZZZZZZZZZZZZZZZZZZ|",
@@ -115,6 +127,8 @@ static const char *const seeds[] = {
     "!|2P1000A140U00020000|", "!|2P1000A140U0001|",
     "!|2s100|", "!|2s000|", "!|2p1000|",
     "!|2C0002WZKA810000ZK72000000|",
+    "!|2Y700|c05|W01|s737373737373737309|2Y804|c09|2s100|2Y702|*|2Y700|",
+    "!|2Y004|2YZ01|2Y00F|J1S|2Ya00|2Y0|",
     "!|2A100|", "!|2B100|", "!|2E100|", "!|2T100|", "!|2Y100|",
     "!|2R0001|", "!|2W1000A140U00000000file.bmp|",
 
