@@ -60,7 +60,9 @@ bool rip_save_clipboard_slot(rip_state_t *s, uint16_t slot);
 
 /* Draw an 8bpp source rectangle into the framebuffer with the given
  * write mode.  Scales (src_w x src_h) to (dst_w x dst_h) via nearest-
- * neighbour when the dimensions differ. */
+ * neighbour when the dimensions differ. Modes follow RIP image semantics:
+ * 0=COPY, 1=XOR, 2=OR, 3=AND, 4=invert SOURCE (NOTSRCCOPY). The public
+ * drawing API's DRAW_MODE_NOT still inverts the destination. */
 void rip_blit_pixels(rip_state_t *s,
                      int16_t dx, int16_t dy,
                      const uint8_t *pixels,

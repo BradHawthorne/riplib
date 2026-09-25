@@ -500,6 +500,14 @@ def main():
     check("LoadIcon stretch invokes logical-to-device dimension scaling",
           None if ins is None else any(i.mnemonic == 'call' and i.op_str == '0x10031084' for i in ins),
           "show_bmp_file dimension helper")
+    for label, start, end, operand in (
+            ('LoadIcon', 0xCD5A, 0xCD9A, 'edx, 0x330008'),
+            ('native PortCopy', 0x136C2, 0x136FA, 'ebx, 0x330008'),
+            ('scaled PortCopy', 0x1377C, 0x137B4, 'ebx, 0x330008')):
+        ins = instructions(start, end)
+        check(label + ' selects NOTSRCCOPY',
+              None if ins is None else any(i.mnemonic == 'mov' and i.op_str == operand for i in ins),
+              'bounded ROP selector; also executed by dll-raster-fixtures.py')
     drawing = (Path(SRC).parent / 'drawing.c').read_text(encoding='utf-8')
     match = re.search(r'rip_fill_patterns\[10\]\[8\]\s*=\s*\{(.*?)\n\};',drawing,re.S)
     got = [int(x,16) for x in re.findall(r'0x([0-9A-Fa-f]{2})',match[1])] if match else []

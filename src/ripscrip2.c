@@ -109,39 +109,6 @@ static uint8_t rip2_nearest_palette_index(const ripscrip2_state_t *s,
     return (uint8_t)best_idx;
 }
 
-static void rip2_blit_pixels(rip_state_t *rs,
-                             int16_t dx, int16_t dy,
-                             const uint8_t *pixels,
-                             uint16_t src_w, uint16_t src_h,
-                             int16_t dst_w, int16_t dst_h,
-                             uint8_t write_mode) {
-    uint8_t old_color;
-
-    if (!pixels || src_w == 0 || src_h == 0 || dst_w <= 0 || dst_h <= 0)
-        return;
-    if (write_mode > DRAW_MODE_NOT)
-        write_mode = DRAW_MODE_COPY;
-
-    old_color = draw_get_color();
-    draw_set_write_mode(write_mode);
-    if (dst_w == (int16_t)src_w && dst_h == (int16_t)src_h) {
-        draw_restore_region(dx, dy, dst_w, dst_h, pixels);
-    } else {
-        for (int16_t yy = 0; yy < dst_h; yy++) {
-            uint16_t sy = (uint16_t)(((uint32_t)(uint16_t)yy * src_h) /
-                                     (uint16_t)dst_h);
-            for (int16_t xx = 0; xx < dst_w; xx++) {
-                uint16_t sx = (uint16_t)(((uint32_t)(uint16_t)xx * src_w) /
-                                         (uint16_t)dst_w);
-                draw_set_color(pixels[(size_t)sy * src_w + sx]);
-                draw_pixel((int16_t)(dx + xx), (int16_t)(dy + yy));
-            }
-        }
-    }
-    draw_set_write_mode(rs ? rs->write_mode : DRAW_MODE_COPY);
-    draw_set_color(old_color);
-}
-
 static void rip2_copy_scaled(rip_state_t *rs,
                              int16_t sx, int16_t sy,
                              int16_t sw, int16_t sh,
@@ -171,7 +138,7 @@ static void rip2_copy_scaled(rip_state_t *rs,
         return;
 
     draw_save_region(sx, sy, sw, sh, scratch);
-    rip2_blit_pixels(rs, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
+    rip_blit_pixels(rs, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
                      dw, dh, write_mode);
     free(scratch);
 }
@@ -1207,7 +1174,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 uint8_t mode = (param_count >= 4)
                              ? (uint8_t)(params[3] & 0xFF)
                              : DRAW_MODE_COPY;
-                rip2_blit_pixels(rs, x, y, rs->clipboard.data,
+                rip_blit_pixels(rs, x, y, rs->clipboard.data,
                                  (uint16_t)rs->clipboard.width,
                                  (uint16_t)rs->clipboard.height,
                                  rs->clipboard.width, rs->clipboard.height,
@@ -1221,7 +1188,7 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
                 uint8_t mode = (param_count >= 6)
                              ? (uint8_t)(params[5] & 0xFF)
                              : DRAW_MODE_COPY;
-                rip2_blit_pixels(rs, x, y, rs->clipboard.data,
+                rip_blit_pixels(rs, x, y, rs->clipboard.data,
                                  (uint16_t)rs->clipboard.width,
                                  (uint16_t)rs->clipboard.height,
                                  w, h, mode);

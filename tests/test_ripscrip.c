@@ -13,6 +13,7 @@
 #include "../src/rip_affine_oval.h"
 #include "../src/rip_clipboard.h"
 #include "fixtures/affine_oval.h"
+#include "fixtures/image_rops.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -190,6 +191,103 @@ static void test_scaled_port_copy_blanks_offscreen_source(void) {
         fb[11 * W + 9] != 0xA7 || fb[11 * W + 18] != 0xA7) {
         FAIL("scaled copy exposed scratch bytes or changed its extent"); return;
     }
+    PASS();
+}
+
+/* Evaluate the binary driver's ROP3 truth table (pattern bit = 0).
+ * This independently derives expected values for the indexed renderer. */
+static uint8_t image_rop_expected(int mode, uint8_t source, uint8_t dest) {
+    uint8_t truth = (uint8_t)(image_rop_fixtures[mode] >> 16);
+    uint8_t result = 0;
+    for (int bit = 0; bit < 8; bit++) {
+        unsigned index = (((source >> bit) & 1u) << 1) | ((dest >> bit) & 1u);
+        result |= (uint8_t)(((truth >> index) & 1u) << bit);
+    }
+    return result;
+}
+
+static void test_image_blit_driver_rops(void) {
+    rip_state_t s; comp_context_t ctx;
+    static const uint8_t source[4] = {0x12, 0x34, 0x56, 0x78};
+    TEST("native/scaled image ROPs match driver truth tables");
+    init_fixture(&s, &ctx);
+    for (int mode = 0; mode < 6; mode++) {
+        for (int scaled = 0; scaled < 2; scaled++) {
+            int size = scaled ? 4 : 2;
+            memset(fb, 0xA5, sizeof(fb));
+            s.write_mode = DRAW_MODE_XOR;
+            draw_set_color(0x39);
+            draw_set_clip(11, 10, 12, 12);
+            rip_blit_pixels(&s, 10, 10, source, 2, 2,
+                            (int16_t)size, (int16_t)size, (uint8_t)mode);
+            for (int y = 9; y <= 14; y++) {
+                for (int x = 9; x <= 14; x++) {
+                    uint8_t expected = 0xA5;
+                    if (x >= 11 && x <= 12 && y >= 10 && y <= 12 &&
+                        x < 10 + size && y < 10 + size) {
+                        int index = ((y - 10) * 2 / size) * 2 + (x - 10) * 2 / size;
+                        expected = image_rop_expected(mode, source[index], 0xA5);
+                    }
+                    if (fb[y * W + x] != expected) {
+                        FAIL("native/scaled image changed wrong operand or escaped clip"); return;
+                    }
+                }
+            }
+            if (draw_get_color() != 0x39) { FAIL("image blit lost color"); return; }
+            draw_reset_clip(); draw_set_color(3); draw_pixel(0, 0);
+            if (fb[0] != (0xA5 ^ 3)) { FAIL("image blit lost drawing mode"); return; }
+        }
+    }
+    PASS();
+}
+
+static void test_icon_and_clipboard_not_source(void) {
+    rip_state_t s; comp_context_t ctx;
+    static uint8_t source[14] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14};
+    TEST("wire icon and clipboard NOT invert source pixels");
+    init_fixture(&s, &ctx);
+    if (!rip_icon_cache_pixels(&s.icon_state, "ROP", 3, source, 2, 7) ||
+        !rip_clipboard_store_pixels(&s, source, 2, 7)) {
+        FAIL("asset setup failed"); return;
+    }
+    memset(fb, 0xA5, sizeof(fb));
+    feed_script(&s, &ctx, "!|1I000004000ROP|1I040004010ROP|1P0800040|");
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 2; x++) {
+            uint8_t scaled = image_rop_expected(4, source[(y * 7 / 8) * 2 + x], 0xA5);
+            uint8_t native = y < 7 ? image_rop_expected(4, source[y * 2 + x], 0xA5) : 0xA5;
+            if (fb[y * W + x] != native || fb[y * W + 4 + x] != scaled ||
+                fb[y * W + 8 + x] != native) {
+                FAIL("LOAD_ICON or PUT_IMAGE inverted the destination"); return;
+            }
+        }
+    }
+    draw_set_clip(10, 10, 12, 12);
+    rip_blit_pixels_tiled(&s, 9, 9, 14, 14, source, 2, 7, DRAW_MODE_NOT);
+    if (fb[10 * W + 10] != image_rop_expected(4, source[3], 0xA5) ||
+        fb[9 * W + 9] != 0xA5) { FAIL("tiled NOT differs"); return; }
+    PASS();
+}
+
+static void test_port_copy_not_source(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("wire port copies invert source in native and scaled paths");
+    init_fixture(&s, &ctx);
+    memset(fb, 0xA5, sizeof(fb));
+    fb[0] = 0x12; fb[1] = 0x34;
+    /* Native 2x1, then scaled 4x1 copy, followed by Level 2 clipboard. */
+    feed_script(&s, &ctx, "!|2C" "000000100" "00A000B00" "400000|"
+                          "2C" "000000100" "00K000N00" "400000|");
+    if (fb[10] != 0xED || fb[11] != 0xCB || fb[20] != 0xED ||
+        fb[21] != 0xED || fb[22] != 0xCB || fb[23] != 0xCB) {
+        FAIL("port copy inverted destination or scaled incorrectly"); return;
+    }
+    (void)rip_clipboard_capture(&s, 0, 0, 2, 1);
+    {
+        const int16_t params[4] = {2, 30, 0, 4};
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_CLIPBOARD, "", 0, params, 4);
+    }
+    if (fb[30] != 0xED || fb[31] != 0xCB) { FAIL("Level 2 paste differs"); return; }
     PASS();
 }
 
@@ -6750,6 +6848,9 @@ int main(void) {
     test_clipboard_capture_clears_padding();
     test_clipboard_rejects_unrepresentable_dimensions();
     test_scaled_port_copy_blanks_offscreen_source();
+    test_image_blit_driver_rops();
+    test_icon_and_clipboard_not_source();
+    test_port_copy_not_source();
     test_clipboard_op_5_capture_op_6_paste();
     test_save_icon_slot_out_of_range_is_noop();
     test_stamp_icon_unset_slot_falls_back_to_clipboard();

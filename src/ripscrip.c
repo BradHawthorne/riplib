@@ -3398,7 +3398,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                    * x:2 y:2 mode:2 res:1 */
             if (len >= 7 && s->clipboard.valid && s->clipboard.data) {
                 int16_t px = mega2(p), py = scale_y(mega2(p + 2));
-                /* mode at p+4: 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT — the
+                /* mode at p+4: 0=COPY, 1=XOR, 2=OR, 3=AND, 4=NOT source — the
                  * RIPscrip wire encoding, confirmed against RIPSCRIP.DLL
                  * 3.0.7 (see docs/spec/12-dll-provenance.md §12.10).
                  * NOTE: trace item T-004 changed this comment the WRONG

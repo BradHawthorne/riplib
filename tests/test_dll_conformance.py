@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import sys
 import struct
@@ -32,6 +33,21 @@ def fixture(body):
 
 
 class HandlerCoverageTests(unittest.TestCase):
+    def test_raster_fixtures_keep_source_not_and_capture_extents(self):
+        data = json.loads((ROOT / 'tests/fixtures/raster_calls.json').read_text(encoding='utf-8'))
+        rops = [0xCC0020, 0x660046, 0xEE0086, 0x8800C6, 0x330008, 0xCC0020]
+        self.assertEqual(data['icon_rops'], rops)
+        self.assertEqual(len(data['port_rops']), 12)
+        for case in data['port_rops']:
+            call = 'StretchBlt' if case['scaled'] else 'BitBlt'
+            self.assertEqual(case['events'][0][call][-1], rops[case['mode']])
+        captures = {c['name']: c['events'] for c in data['captures']}
+        self.assertEqual(captures['native'][1], {'allocation': [3, 8]})
+        self.assertEqual(captures['stretched'][1], {'allocation': [3, 9]})
+        self.assertEqual(captures['right_bottom_clip'][2]['StretchBlt'],
+                         [102, 0, 0, 5, 8, 101, 638, 398, 2, 2, 0xCC0020])
+        self.assertFalse(any('StretchBlt' in e for e in captures['outside']))
+
     def test_directed_fuzz_seeds_keep_adjacent_literals_and_escapes(self):
         spec = importlib.util.spec_from_file_location('fuzz_seeds', ROOT / 'scripts/fuzz-seeds.py')
         exporter = importlib.util.module_from_spec(spec)

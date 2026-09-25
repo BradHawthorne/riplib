@@ -1,8 +1,43 @@
-CURRENT CORRECTION (2026-09-24, D-34..38): historical claims below
+CURRENT CORRECTION (2026-09-24, D-34..39): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
 are now implemented. See ../crosswalk-audit.md for current boundaries.
+
+D-39 IMAGE NOT SOURCE AND EXECUTABLE CAPTURE RECTANGLES (2026-09-24).
+
+     dll-raster-fixtures.py executes the pinned DLL's icon ROP selector
+     (CD5A..CD9A), show_bmp_file dimension/rectangle path (4A410), clipboard
+     allocation/copy path (02866), and native/scaled PortCopy (134D0).
+     It records six capture cases and eighteen ROP selections. File loading,
+     metadata, palette preparation, allocation, locking and invalidation are
+     stubbed; rectangle APIs are modeled; GDI calls are recorded, not drawn.
+     Driver arithmetic, trimming, translation and ROP selection execute
+     unchanged. An allowlist rejects unexpected execution. The checked-in
+     JSON and C fixtures contain results, no proprietary executable bytes.
+
+     All three image paths select 0x00330008 for mode 4: NOTSRCCOPY, which
+     copies the inverted source. RIPlib had reused generic DRAW_MODE_NOT,
+     inverting the destination instead. The shared image blitter now copies
+     complemented 8-bit source samples; Level 2 uses the same helper.
+     Native, stretched, tiled, clipboard and port-copy regressions distinguish
+     operands with different source/destination patterns. Three tests fail
+     against bc9e7e1 and pass after the change. Generic drawing NOT retains
+     its existing destination-inversion contract. Wire fields do not change.
+
+     The oracle resolves the earlier static capture hypothesis: a native
+     2x7 image allocates 3x8 and calls StretchBlt with source 2x7; stretch=1
+     displays 2x8 and captures into 3x9. A 4x7 image at (638,398) allocates
+     5x8 but trims its capture source to 2x2 before stretching. A completely
+     disjoint source reports errors and performs no GDI copy. These are call
+     contracts, NOT evidence of pixel equivalence. Palette remapping and GDI
+     resampling are unmodeled. RIPlib's 1I still caches the source asset;
+     no speculative capture-size/content change accompanies this correction.
+
+     Microsoft documents the operand distinction at:
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-bitblt
+     RIPlib operates on indexed 8-bit values; matching Boolean operands is
+     not a claim of color matching on arbitrary Windows palettes.
 
 D-38 CLIPPED RASTER VALUES AND CAPTURE INITIALIZATION (2026-09-24).
 

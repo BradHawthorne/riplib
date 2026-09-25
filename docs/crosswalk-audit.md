@@ -280,3 +280,30 @@ exclusive source rectangle passed to a helper that allocates inclusive
 dimensions, then selects a scaling path. That needs an executable rectangle
 and copy-call oracle before changing capture dimensions. See D-38 and
 [iteration-state.md](iteration-state.md) for the evidence and next experiment.
+
+## Image operands and executable rectangle oracle (D-39)
+
+Image mode 4 now complements source samples for icon drawing, clipboard
+pasting and port copies, including scaling and tiling. It previously inverted
+the destination. The generic drawing API keeps its destination-inversion
+contract. Level 2 now shares the image blitter. Syntax and public structures
+are unchanged.
+
+The new `scripts/dll-raster-fixtures.py` executes six capture cases and eighteen
+ROP selections in the pinned driver, with explicit file/palette/allocation
+stubs and modeled rectangle APIs. It records actual driver arguments to GDI
+without rasterizing them. Checked-in call fixtures and ROP truth tables make
+the results reviewable; ordinary CI does not require the DLL or Unicorn.
+Regenerate with `python scripts/dll-raster-fixtures.py C:/RIPtel/RIPSCRIP.DLL`
+and verify with the same command plus `--check`.
+
+Three new runtime tests fail against bc9e7e1 and pass with the fix. The suite
+now has 344 parser tests, 43 drawing tests and 16 audit-instrument tests.
+All 70 driver/source predicates hold. All 35 corpus scene metrics are
+unchanged. Native/scaled/tiled output and state restoration are checked
+against the driver's ROP truth tables; a new directed seed reaches image NOT.
+
+The capture discrepancy is now demonstrated at the call boundary: 2x7 is
+captured into 3x8, and right/bottom clipping shrinks the source without
+shrinking the destination allocation. Exact capture pixels, GDI palette
+remapping and resampling remain unverified. RIPlib still caches source icons.

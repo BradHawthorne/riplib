@@ -155,9 +155,12 @@ void rip_blit_pixels(rip_state_t *s,
         write_mode = DRAW_MODE_COPY;
 
     old_color = draw_get_color();
-    draw_set_write_mode(write_mode);
+    /* Image mode 4 is NOTSRCCOPY. The generic drawing mode with the same
+     * number is destination inversion, so copy the complemented source. */
+    draw_set_write_mode(write_mode == DRAW_MODE_NOT ? DRAW_MODE_COPY : write_mode);
 
-    if (dst_w == (int16_t)src_w && dst_h == (int16_t)src_h) {
+    if (dst_w == (int16_t)src_w && dst_h == (int16_t)src_h &&
+        write_mode != DRAW_MODE_NOT) {
         draw_restore_region(dx, dy, dst_w, dst_h, pixels);
     } else {
         for (int16_t yy = 0; yy < dst_h; yy++) {
@@ -166,7 +169,8 @@ void rip_blit_pixels(rip_state_t *s,
             for (int16_t xx = 0; xx < dst_w; xx++) {
                 uint16_t sx = (uint16_t)(((uint32_t)(uint16_t)xx * src_w) /
                                          (uint16_t)dst_w);
-                draw_set_color(pixels[(size_t)sy * src_w + sx]);
+                uint8_t pixel = pixels[(size_t)sy * src_w + sx];
+                draw_set_color(write_mode == DRAW_MODE_NOT ? (uint8_t)~pixel : pixel);
                 draw_pixel((int16_t)(dx + xx), (int16_t)(dy + yy));
             }
         }
