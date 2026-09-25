@@ -41,6 +41,38 @@ class HandlerCoverageTests(unittest.TestCase):
         data = json.loads((ROOT / 'tests/fixtures/port_calls.json').read_text(encoding='utf-8'))
         return module, data
 
+    def test_port_redefinition_instrument_and_mutations(self):
+        spec = importlib.util.spec_from_file_location('redefine', ROOT / 'scripts/dll-port-redefine-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/port_redefine.json').read_text(encoding='utf-8'))
+        module.validate(data)
+        for mutation in ('cursor', 'style', 'clip', 'rop', 'duplicate'):
+            broken = copy.deepcopy(data)
+            case = broken['cases'][8]
+            if mutation == 'cursor': case['target_cursor'][0] = 37
+            elif mutation == 'style': case['style']['selected'] = 1
+            elif mutation == 'clip': case['next_line'][0]['clip'][1] = 0
+            elif mutation == 'rop': case['next_line'][1]['SetROP2'][1] = 13
+            else: broken['cases'][0] = broken['cases'][1]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError): module.validate(broken)
+
+    def test_oracle_import_addresses_survive_stub_removal(self):
+        spec = importlib.util.spec_from_file_location('raster', ROOT / 'scripts/dll-raster-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        oracle = module.Oracle.__new__(module.Oracle)  # no Unicorn or DLL required
+        sentinel = (lambda a: 17, 0)
+        oracle.stubs = {0x130010: sentinel}
+        imports = {}
+        oracle.write = lambda address, values: imports.update({address: values[0]})
+        oracle.import_stub(0x10, 2, lambda a: 21)
+        oracle.import_stub(0x14, 3, lambda a: 22)
+        self.assertIs(oracle.stubs[0x130010], sentinel)
+        self.assertEqual(len(set(imports.values())), 2)
+        self.assertEqual(oracle.stubs[imports[module.IB + 0x10]][1], 8)
+        self.assertEqual(oracle.stubs[imports[module.IB + 0x14]][1], 12)
+
     def test_port_lifecycle_instrument_and_mutations(self):
         spec = importlib.util.spec_from_file_location('lifecycle', ROOT / 'scripts/dll-port-lifecycle-fixtures.py')
         module = importlib.util.module_from_spec(spec)

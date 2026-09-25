@@ -91,6 +91,10 @@ class Oracle:
 
     def import_stub(self, iat, argc, fn):
         address = 0x130000 + len(self.stubs) * 16
+        # A derived oracle can remove a stub to execute its native body.
+        # Table length alone can then select an address still owned by an import.
+        while address in self.stubs:
+            address += 16
         self.write(IB + iat, [address])
         self.stubs[address] = (fn, argc * 4)
 

@@ -670,6 +670,19 @@ rather than a slogan.
      active-definition synchronization and absent offscreen storage remain
      separate work. These findings change no wire widths or length gates.
 
+14.3.13  ACTIVE REDEFINITION AND STYLE SELECTION (D-44)
+
+     FIXED: successful active 2P redefinition now applies the new stored
+     viewport, resets drawing position and preserves current style for
+     either activation flag value. Protected refusal remains unchanged.
+
+     OPEN: driver graphics styles have a selection independent of drawing
+     ports. The new 16-case oracle keeps style slot 7 selected while changing
+     ports 0/1 and verifies the next line's clip and ROP. RIPlib still saves
+     and loads per-port styles and treats its explicit style selector as
+     metadata. That broader model, 2P extents and offscreen storage remain
+     unresolved; D-44 does not claim complete port or style fidelity.
+
 14.4  WHAT THIS REGISTER IS FOR
 ---------------------------------------------------------------------
 

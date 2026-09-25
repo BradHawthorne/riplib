@@ -113,8 +113,12 @@ Viewport coordinates are Y-scaled (EGA 350→card 400):
      vp_y0 = scale_y(y0)       (floor)
      vp_y1 = scale_y1(y1)      (ceiling)
 
-On creation, all drawing state is initialized to defaults
-(white color, solid fill, bitmap font, COPY mode).
+RIPlib initializes a new inactive port's drawing state to defaults
+(white color, solid fill, bitmap font, COPY mode). Successful redefinition
+of the active port preserves its current style, resets its drawing position
+and immediately applies its new stored viewport, even without flag 2.
+D-44 verifies this correction. The driver's separately selected graphics
+styles remain a broader difference from RIPlib's per-port style model.
 
 
 ---------------------------------------------------------------------

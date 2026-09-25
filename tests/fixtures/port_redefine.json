@@ -1,0 +1,1633 @@
+{
+  "driver_md5": "bade8b1f4e467ac7ad4edb2639738d4c",
+  "cases": [
+    {
+      "initial_active": 0,
+      "flags": 0,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          0,
+          0
+        ],
+        "state": {
+          "active": 0,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                20,
+                34,
+                50,
+                68
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 0,
+      "flags": 0,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          0,
+          0
+        ],
+        "state": {
+          "active": 0,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 0,
+      "flags": 1,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          1,
+          0
+        ],
+        "state": {
+          "active": 0,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                30,
+                34
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1998980
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              30,
+              34
+            ]
+          }
+        ]
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 0,
+      "flags": 1,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          1,
+          0
+        ],
+        "state": {
+          "active": 0,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 0,
+      "flags": 2,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          2,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                20,
+                34,
+                50,
+                68
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            20,
+            34,
+            50,
+            68
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            20,
+            34
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            23,
+            42
+          ]
+        },
+        {
+          "clip": [
+            101,
+            20,
+            34,
+            50,
+            68
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 0,
+      "flags": 2,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          2,
+          0
+        ],
+        "state": {
+          "active": 0,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 0,
+      "flags": 3,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                30,
+                34
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1998980
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              30,
+              34
+            ]
+          }
+        ]
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            201,
+            0,
+            0,
+            30,
+            34
+          ]
+        },
+        {
+          "SetROP2": [
+            201,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            201,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            201,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            201,
+            0,
+            0,
+            30,
+            34
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 0,
+      "flags": 3,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          3,
+          0
+        ],
+        "state": {
+          "active": 0,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            640,
+            400
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 0,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          0,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                20,
+                34,
+                50,
+                68
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            20,
+            34,
+            50,
+            68
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            20,
+            34
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            23,
+            42
+          ]
+        },
+        {
+          "clip": [
+            101,
+            20,
+            34,
+            50,
+            68
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 0,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          0,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 1,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          1,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                30,
+                34
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1998980
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              30,
+              34
+            ]
+          }
+        ]
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            201,
+            0,
+            0,
+            30,
+            34
+          ]
+        },
+        {
+          "SetROP2": [
+            201,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            201,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            201,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            201,
+            0,
+            0,
+            30,
+            34
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 1,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          1,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 2,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          2,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                20,
+                34,
+                50,
+                68
+              ],
+              "protected": false,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [],
+        "resources": []
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            20,
+            34,
+            50,
+            68
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            20,
+            34
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            23,
+            42
+          ]
+        },
+        {
+          "clip": [
+            101,
+            20,
+            34,
+            50,
+            68
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 2,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          2,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 3,
+      "protected": false,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 4,
+              "clip": [
+                0,
+                0,
+                30,
+                34
+              ],
+              "protected": false,
+              "dc": 201
+            }
+          ],
+          "available_pixels": 1998980
+        },
+        "errors": [],
+        "resources": [
+          {
+            "create_dc": 201
+          },
+          {
+            "create_bitmap": [
+              301,
+              30,
+              34
+            ]
+          }
+        ]
+      },
+      "target_cursor": [
+        0,
+        0
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            201,
+            0,
+            0,
+            30,
+            34
+          ]
+        },
+        {
+          "SetROP2": [
+            201,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            201,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            201,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            201,
+            0,
+            0,
+            30,
+            34
+          ]
+        }
+      ]
+    },
+    {
+      "initial_active": 1,
+      "flags": 3,
+      "protected": true,
+      "define": {
+        "command": "P",
+        "args": [
+          1,
+          20,
+          30,
+          50,
+          60,
+          3,
+          0
+        ],
+        "state": {
+          "active": 1,
+          "ports": [
+            {
+              "slot": 0,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                640,
+                400
+              ],
+              "protected": false,
+              "dc": 101
+            },
+            {
+              "slot": 1,
+              "kind": 1,
+              "clip": [
+                0,
+                0,
+                100,
+                80
+              ],
+              "protected": true,
+              "dc": 101
+            }
+          ],
+          "available_pixels": 2000000
+        },
+        "errors": [
+          {
+            "error_code": 30
+          }
+        ],
+        "resources": []
+      },
+      "target_cursor": [
+        37,
+        49
+      ],
+      "style": {
+        "selected": 7,
+        "sha256": "943843ab0cafcc39b0a297ae20abd0129413582d165c174f78bdc40379e19020"
+      },
+      "next_line": [
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        },
+        {
+          "SetROP2": [
+            101,
+            7
+          ]
+        },
+        {
+          "MoveToEx": [
+            101,
+            0,
+            0
+          ]
+        },
+        {
+          "LineTo": [
+            101,
+            3,
+            8
+          ]
+        },
+        {
+          "clip": [
+            101,
+            0,
+            0,
+            100,
+            80
+          ]
+        }
+      ]
+    }
+  ]
+}

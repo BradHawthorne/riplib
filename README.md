@@ -337,7 +337,7 @@ ctest --test-dir build --output-on-failure
 
 The suite includes rendering, parser, compatibility, and audit checks:
 - `test_drawing` — 43 rendering primitives, fonts, and edge-case checks.
-- `test_ripscrip` — 354 FSM transitions, dispatched commands, mouse
+- `test_ripscrip` — 356 FSM transitions, dispatched commands, mouse
   hit-testing, variable expansion, host callbacks, port system.
 - `test_compat` — 6 fixture replays with FNV-1a frame-hash lockdown so
   pixel-level regressions show up immediately.
@@ -345,7 +345,7 @@ The suite includes rendering, parser, compatibility, and audit checks:
   asserting no crash, no wedged FSM and no drawing outside the framebuffer,
   and reporting painted pixels, distinct colours and pending asset requests.
   Reports SKIP unless `-DRIPLIB_CORPUS_DIR` points at an installation.
-- `test_dll_conformance` — 20 instrument regressions, including numeric
+- `test_dll_conformance` — 22 instrument regressions, including numeric
   opcodes, complete handlers, continuation rows, and negative reinjections.
 - `test_fuzz_seeded` — fixed-seed mutation fuzzer over the command layer,
   including long payloads with `\` continuations, against a guard-banded
@@ -355,6 +355,9 @@ The suite includes rendering, parser, compatibility, and audit checks:
 the D-43 definition, deletion, protection and allocation-failure evidence
 against the pinned driver. Its checked-in fixtures are tested without the
 DLL; geometry and resource metadata are distinct from pixel parity.
+`scripts/dll-port-redefine-fixtures.py <RIPSCRIP.DLL> --check` adds D-44's
+active-redefinition, drawing-position and independent-style evidence,
+including the next native line command's clipping and ROP calls.
 
 CI runs the matrix on Linux, macOS, and Windows in both Debug and
 Release, plus dedicated UBSan/ASan, coverage-floor, embedded ARM archive,

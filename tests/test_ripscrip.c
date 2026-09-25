@@ -3198,6 +3198,70 @@ static void test_port_delete_all_query_and_destination_state(void) {
     PASS();
 }
 
+static void test_active_port_redefine_applies_viewport(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("active redefinition applies its stored viewport and preserves drawing style");
+    for (int flag = 0; flag <= 2; flag += 2) {
+        char redefine[] = "!|2P10K0U1E1O00000000|";
+        init_fixture(&s, &ctx);
+        feed_script(&s, &ctx, "!|2P100000A0A00020000|c05|S0109|k03|W01|");
+        s.font_id = 2; s.font_size = 3; s.font_dir = 1;
+        s.font_hjust = 1; s.font_vjust = 2; s.font_attrib = 5;
+        s.line_pattern = 0xA5A5; s.line_thick = 3;
+        redefine[16] = (char)('0' + flag);
+        feed_script(&s, &ctx, redefine);
+        const rip_port_t *p = &s.ports[1];
+        if (s.active_port != 1 || s.vp_x0 != p->vp_x0 || s.vp_y0 != p->vp_y0 ||
+            s.vp_x1 != p->vp_x1 || s.vp_y1 != p->vp_y1 ||
+            draw_get_clip_x0() != p->vp_x0 || draw_get_clip_y0() != p->vp_y0 ||
+            draw_get_clip_x1() != p->vp_x1 || draw_get_clip_y1() != p->vp_y1) {
+            FAIL("active or applied viewport still describes the old port"); return;
+        }
+        /* Check persistence through the portable port-state mirror as well. */
+        feed_script(&s, &ctx, "!|2s000|2s100|");
+        if (s.draw_color != 5 || s.fill_color != 9 || s.back_color != 3 || s.write_mode != 1 ||
+            s.font_id != 2 || s.font_size != 3 || s.font_dir != 1 ||
+            s.font_hjust != 1 || s.font_vjust != 2 || s.font_attrib != 5 ||
+            s.line_pattern != 0xA5A5 || s.line_thick != 3) {
+            FAIL("redefinition reset or failed to retain the active style"); return;
+        }
+        /* These points distinguish the old and new viewport without claiming
+         * driver geometry parity for the existing inclusive port definition. */
+        draw_set_write_mode(DRAW_MODE_COPY); draw_set_color(6);
+        draw_pixel(5, 5); draw_pixel(25, 40);
+        if (fb[5 * W + 5] != 0 || fb[40 * W + 25] != 6) {
+            FAIL("drawing used the stale viewport"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_active_port_redefine_resets_position(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("active redefinition resets position with either flag and preserves refused state");
+    for (int flag = 0; flag < 4; flag++) {
+        char redefine[] = "!|2P10K0U1E1O00000000|";
+        init_fixture(&s, &ctx);
+        feed_script(&s, &ctx, "!|2s100|c05|m1117|");
+        redefine[16] = (char)('0' + flag);
+        feed_script(&s, &ctx, redefine);
+        if (s.draw_x || s.draw_y || s.ports[1].draw_x || s.ports[1].draw_y) {
+            FAIL("old drawing position was saved back into the redefined port"); return;
+        }
+        feed_script(&s, &ctx, "!|2s000|2s100|");
+        if (s.draw_x || s.draw_y) { FAIL("reset position did not survive switching"); return; }
+        feed_script(&s, &ctx, "!|m1117|2s101|");
+        rip_port_t before = s.ports[1];
+        int16_t x = s.draw_x, y = s.draw_y;
+        feed_script(&s, &ctx, redefine);
+        if (memcmp(&before, &s.ports[1], sizeof(before)) || s.draw_x != x || s.draw_y != y ||
+            s.vp_x0 != before.vp_x0 || s.vp_y0 != before.vp_y0) {
+            FAIL("refused redefinition changed the protected port"); return;
+        }
+    }
+    PASS();
+}
+
 static void test_l2_port_switch_changes_active(void) {
     rip_state_t s;
     comp_context_t ctx;
@@ -7050,6 +7114,8 @@ int main(void) {
     test_l2_port_delete();
     test_port_lifecycle_driver_states();
     test_port_delete_all_query_and_destination_state();
+    test_active_port_redefine_applies_viewport();
+    test_active_port_redefine_resets_position();
     test_l2_port_switch_changes_active();
     test_l2_port_flags_set_alpha();
     test_l2_scale_text();

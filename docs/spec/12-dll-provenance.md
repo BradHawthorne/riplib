@@ -1,9 +1,71 @@
-CURRENT CORRECTION (2026-09-24, D-34..43): historical claims below
+CURRENT CORRECTION (2026-09-24, D-34..44): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
 are now implemented. D-40 supersedes the source-icon clipboard limitation
 in D-38/39. See ../crosswalk-audit.md for current boundaries.
+
+D-44 ACTIVE PORT REDEFINITION AND INDEPENDENT STYLES (2026-09-24).
+
+     dll-port-redefine-fixtures.py extends the D-43 oracle through the next
+     native line handler (1CB79), clipping helpers (342AD/34319), ROP setup
+     (E6B3/E6E9), pen selection (13CFC), and graphics-style lock/unlock
+     (3988F/398EE). The focus-off branch at 45038 now executes instead of
+     being stubbed. Sixteen cases vary initial active port (0/1), definition
+     flags (0..3) and protection. They seed port 1's position to (37,49),
+     select style slot 7 independently, and retain a digest of all 36 style
+     entries. Master backing bounds are supplied for the post-line restore.
+
+     PROVEN in this profile: successful redefinition resets the target's
+     drawing position to (0,0) whether or not flag 2 is set. Refused protected
+     definitions preserve the old position and viewport. The separately
+     selected style index and all seeded style bytes remain unchanged.
+     The next line applies the selected port's new clip, adds its origin
+     once, and uses that unchanged style's XOR ROP (SetROP2 value 7).
+     Shared (20,30)-(50,60) becomes exclusive device (20,34)-(50,68);
+     offscreen becomes (0,0)-(30,34). These extents are evidence for future
+     geometry work, not a claim that RIPlib's 2P now creates them exactly.
+
+     RIPlib's bounded correction handles redefinition of its active port:
+     preserve the current drawing style, reset drawing position, synchronize
+     the per-port mirror and apply the new stored viewport immediately.
+     Previously no activation flag left the old viewport active; using the
+     normal switch path could save the old position back into the new port.
+     Two runtime tests fail on f60270f and pass after the fix. They cover
+     both activation choices, offscreen-flag position reset, protected refusal,
+     switch-away/back persistence, style preservation and pixels inside the
+     new viewport versus the old one. Wire syntax and public layout do not
+     change. These tests validate application of stored portable viewports,
+     not independent offscreen pixels or driver rectangle parity.
+
+     New boundary clarified: RIPINST+0x0A selects a 0x61-byte graphics-style
+     table independently of the active port at RIPINST+0x22. The historical
+     "per-port drawing attributes" description conflated two selections.
+     RIPlib still saves/loads styles with ports and initializes other newly
+     activated ports to defaults. D-44 does not resolve that broader style-slot
+     model; it fixes the active-redefinition case without resetting its style.
+
+     Instrument repair: import addresses derived only from stub-table length
+     could collide after a subclass removed a native-function stub. Allocation
+     now skips occupied addresses. A DLL-free regression checks callback and
+     stack-cleanup preservation. Existing raster, port and lifetime fixtures
+     reproduce unchanged. A second instrument test rejects cursor/style/clip/
+     ROP/matrix mutations. Removing the native line ROP call at 1CC2A fails
+     the new oracle's contract predicate.
+
+     Boundaries: decoded commands, inactive focus rectangle, modeled GDI and
+     global-memory handles, caret services, invalidation and string release.
+     Real graphics-style lock counters return to zero. No live rasterization
+     or active-focus rendering is claimed. The fixture stores metadata and
+     calls, not proprietary executable bytes.
+
+     Validation: 356 parser, 43 drawing, 22 instrument tests; all six CTest
+     groups pass with Windows GCC/MSVC and Linux Clang ASan/UBSan. Another
+     100,000 seeded sanitizer mutations pass, as do nine coverage floors,
+     GCC static analysis, RP2350 archive build, 70 claims and conformance.
+     All 35 corpus metrics, asset requests, regions and host silence match
+     D-43. Remaining: independent style-slot semantics, 2P geometry and
+     optional bounded offscreen storage. D-42's visual limitations remain.
 
 D-43 PORT LIFETIME, PROTECTION AND DEFINITION FAILURE (2026-09-24).
 

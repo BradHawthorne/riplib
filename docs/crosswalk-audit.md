@@ -416,3 +416,22 @@ shared rectangles are not clamped, reversed dimensions wrap, and failed
 replacement can lose the old port and recreate a default shared port. That
 evidence guides future storage work; no large-surface implementation or
 Windows pixel parity is claimed. See D-43 and the iteration checkpoint.
+
+## Active redefinition correction (D-44)
+
+Active `2P` redefinition now applies the new stored viewport, resets drawing
+position and preserves the current style for both activation choices. Two
+new runtime regressions fail on f60270f and pass after correction, including
+protected refusal, switch persistence and drawing inside the new clip.
+
+The driver oracle adds 16 cases through the next native line handler, its
+clipping and ROP setup, and real graphics-style lock/unlock. Styles retain
+an independent selected index: RIPlib's broader per-port style model remains
+an explicit difference. Port-definition geometry and offscreen storage also
+remain open. Fixing an import-address collision in the emulator leaves all
+older driver fixtures unchanged; adversarial tests cover that bug and the
+new fixture predicates.
+
+All 356 parser, 43 drawing and 22 instrument tests pass, along with sanitizer
+tests, 100,000 mutations, coverage floors, static analysis, the RP2350 build,
+70 claims and conformance. All 35 corpus metrics remain unchanged from D-43.

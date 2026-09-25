@@ -683,9 +683,19 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
         if (!ok)
             break;
 
-        /* Flag bit 1 (value 2) = make active immediately */
-        if (port_flags & 0x02)
+        /* D-44: replacing the active port preserves the selected style,
+         * resets its drawing position and applies its new viewport even
+         * without the activation flag. A normal switch would save the old
+         * position back into the freshly initialized port. */
+        if (port_num == rs->active_port) {
+            port_save_state(rs, port_num);
+            rs->ports[port_num].draw_x = 0;
+            rs->ports[port_num].draw_y = 0;
+            port_load_state(rs, port_num);
+        } else if (port_flags & 0x02) {
+            /* Flag bit 1 (value 2) = make active immediately */
             rip_port_switch(rs, port_num, 0);
+        }
         break;
     }
 
