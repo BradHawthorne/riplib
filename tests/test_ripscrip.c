@@ -16,6 +16,7 @@
 #include "fixtures/image_rops.h"
 #include "fixtures/gdi_raster.h"
 #include "fixtures/port_copy.h"
+#include "fixtures/port_lifecycle.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -3145,6 +3146,56 @@ static void test_l2_port_delete(void) {
         PASS();
     else
         FAIL("2p did not deallocate");
+}
+
+static void test_port_lifecycle_driver_states(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("port lifetime wire sequences match native allocation/protection/selection");
+    for (size_t i = 0; i < sizeof(port_lifecycle_fixtures) / sizeof(port_lifecycle_fixtures[0]); i++) {
+        uint64_t allocated = 0, protected_ports = 0;
+        if (port_lifecycle_fixtures[i].reset) {
+            init_fixture(&s, &ctx);
+            feed_script(&s, &ctx, "!|2P100002S1Y00020000|");
+        }
+        feed_script(&s, &ctx, port_lifecycle_fixtures[i].wire);
+        for (int p = 0; p < RIP_MAX_PORTS; p++) {
+            if (s.ports[p].allocated) allocated |= UINT64_C(1) << p;
+            if (s.ports[p].flags & RIP_PORT_FLAG_PROTECTED) protected_ports |= UINT64_C(1) << p;
+        }
+        if (s.active_port != port_lifecycle_fixtures[i].active ||
+            allocated != port_lifecycle_fixtures[i].allocated ||
+            protected_ports != port_lifecycle_fixtures[i].protected_ports) {
+            printf("step=%u wire=%s ", (unsigned)i, port_lifecycle_fixtures[i].wire);
+            FAIL("port membership, protection or selection differs from driver"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_port_delete_all_query_and_destination_state(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("delete-all clears removed queries and restores protected destination state");
+    init_fixture(&s, &ctx);
+    feed_script(&s, &ctx, "!|2s100|1\x1b" "3100one|2s200|1\x1b" "3200two|c05|"
+                          "2s201|2s300|1\x1b" "3300three|c07|2p0200|");
+    if (s.active_port != 2 || s.draw_color != 5 || s.ports[1].allocated || s.ports[3].allocated ||
+        !s.ports[0].allocated || !s.ports[2].allocated ||
+        rip_trigger_query(&s, 3, 1) || rip_trigger_query(&s, 3, 3) ||
+        !rip_trigger_query(&s, 3, 2) || tx_len != 3 || memcmp(tx_capture, "two", 3)) {
+        FAIL("bulk deletion lost protected state or retained removed queries"); return;
+    }
+    /* Deleting and selecting the same slot must recreate a fresh full-screen port. */
+    feed_script(&s, &ctx, "!|2s202|2p2200|");
+    if (s.active_port != 2 || !s.ports[2].allocated || s.draw_color != 15 ||
+        s.vp_x0 != 0 || s.vp_y0 != 0 || s.vp_x1 != 639 || s.vp_y1 != 399 ||
+        rip_trigger_query(&s, 3, 2)) {
+        FAIL("same-slot destination did not recreate a clean default port"); return;
+    }
+    feed_script(&s, &ctx, "!|2p00|J1S|2p2a00|2pa000|");
+    if (s.active_port != 2 || !s.ports[2].allocated) {
+        FAIL("truncated or base-64 out-of-range deletion changed state"); return;
+    }
+    PASS();
 }
 
 static void test_l2_port_switch_changes_active(void) {
@@ -6997,6 +7048,8 @@ int main(void) {
     test_l2_port_define_ignores_unread_flag_bits();
     test_l2_port_zero_protected();
     test_l2_port_delete();
+    test_port_lifecycle_driver_states();
+    test_port_delete_all_query_and_destination_state();
     test_l2_port_switch_changes_active();
     test_l2_port_flags_set_alpha();
     test_l2_scale_text();

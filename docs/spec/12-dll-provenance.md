@@ -1,9 +1,81 @@
-CURRENT CORRECTION (2026-09-24, D-34..42): historical claims below
+CURRENT CORRECTION (2026-09-24, D-34..43): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
 are now implemented. D-40 supersedes the source-icon clipboard limitation
 in D-38/39. See ../crosswalk-audit.md for current boundaries.
+
+D-43 PORT LIFETIME, PROTECTION AND DEFINITION FAILURE (2026-09-24).
+
+     dll-port-lifecycle-fixtures.py extends D-41's decoded-handler oracle
+     through real deletion (3302C/33112), protection (3378A/33821), portInit
+     and selection. It executes 18 lifetime sequences (34 command steps),
+     18 shared/offscreen definitions and eight allocation-failure cases.
+     JSON records active selection, allocated slots, protection, rectangles,
+     DC ownership, available pixel budget and modeled resource cleanup.
+     port_lifecycle.h exports 32 wire steps in 16 sequences; decoded port
+     index 36 cases remain in JSON, with separate base-64 runtime rejection.
+
+     D-17's deletion explanation was wrong: decoded RIP_PortDelete maps
+     source zero to internal -2 (delete all unprotected slots 1..35), not
+     a forbidden master-port deletion. After deleting, handler 46862 calls
+     port selection with its second argument even if deletion was refused
+     or the source did not exist. An empty/deleted destination is lazily
+     recreated. Both indices are validated before any mutation. Internal
+     sentinels -1/-2 are not additional one-digit wire values. The four-byte
+     payload gate and handling of the corpus's truncated !|2p00 are unchanged.
+
+     RIPlib now honors that destination and source-zero deletion rule.
+     Protected slots and their queries survive; deleted queries are cleared.
+     Selecting a deleted slot restores a clean default port. Driver 3378A
+     also refuses to change protection on port zero: RIPlib now guards both
+     source and destination protection flags for the permanent master.
+     Wire widths, aliases and public structure layout are unchanged.
+
+     Definition findings are recorded, not implemented as surface parity:
+     shared rectangles are exclusive with floor-scaled Y, and are not
+     clamped to the display. Empty dimensions reach portInit. Reversed
+     endpoint differences wrap through unsigned 16-bit dimensions: shared
+     reverse-X (110,20)-(10,90) records (110,22)-(65546,102). Offscreen
+     origins reset to zero; a 2,000,000-pixel budget rejects these wrapped
+     sizes but accepts FONTS 1280x290 and SPECLEFX 936x1097. Budget units
+     here are driver pixels, not a portable allocation-byte contract.
+
+     Four failure boundaries (budget, CreateCompatibleDC,
+     CreateCompatibleBitmap, SelectObject), each for a fresh slot and an
+     active replacement, preserve the pixel budget and release acquired
+     modeled resources. Replacement deletes the old port before trying to
+     allocate the new one. On failure, the saved active index is selected
+     again; a deleted active slot becomes a default shared 640x400 port.
+     A successful 100x80 offscreen allocation consumes 8,000 pixel units;
+     deletion releases its bitmap/DC and restores those units.
+
+     Instrument boundaries remain explicit: wire parsing, drawing-state
+     synchronization, strings, GDI resources, clipping and palette services
+     are modeled. The new oracle supplies initialized master bounds and a
+     configurable budget; it removes D-41's unprotected-slot lookup stub.
+     memset is a bounded memory-service model. Real DLL instructions decide
+     geometry, branch selection, slot membership and resource calls. Modeled
+     allocation success for zero dimensions does not prove Windows accepts
+     those bitmap sizes. No live-terminal pixels or renderer state parity
+     follows from these metadata fixtures.
+
+     Two new runtime regressions fail against a2f0eb3 and pass after fixing
+     deletion/protection. They compare allocation/protection/selection after
+     every exported step and test query cleanup, preserved destination state,
+     same-slot recreation, truncation and base-64 out-of-range indices.
+     One instrument regression rejects seven classes of fixture mutation.
+     Removing the native post-delete selection call at 468D6 also fails the
+     oracle's independent selection predicate. Totals: 354 parser, 43 drawing,
+     20 instrument tests; all six CTest groups pass. Windows GCC/MSVC, Linux
+     Clang ASan/UBSan, 100,000 seeded mutations, nine coverage floors, GCC
+     static analysis and RP2350 archive build pass. All 70 existing claims
+     hold and conformance reports zero defects. All 35 corpus metrics,
+     asset requests, region counts and passive host silence match D-42.
+
+     Remaining work: 2P geometry and active-definition synchronization,
+     independent offscreen storage, and its bounded host allocation policy.
+     D-42's FONTS/SPECLEFX visual-fidelity limitation remains open.
 
 D-42 PORT COPY RECTANGLES, SAMPLING AND VIEWPORT CLIPPING (2026-09-24).
 
@@ -2329,6 +2401,11 @@ D-17 LEVEL 2 WAS NEVER AUDITED AT ALL.  Recorded 2026-08-13.
      upstream against bbs-land's six-character reading.  The single
      2-character '|2p' in the corpus targets port 0, which is protected
      and refused either way, so rejecting it costs nothing.
+
+     D-43 CORRECTION: this explanation was false. A complete source-zero
+     record deletes secondary ports and then selects its destination.
+     The four-character gate remains; decoded-handler evidence does not
+     establish what the DLL wire parser does with the truncated record.
 
      VERIFIED CORRECT, and worth recording as checked rather than
      assumed: '|2C' RIP_PortCopy matches slot 113 field for field

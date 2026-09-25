@@ -41,6 +41,24 @@ class HandlerCoverageTests(unittest.TestCase):
         data = json.loads((ROOT / 'tests/fixtures/port_calls.json').read_text(encoding='utf-8'))
         return module, data
 
+    def test_port_lifecycle_instrument_and_mutations(self):
+        spec = importlib.util.spec_from_file_location('lifecycle', ROOT / 'scripts/dll-port-lifecycle-fixtures.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        data = json.loads((ROOT / 'tests/fixtures/port_lifecycle.json').read_text(encoding='utf-8'))
+        module.validate(data)
+        self.assertEqual(module.c_header(data), (ROOT / 'tests/fixtures/port_lifecycle.h').read_text(encoding='utf-8'))
+        for mutation in ('active', 'protection', 'rectangle', 'cleanup', 'budget', 'duplicate', 'error'):
+            broken = copy.deepcopy(data)
+            if mutation == 'active': broken['lifetimes'][0]['steps'][0]['state']['active'] = 1
+            elif mutation == 'protection': broken['lifetimes'][0]['steps'][0]['state']['ports'][0]['protected'] = True
+            elif mutation == 'rectangle': broken['definitions'][0]['step']['state']['ports'][2]['clip'][2] += 1
+            elif mutation == 'cleanup': broken['failures'][-1]['step']['resources'].pop()
+            elif mutation == 'budget': broken['definitions'][1]['step']['state']['available_pixels'] += 1
+            elif mutation == 'duplicate': broken['lifetimes'][1] = broken['lifetimes'][0]
+            else: broken['lifetimes'][0]['steps'][0]['errors'] = [{'error_code': 30}]
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError): module.validate(broken)
+
     def test_full_port_fixtures_preserve_coordinate_and_dc_contracts(self):
         module, data = self.port_instrument()
         module.validate(data)

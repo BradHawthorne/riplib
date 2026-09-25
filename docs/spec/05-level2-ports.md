@@ -123,29 +123,32 @@ On creation, all drawing state is initialized to defaults
 
      Function:     Delete Drawing Port
      Command:      |2p     (lowercase)
-     Arguments:    port:1 res:1 res:2
-     Format:       !|2p<port><res><res>|
+     Arguments:    port:1 dest_port:1 res:2
+     Format:       !|2p<port><dest_port><res>|
 
-Deletes a port and frees its slot. Port 0 cannot be deleted.
-Protected ports reject deletion unless force-deleted.
+Deletes a port and selects the destination. Port 0 remains permanent;
+source value zero deletes all unprotected ports 1..35. Protected ports
+survive deletion. No force-delete flag is exposed by this wire command.
 
      Parameter   Width   Range     Description
      ---------   -----   -------   -----------
-     port        1       0-35      Port slot (or special index)
-     res         1       0         Reserved
+     port        1       0-35      Source slot; zero means all secondary ports
+     dest_port   1       0-35      Port selected after deletion
      res         2       0         Reserved
 
      Note: dispatch slot 116 records mega1 + mega1 + mega2, so the
      payload is FOUR characters, not one.  RIPlib gates on that
-     length; it reads the port index and ignores both reserved
-     fields.
+     length. Both port indices are validated before changing any state.
 
-Special values:
+The destination is selected even if the source is missing or protected.
+If the destination was deleted or did not exist, switching creates a
+default shared-screen port. Selecting the same slot that was just deleted
+therefore recreates it. Deleted queries are cleared; protected ones survive.
 
-     0xFE (PORT_IDX_ALL):     Delete all non-protected ports
-     0xFF (PORT_IDX_CURRENT): Delete the active port
-
-When the active port is deleted, the system falls back to port 0.
+The DLL maps wire source zero to internal sentinel -2. Its internal -1
+(current) and -2 (all) values are not additional one-digit wire values.
+D-43 verifies decoded handler 0x046862 and native lifetime helpers, with
+portable wire regressions for allocation, protection and active selection.
 
 
 ---------------------------------------------------------------------

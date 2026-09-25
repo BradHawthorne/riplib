@@ -506,9 +506,9 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
     uint8_t old_idx = rs->active_port;
 
     /* Apply source-port protection flags before saving state */
-    if (switch_flags & 0x04)
+    if (old_idx != 0 && (switch_flags & 0x04))
         rs->ports[old_idx].flags |= RIP_PORT_FLAG_PROTECTED;
-    if (switch_flags & 0x08)
+    if (old_idx != 0 && (switch_flags & 0x08))
         rs->ports[old_idx].flags &= (uint8_t)~RIP_PORT_FLAG_PROTECTED;
 
     /* Snapshot current port's drawing state */
@@ -528,9 +528,9 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
     }
 
     /* Apply destination-port protection flags */
-    if (switch_flags & 0x01)
+    if (new_idx != 0 && (switch_flags & 0x01))
         rs->ports[new_idx].flags |= RIP_PORT_FLAG_PROTECTED;
-    if (switch_flags & 0x02)
+    if (new_idx != 0 && (switch_flags & 0x02))
         rs->ports[new_idx].flags &= (uint8_t)~RIP_PORT_FLAG_PROTECTED;
 
     rs->active_port = new_idx;
@@ -693,19 +693,30 @@ void ripscrip2_execute(ripscrip2_state_t *s, rip_state_t *rs, void *ctx,
      *
      * Wire format: !|2p<port_num:1><dest_port:1><reserved:2>|
      *
-     * port_num: specific port in the on-wire 0-35 range
-     * dest_port: ignored (DLL ignores it too)
+     * port_num: 1-35 selects one port; 0 deletes all unprotected secondary ports
+     * dest_port: selected after deletion, including when protection refuses it
      */
     case RIP2_CMD_PORT_DELETE: {
-        /* Slot 116 records mega1, mega1, mega2 -- four characters.  The one
-         * 2-character '|2p' in the corpus (SPECLEFX.RIP, "!|2p00") targets
-         * port 0, which is protected and refused either way, so rejecting a
-         * truncated record costs nothing and matches the driver.  D-17. */
+        /* Slot 116 records mega1, mega1, mega2 -- four characters. Keep the
+         * existing gate: the two-character SPECLEFX record is truncated.
+         * D-43 corrects D-17's explanation: a complete source-zero record
+         * deletes secondary ports, not the permanent master port. */
         if (raw_len < 4)
             break;
         uint8_t port_num = (uint8_t)mega1(raw + 0);
+        uint8_t dest_port = (uint8_t)mega1(raw + 1);
+        if (port_num >= RIP_MAX_PORTS || dest_port >= RIP_MAX_PORTS)
+            break;
 
-        rip_port_destroy(rs, port_num, false);
+        if (port_num == 0) {
+            for (uint8_t i = 1; i < RIP_MAX_PORTS; i++)
+                rip_port_destroy(rs, i, false);
+        } else {
+            rip_port_destroy(rs, port_num, false);
+        }
+        /* RIP_PortDelete ignores the deletion result, then selects dest.
+         * A deleted/empty destination is lazily recreated by the switch. */
+        rip_port_switch(rs, dest_port, 0);
         break;
     }
 

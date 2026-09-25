@@ -390,3 +390,29 @@ are unchanged. Both changed scenes use larger independent offscreen surfaces
 that RIPlib still maps onto its one display. This pass proves copy behavior
 for equivalent viewports; it does not establish 2P geometry, independent
 storage or full visual parity. Those remain the next implementation boundary.
+
+## Port lifetime correction (D-43)
+
+The complete native deletion path disproves the earlier reserved-destination
+and source-zero explanations. `2p` now deletes all unprotected secondary
+ports when source is zero and always selects its destination after a valid
+request, including when deletion is refused or its source is absent. An
+empty destination is recreated. `2s` cannot protect the permanent master
+port. Deleted queries are cleared and protected destination state survives.
+Wire widths, gates and public structure layout are unchanged.
+
+The new oracle records 18 lifetime sequences, 18 definition cases and eight
+allocation failures. Thirty-two wire steps compare allocated slots,
+protection and selection against the driver; two new runtime tests fail
+before the fix. Instrument predicates reject altered states, geometry,
+resource cleanup, accounting, diagnostics and missing/duplicate cases.
+Removing the actual native destination-selection call is also detected.
+All 354 parser, 43 drawing and 20 instrument tests pass, with sanitizers,
+100,000 mutations, coverage floors, static analysis and the RP2350 build.
+All 35 corpus metrics match D-42; all 70 claims hold.
+
+Geometry/failure evidence is conditional on modeled allocation services:
+shared rectangles are not clamped, reversed dimensions wrap, and failed
+replacement can lose the old port and recreate a default shared port. That
+evidence guides future storage work; no large-surface implementation or
+Windows pixel parity is claimed. See D-43 and the iteration checkpoint.

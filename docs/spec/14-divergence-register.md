@@ -514,10 +514,11 @@ rather than a slogan.
      switch with bit 0 and it is refused, switch with bit 1 and it lands
      again.  The unprotected leg is first on purpose -- a guard that is
      simply always-on fails there rather than passing quietly.
-     PORT protection RIPlib does implement -- port 0 permanently,
-     '|2s' bits 0..3 to protect and unprotect the destination and
-     source ports, and create/delete refusing a protected port.  The
-     bit assignment above is the same one.  See D-22.
+     PORT protection RIPlib implements: port 0 is permanent and cannot
+     be protected; '|2s' bits 0..3 protect/unprotect secondary destination
+     and source ports. Create/delete refuse a protected port. D-43 fixes
+     the master-port flag guard and confirms that deletion still selects
+     its destination after a protection refusal. See D-22 and D-43.
 
 14.3.7  WITHDRAWN MOUSE-REGION CLAIM
 
@@ -653,6 +654,21 @@ rather than a slogan.
      change under the corrected copy semantics, with rendering parity still
      unproven. D-42 records exact deltas and source dimensions. These fixes
      and remaining differences do not require changing wire field widths.
+
+14.3.12  PORT DELETION AND MASTER PROTECTION (D-43)
+
+     FIXED: '|2p' now reads its destination, validates both indices, maps
+     source zero to all unprotected secondary slots and selects destination
+     even after refused/missing-source deletion. Empty destinations are
+     recreated by switching. '|2s' protection flags cannot protect port 0.
+     Runtime checks compare 32 wire steps against native lifetime metadata,
+     plus query cleanup, state restoration and invalid/truncated inputs.
+
+     VERIFIED BOUNDARY: native 2P geometry and failure fixtures record
+     unbounded shared rectangles, unsigned wrapped dimensions and loss of
+     old storage before replacement allocation. RIPlib's bounded geometry,
+     active-definition synchronization and absent offscreen storage remain
+     separate work. These findings change no wire widths or length gates.
 
 14.4  WHAT THIS REGISTER IS FOR
 ---------------------------------------------------------------------
