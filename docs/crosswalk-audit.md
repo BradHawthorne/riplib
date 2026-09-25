@@ -365,3 +365,28 @@ A mutation removing the driver's X-coordinate addition is also rejected.
 All 350 parser tests, 43 drawing tests and 70 existing claims remain green.
 The next input class is PORT_COPY's all-zero rectangles, reversed endpoints
 and clipping, before making a coherent correction to its copy semantics.
+
+## Port-copy correction (D-42)
+
+PORT_COPY now uses relative coordinates, exclusive extents and floor-scaled
+Y endpoints. All-zero destinations scale to their entire viewport;
+position-only destinations retain native size. Empty/reversed rectangles
+and invalid ROPs are rejected. Trimming follows the driver's native/scaled
+distinction, and scaled copies use measured GDI sampling. The native COPY
+shortcut now obeys the active clip; overlapping samples and draw state are
+preserved. Syntax and public structure layout are unchanged.
+
+The driver oracle adds 84 boundary cases. Fifty shared-port fixtures check
+runtime pixels across all five ROPs and invalid mode 5, using matching stored
+viewport geometry. Both new runtime tests fail with the previous ripscrip2.c
+and pass after correction. There are 352 parser, 43 drawing and 19 instrument
+tests; all six CTest groups, 70 claims, nine coverage floors, static analysis,
+RP2350 build and 100,000 additional sanitizer mutations pass.
+
+All 35 scenes replay, but two change: FONTS foreground 15,494 -> 2,092
+(3 -> 2 colors), SPECLEFX foreground 82,788 -> 129,372 (7 colors retained).
+The other 33 scene metrics and all asset-request/region/host-silence results
+are unchanged. Both changed scenes use larger independent offscreen surfaces
+that RIPlib still maps onto its one display. This pass proves copy behavior
+for equivalent viewports; it does not establish 2P geometry, independent
+storage or full visual parity. Those remain the next implementation boundary.

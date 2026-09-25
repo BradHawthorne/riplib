@@ -177,18 +177,18 @@ Types are raw record widths; `XY` and `color` are configurable-width fields. Zer
 | 107 | <code>&#124;1U</code> | <code>0x00a952</code> | 7 | XY, XY, XY, XY, 2, 1, 1 | [Present: RIP_BUTTON](../src/ripscrip.c#L3192) | 61 | [RIP_BUTTON](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L189); <code>x0:XY y0:XY x1:XY y1:XY hotkey:2 flags:1 res:1 text</code>; Numeric shape agrees |
 | 108 | <code>&#124;1W</code> | <code>0x00dd67</code> | 1 | 1 | [Present: RIP_WRITE_ICON](../src/ripscrip.c#L3802) | 0 | [RIP_WRITE_ICON](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L162); <code>res:1 filename</code>; Numeric shape agrees |
 | 109 | <code>&#124;1w</code> | <code>0x00d24e</code> | 2 | 1, 3 | [Present: RIP_PlayAudio](../src/ripscrip.c#L3760) | 0 | [RIP_PLAY_AUDIO](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L196); <code>res:4 filename</code>; **Numeric shape differs** |
-| 110 | <code>&#124;2&lt;0x1B&gt;</code> | <code>0x046f66</code> | 1 | 4 | [Present: RIP2_CMD_SWITCH_DIRECTORY](../src/ripscrip2.c#L1043) | 0 | Not listed by opcode |
-| 111 | <code>&#124;2A</code> | <code>0x046c64</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_PALETTE](../src/ripscrip2.c#L705) | 0 | [RIP_SWITCH_PALETTE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L74); <code>palette_num:2</code>; **Numeric shape differs** |
-| 112 | <code>&#124;2B</code> | <code>0x046d08</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_BUTTON_STYLE](../src/ripscrip2.c#L706) | 0 | [RIP_SWITCH_BUTTON_STYLE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L190); <code>bstyle_num:2</code>; **Numeric shape differs** |
-| 113 | <code>&#124;2C</code> | <code>0x046372</code> | 12 | 1, XY, XY, XY, XY, 1, XY, XY, XY, XY, 1, 5 | [Present: RIP2_CMD_PORT_COPY](../src/ripscrip2.c#L826) | 46 | [RIP_PORT_COPY](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L230); <code>source_port:1 sx0:XY sy0:XY sx1:XY sy1:XY dest-port:1 dx0:XY dy0:XY dx1:XY dy1:XY write-mode:1 res:5</code>; Numeric shape agrees |
-| 114 | <code>&#124;2E</code> | <code>0x046da0</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_ENVIRONMENT](../src/ripscrip2.c#L707) | 0 | [RIP_SWITCH_ENVIRONMENT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L233); <code>env_num:2</code>; **Numeric shape differs** |
-| 115 | <code>&#124;2P</code> | <code>0x0466ec</code> | 7 | 1, XY, XY, XY, XY, 4, 4 | [Present: RIP2_CMD_PORT_DEFINE](../src/ripscrip2.c#L634) | 3 | [RIP_DEFINE_PORT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L227); <code>port-num:1 x0:XY y0:XY x1:XY y1:XY flags:4 res:4</code>; Numeric shape agrees |
-| 116 | <code>&#124;2p</code> | <code>0x046862</code> | 3 | 1, 1, 2 | [Present: RIP2_CMD_PORT_DELETE](../src/ripscrip2.c#L674) | 2 | [RIP_DELETE_PORT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L229); <code>port_num:1 dest_port:1 res:2</code>; Numeric shape agrees |
-| 117 | <code>&#124;2R</code> | <code>0x046bd9</code> | 1 | 4 | [Present: RIP2_CMD_SET_REFRESH](../src/ripscrip2.c#L1049) | 0 | [RIP_SET_REFRESH](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L202); <code>res:4 refresh_string</code>; Numeric shape agrees |
-| 118 | <code>&#124;2s</code> | <code>0x0468eb</code> | 2 | 1, 2 | [Present: RIP2_CMD_PORT_SWITCH](../src/ripscrip2.c#L805) | 2 | [RIP_SWITCH_PORT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L228); <code>port-num:1 flags:2 res:3</code>; **Numeric shape differs** |
-| 119 | <code>&#124;2T</code> | <code>0x046ece</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_TEXT_WINDOW](../src/ripscrip2.c#L708) | 0 | [RIP_SWITCH_TEXT_WINDOW](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L57); <code>window_num:1 res:1</code>; **Numeric shape differs** |
-| 120 | <code>&#124;2W</code> | <code>0x04699a</code> | 7 | 1, XY, XY, XY, XY, 2, 2 | [Present: RIP2_CMD_PORT_WRITE](../src/ripscrip2.c#L787) | 0 | [RIP_PORT_WRITE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L231); <code>port_num:1 x0:XY y0:XY x1:XY y1:XY res:4 filename</code>; **Numeric shape differs** |
-| 121 | <code>&#124;2Y</code> | <code>0x046e41</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_STYLE](../src/ripscrip2.c#L709) | 0 | [RIP_SWITCH_STYLE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L232); <code>style_num:1 res:1</code>; **Numeric shape differs** |
+| 110 | <code>&#124;2&lt;0x1B&gt;</code> | <code>0x046f66</code> | 1 | 4 | [Present: RIP2_CMD_SWITCH_DIRECTORY](../src/ripscrip2.c#L1068) | 0 | Not listed by opcode |
+| 111 | <code>&#124;2A</code> | <code>0x046c64</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_PALETTE](../src/ripscrip2.c#L730) | 0 | [RIP_SWITCH_PALETTE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L74); <code>palette_num:2</code>; **Numeric shape differs** |
+| 112 | <code>&#124;2B</code> | <code>0x046d08</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_BUTTON_STYLE](../src/ripscrip2.c#L731) | 0 | [RIP_SWITCH_BUTTON_STYLE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L190); <code>bstyle_num:2</code>; **Numeric shape differs** |
+| 113 | <code>&#124;2C</code> | <code>0x046372</code> | 12 | 1, XY, XY, XY, XY, 1, XY, XY, XY, XY, 1, 5 | [Present: RIP2_CMD_PORT_COPY](../src/ripscrip2.c#L851) | 46 | [RIP_PORT_COPY](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L230); <code>source_port:1 sx0:XY sy0:XY sx1:XY sy1:XY dest-port:1 dx0:XY dy0:XY dx1:XY dy1:XY write-mode:1 res:5</code>; Numeric shape agrees |
+| 114 | <code>&#124;2E</code> | <code>0x046da0</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_ENVIRONMENT](../src/ripscrip2.c#L732) | 0 | [RIP_SWITCH_ENVIRONMENT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L233); <code>env_num:2</code>; **Numeric shape differs** |
+| 115 | <code>&#124;2P</code> | <code>0x0466ec</code> | 7 | 1, XY, XY, XY, XY, 4, 4 | [Present: RIP2_CMD_PORT_DEFINE](../src/ripscrip2.c#L659) | 3 | [RIP_DEFINE_PORT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L227); <code>port-num:1 x0:XY y0:XY x1:XY y1:XY flags:4 res:4</code>; Numeric shape agrees |
+| 116 | <code>&#124;2p</code> | <code>0x046862</code> | 3 | 1, 1, 2 | [Present: RIP2_CMD_PORT_DELETE](../src/ripscrip2.c#L699) | 2 | [RIP_DELETE_PORT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L229); <code>port_num:1 dest_port:1 res:2</code>; Numeric shape agrees |
+| 117 | <code>&#124;2R</code> | <code>0x046bd9</code> | 1 | 4 | [Present: RIP2_CMD_SET_REFRESH](../src/ripscrip2.c#L1074) | 0 | [RIP_SET_REFRESH](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L202); <code>res:4 refresh_string</code>; Numeric shape agrees |
+| 118 | <code>&#124;2s</code> | <code>0x0468eb</code> | 2 | 1, 2 | [Present: RIP2_CMD_PORT_SWITCH](../src/ripscrip2.c#L830) | 2 | [RIP_SWITCH_PORT](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L228); <code>port-num:1 flags:2 res:3</code>; **Numeric shape differs** |
+| 119 | <code>&#124;2T</code> | <code>0x046ece</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_TEXT_WINDOW](../src/ripscrip2.c#L733) | 0 | [RIP_SWITCH_TEXT_WINDOW](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L57); <code>window_num:1 res:1</code>; **Numeric shape differs** |
+| 120 | <code>&#124;2W</code> | <code>0x04699a</code> | 7 | 1, XY, XY, XY, XY, 2, 2 | [Present: RIP2_CMD_PORT_WRITE](../src/ripscrip2.c#L812) | 0 | [RIP_PORT_WRITE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L231); <code>port_num:1 x0:XY y0:XY x1:XY y1:XY res:4 filename</code>; **Numeric shape differs** |
+| 121 | <code>&#124;2Y</code> | <code>0x046e41</code> | 2 | 1, 2 | [Present: RIP2_CMD_SWITCH_STYLE](../src/ripscrip2.c#L734) | 0 | [RIP_SWITCH_STYLE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L232); <code>style_num:1 res:1</code>; **Numeric shape differs** |
 | 122 | <code>&#124;3D</code> | <code>0x038bd2</code> | 1 | 4 | [Present: RIP_DELAY](../src/ripscrip.c#L2989) | 0 | [RIP_DELAY](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L213); <code>delay_period:4</code>; Numeric shape agrees |
 | 123 | <code>&#124;3e</code> | <code>0x038be1</code> | 1 | 2 | [Present: RIP_BAUD_EMULATION](../src/ripscrip.c#L2959) | 0 | [RIP_BAUD_EMULATION](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L214); <code>rate_val:4</code>; **Numeric shape differs** |
 | 124 | <code>&#124;9&lt;0x1B&gt;</code> | <code>0x024b4e</code> | 5 | 1, 1, 2, 2, 2 | [Present: RIP_EnterBlockMode](../src/ripscrip.c#L2837) | 0 | [RIP_ENTER_BLOCK_MODE](https://github.com/bbs-land/remote-imaging-protocol/blob/2fb17724b6122a5ad5cd1df38b69b8cce3a7079f/version/3.0/ripscrip/9.0-command-reference.md#L220); <code>mode:1 proto:1 file_type:2 res:4 [filename] &lt;&gt;</code>; **Numeric shape differs** |
@@ -211,18 +211,18 @@ These are additions relative to this image; absence here does not establish thei
 | <code>&#124;1V</code> | [Present: RIP_SET_VIEWPORT_EXT](../src/ripscrip.c#L3986) | 0 | Not listed by opcode |
 | <code>&#124;1X</code> | [Present: RIP_CLIPBOARD_OP](../src/ripscrip.c#L4004) | 0 | Not listed by opcode |
 | <code>&#124;1Z</code> | [Present: RIP_PLAY_MIDI](../src/ripscrip.c#L3874) | 0 | Not listed by opcode |
-| <code>&#124;20</code> | [Present: RIP2_CMD_SET_PALETTE](../src/ripscrip2.c#L877) | 0 | Not listed by opcode |
-| <code>&#124;21</code> | [Present: RIP2_CMD_QUERY_PALETTE](../src/ripscrip2.c#L1136) | 0 | Not listed by opcode |
-| <code>&#124;22</code> | [Present: RIP2_CMD_SET_WINDOW](../src/ripscrip2.c#L896) | 0 | Not listed by opcode |
-| <code>&#124;23</code> | [Present: RIP2_CMD_SCROLLBAR](../src/ripscrip2.c#L1065) | 0 | Not listed by opcode |
-| <code>&#124;24</code> | [Present: RIP2_CMD_MENU](../src/ripscrip2.c#L1094) | 0 | Not listed by opcode |
-| <code>&#124;25</code> | [Present: RIP2_CMD_DIALOG](../src/ripscrip2.c#L1113) | 0 | Not listed by opcode |
-| <code>&#124;26</code> | [Present: RIP2_CMD_SCALE_TEXT](../src/ripscrip2.c#L936) | 0 | Not listed by opcode |
-| <code>&#124;27</code> | [Present: RIP2_CMD_CLIPBOARD](../src/ripscrip2.c#L1155) | 0 | Not listed by opcode |
-| <code>&#124;28</code> | [Present: RIP2_CMD_GRADIENT](../src/ripscrip2.c#L957) | 0 | Not listed by opcode |
-| <code>&#124;29</code> | [Present: RIP2_CMD_ALPHA_BLEND](../src/ripscrip2.c#L1203) | 0 | Not listed by opcode |
-| <code>&#124;2F</code> | [Present: RIP2_CMD_PORT_FLAGS](../src/ripscrip2.c#L851) | 0 | Not listed by opcode |
-| <code>&#124;2c</code> | [Present: RIP2_CMD_CHORD](../src/ripscrip2.c#L1026) | 0 | Not listed by opcode |
+| <code>&#124;20</code> | [Present: RIP2_CMD_SET_PALETTE](../src/ripscrip2.c#L902) | 0 | Not listed by opcode |
+| <code>&#124;21</code> | [Present: RIP2_CMD_QUERY_PALETTE](../src/ripscrip2.c#L1161) | 0 | Not listed by opcode |
+| <code>&#124;22</code> | [Present: RIP2_CMD_SET_WINDOW](../src/ripscrip2.c#L921) | 0 | Not listed by opcode |
+| <code>&#124;23</code> | [Present: RIP2_CMD_SCROLLBAR](../src/ripscrip2.c#L1090) | 0 | Not listed by opcode |
+| <code>&#124;24</code> | [Present: RIP2_CMD_MENU](../src/ripscrip2.c#L1119) | 0 | Not listed by opcode |
+| <code>&#124;25</code> | [Present: RIP2_CMD_DIALOG](../src/ripscrip2.c#L1138) | 0 | Not listed by opcode |
+| <code>&#124;26</code> | [Present: RIP2_CMD_SCALE_TEXT](../src/ripscrip2.c#L961) | 0 | Not listed by opcode |
+| <code>&#124;27</code> | [Present: RIP2_CMD_CLIPBOARD](../src/ripscrip2.c#L1180) | 0 | Not listed by opcode |
+| <code>&#124;28</code> | [Present: RIP2_CMD_GRADIENT](../src/ripscrip2.c#L982) | 0 | Not listed by opcode |
+| <code>&#124;29</code> | [Present: RIP2_CMD_ALPHA_BLEND](../src/ripscrip2.c#L1228) | 0 | Not listed by opcode |
+| <code>&#124;2F</code> | [Present: RIP2_CMD_PORT_FLAGS](../src/ripscrip2.c#L876) | 0 | Not listed by opcode |
+| <code>&#124;2c</code> | [Present: RIP2_CMD_CHORD](../src/ripscrip2.c#L1051) | 0 | Not listed by opcode |
 | <code>&#124;3&lt;0x1B&gt;</code> | [Present](../src/ripscrip.c#L2952) | 0 | Not listed by opcode |
 | <code>&#124;3&amp;</code> | [Present](../src/ripscrip.c#L3013) | 0 | Not listed by opcode |
 | <code>&#124;3-</code> | [Present](../src/ripscrip.c#L3075) | 0 | Not listed by opcode |
@@ -265,13 +265,13 @@ SHA-256 of the audited source files, with CRLF normalized to LF:
 | include/rip_icons.h | a4d27f59035c96170cdc2e7d08245aaa4dd8e5a2aa453e8ef4d664dcceb146d8 |
 | include/riplib_platform.h | 2076b68078f8c27b1a73bc73ff5075a7b6481f0877f3de7e92f4a2838f767e47 |
 | include/riplib_version.h | 44c89b2b94a9471bfed220d0e2ecb8ac6691d4968cb96a422ee380eff5431b5d |
-| include/ripscrip.h | 998f84d195830fa3d924a88bd227d00828416d218d6893254bcc1a8d71a154e8 |
+| include/ripscrip.h | 124066cd78582aa292ee78b2e6e91dd9c62efbb0a1a36bd2c9fdef812ef51a68 |
 | include/ripscrip2.h | 4309e86c8787ea8ee9cb4bcee3bafc7ff34b8fbd64a7224fdcca3cc948a82aa6 |
 | src/bgi_font.c | bed593d21f5752f8dc2a39d49a0db0a56b310c606f59a39373434a97a815aff6 |
 | src/drawing.c | 642966691b9bc408b968fde8d76629cd317eeed90e4cfcf19efb43c3b5751375 |
 | src/rip_affine_oval.h | 20a18420d1f1667bef54f1005a46296e410f6da9383776eb8ca814ff0f462cf2 |
 | src/rip_clipboard.c | a189d176ebc74b7004ef788ca9b99359f41e3491d9cfa8d95fb10b28897d7eb4 |
-| src/rip_clipboard.h | 2c56a771599d939ebbbfea9112d9147466297f46e46f79888b709b57d8b3b5ba |
+| src/rip_clipboard.h | c51e6f61015f0d3e7887b6fcb6a9838b2241f20131c14d6630e62c4656e1926e |
 | src/rip_icn.c | 308057ef78c5b34ba29aad5b05f1ecda2173120e7a1be96ec208c32c1527dda5 |
 | src/rip_icons.c | efc941453155a168be82c21908716b824b74defea91bc2b59f46527cfbb60fa3 |
 | src/rip_internal.h | 8f6007c8582c65f8be91ce23fa2728d38da4d992bf9d0d1683b6dd49e2b9104e |
@@ -282,4 +282,4 @@ SHA-256 of the audited source files, with CRLF normalized to LF:
 | src/rip_variables.h | fa355279e8fca6b0c13dab42956b996977d5c2307b4fb4c9df08c621feffee1b |
 | src/riplib_version.c | 4c4375b07dfac26116a6ba4741af8634aa2f74108869c8f5a1206be943bfad41 |
 | src/ripscrip.c | 05fc4398fd03a52a385da91bd1e8443d53bbeb48c10e934065932d716675220b |
-| src/ripscrip2.c | 7780820475d985f2bae6a841999b93b5fdbaf8a35ab05ead820a0f93e7b48841 |
+| src/ripscrip2.c | 71e5fbff8cba100defaf4df1354e3e998a9aed351d066bb158641de9f38d1bc3 |

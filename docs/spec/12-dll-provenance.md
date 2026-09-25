@@ -1,9 +1,69 @@
-CURRENT CORRECTION (2026-09-24, D-34..41): historical claims below
+CURRENT CORRECTION (2026-09-24, D-34..42): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
 are now implemented. D-40 supersedes the source-icon clipboard limitation
 in D-38/39. See ../crosswalk-audit.md for current boundaries.
+
+D-42 PORT COPY RECTANGLES, SAMPLING AND VIEWPORT CLIPPING (2026-09-24).
+
+     The complete-handler oracle adds 84 boundary cases: 21 input shapes
+     across zero/nonzero origins and shared/offscreen ports. It executes
+     all-zero source/destination rectangles, position-only destinations,
+     reversed/empty endpoints, the left/top boundary, right/bottom trimming,
+     unequal extents and disjoint rectangles. Existing D-41 cases remain.
+     GDI calls are recorded, not rasterized; native sampling evidence remains
+     the bounded D-40 memory-DIB profile. port_copy.h contains 50 shared-port
+     cases derived from driver arguments; runtime tests inject the same
+     viewport geometry, expressed in RIPlib's inclusive representation.
+     They do not claim to validate RIPlib's separate 2P creation semantics.
+
+     2C now resolves explicit coordinates relative to each stored port,
+     floor-scales both Y endpoints and uses exclusive copy extents. All-zero
+     destination means scale to that whole viewport, not copy at its upper
+     left at native size. Reversed/empty rectangles and write modes above 4
+     do nothing. A position-only destination retains source size. Right/bottom
+     trimming shortens both rectangles for originally equal-size copies;
+     scaled copies trim only the affected rectangle. The scaled/native choice
+     is made before trimming, as in 134D0. Remaining renderer clipping also
+     applies to native COPY, whose former memmove shortcut bypassed it.
+
+     Scaled port copies now use D-40's measured sampler. Scratch snapshots
+     preserve overlapping source pixels for every image ROP; draw color,
+     mode and clipping survive the operation. Native COPY retains the
+     memmove fast path without scratch allocation, including clipped copies.
+     Intermediate endpoint arithmetic is 32-bit; unrepresentable dimensions
+     and scratch captures above the
+     existing clipboard capacity are rejected. Wire widths, short-form
+     tolerances and public structure layout remain unchanged.
+
+     Two added runtime regressions check all 50 fixtures across modes 0..5
+     (five supported ROPs plus invalid mode 5), overlapping samples, all four
+     active clip edges and state restoration. Both fail with 4d24ce6's
+     ripscrip2.c and pass with this change. Three older tests had zero-area
+     wire rectangles; their inputs now express the intended nonempty shapes.
+     One new instrument test checks rejection and scaling boundary evidence.
+     Generation also rejects unexpected errors, missing copy events,
+     duplicated boundary inputs and mismatched DCs; mutation tests cover them.
+     Totals: 352 parser, 43 drawing, 19 audit-instrument tests. Windows GCC/
+     MSVC and Clang ASan/UBSan pass all six CTest groups. All 70 existing
+     claims and nine coverage floors hold; static analysis and the RP2350
+     build pass. Another 100,000 seeded sanitizer mutations pass.
+
+     Corpus impact is explicit, not called pixel parity: all 35 scenes replay
+     cleanly; 33 retain their metrics. FONTS foreground changes 15,494 -> 2,092
+     and colors 3 -> 2. SPECLEFX foreground changes 82,788 -> 129,372, retaining
+     7 colors. Asset requests, regions and passive host silence are unchanged.
+     These are the two scenes using 2C and independent offscreen ports.
+     FONTS requests a 1280x290 device surface. SPECLEFX requests two surfaces
+     of 936x187 and 936x1097. RIPlib clamps these definitions to its one display;
+     their copies therefore operate on different storage and viewport geometry
+     than RIPtel. D-42 fixes copy semantics given matching geometry, not this
+     pre-existing offscreen limitation. A full-frame canvas cannot establish
+     correct rendering for those scenes. Port definition/storage is next.
+
+     Reproduce dll-port-fixtures.py <pinned DLL> --check and the normal CTests.
+     Keep both corpus metric snapshots when assessing subsequent port work.
 
 D-41 PORT CREATION, COMPLETE ICON HANDLER AND PORT COPY (2026-09-24).
 

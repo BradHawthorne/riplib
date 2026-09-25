@@ -296,8 +296,9 @@ typedef struct {
  * switch-away and restored on switch-in.  All drawing targets the
  * single framebuffer; the active port's viewport becomes the clip
  * rectangle.
- * D-41 records remaining differences in relative coordinates, exclusive
- * copy extents and offscreen origins (docs/spec/12-dll-provenance.md).
+ * D-42 corrects port-copy coordinates/extents for the stored viewports;
+ * independent offscreen storage and port-definition geometry remain open
+ * (docs/spec/12-dll-provenance.md).
  *
  * Port 0 is permanent: full-screen viewport, cannot be deleted,
  * allocated at rip_init_first() time.

@@ -78,7 +78,7 @@ void rip_blit_pixels(rip_state_t *s,
                      int16_t dst_w, int16_t dst_h,
                      uint8_t write_mode);
 
-/* Standard LOAD_ICON stretch path, with measured GDI sampling. */
+/* Standard LOAD_ICON and PORT_COPY stretch paths, with measured GDI sampling. */
 void rip_blit_pixels_gdi(rip_state_t *s, int16_t x, int16_t y,
                          const uint8_t *pixels, uint16_t sw, uint16_t sh,
                          int16_t dw, int16_t dh, uint8_t mode);

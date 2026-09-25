@@ -45,6 +45,33 @@ class HandlerCoverageTests(unittest.TestCase):
         module, data = self.port_instrument()
         module.validate(data)
 
+    def test_port_copy_boundaries_preserve_rejection_and_scaling(self):
+        module, data = self.port_instrument()
+        module.validate(data)
+        cases = data['copy_edges']
+        self.assertEqual(len(cases), 84)
+        self.assertEqual(len({(c['name'], tuple(c['define_origin']), c['offscreen']) for c in cases}), 84)
+        for c in cases:
+            if c['name'].startswith(('reverse_', 'empty_')) or c['name'].endswith('_outside'):
+                self.assertTrue(c['events'])
+                self.assertTrue(all('error_code' in e for e in c['events']))
+        shared = {c['name']: c['events'][0] for c in cases
+                  if c['define_origin'] == [10, 20] and not c['offscreen']}
+        self.assertEqual(shared['zero_dest']['StretchBlt'][1:5], [0, 0, 640, 400])
+        self.assertEqual(shared['position_only']['BitBlt'][1:5], [30, 32, 2, 8])
+        self.assertEqual(shared['source_right_native']['BitBlt'][3:5], [2, 8])
+        self.assertEqual(shared['source_right_scaled']['StretchBlt'][3:5], [8, 8])
+        self.assertEqual(shared['source_right_scaled']['StretchBlt'][8:10], [2, 8])
+        for mutation in ('error', 'empty', 'duplicate', 'surface'):
+            broken = copy.deepcopy(data)
+            case = broken['copy_edges'][0]
+            if mutation == 'error': case['events'] = [{'error_code': 30}]
+            elif mutation == 'empty': case['events'] = []
+            elif mutation == 'duplicate': broken['copy_edges'][1] = case
+            else: next(iter(case['events'][0].values()))[0] = 999
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                module.validate(broken)
+
     def test_port_fixture_checker_rejects_origin_surface_and_matrix_mutations(self):
         module, original = self.port_instrument()
         for mutation in ('origin', 'surface', 'capture', 'duplicate'):

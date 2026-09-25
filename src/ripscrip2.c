@@ -121,15 +121,24 @@ static void rip2_copy_scaled(rip_state_t *rs,
     if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0)
         return;
     if (write_mode > DRAW_MODE_NOT)
-        write_mode = DRAW_MODE_COPY;
+        return;
 
     if (sw == dw && sh == dh && write_mode == DRAW_MODE_COPY) {
-        draw_copy_rect(sx, sy, dx, dy, sw, sh);
+        int32_t left = dx, top = dy, right = (int32_t)dx + dw, bottom = (int32_t)dy + dh;
+        if (left < draw_get_clip_x0()) left = draw_get_clip_x0();
+        if (top < draw_get_clip_y0()) top = draw_get_clip_y0();
+        if (right > (int32_t)draw_get_clip_x1() + 1) right = (int32_t)draw_get_clip_x1() + 1;
+        if (bottom > (int32_t)draw_get_clip_y1() + 1) bottom = (int32_t)draw_get_clip_y1() + 1;
+        if (left >= right || top >= bottom) return;
+        /* Clip paired source/destination coordinates before the memmove path;
+         * native COPY needs no temporary allocation even for a tiny viewport. */
+        draw_copy_rect((int16_t)(sx + left - dx), (int16_t)(sy + top - dy),
+                       (int16_t)left, (int16_t)top, (int16_t)(right - left), (int16_t)(bottom - top));
         return;
     }
 
     bytes = (size_t)(uint16_t)sw * (size_t)(uint16_t)sh;
-    if (bytes == 0)
+    if (bytes == 0 || bytes > RIP_CLIPBOARD_MAX)
         return;
     /* Source rectangles may cross the framebuffer edge. The capture
      * leaves those cells untouched, so initialize them before scaling. */
@@ -138,8 +147,8 @@ static void rip2_copy_scaled(rip_state_t *rs,
         return;
 
     draw_save_region(sx, sy, sw, sh, scratch);
-    rip_blit_pixels(rs, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
-                     dw, dh, write_mode);
+    rip_blit_pixels_gdi(rs, dx, dy, scratch, (uint16_t)sw, (uint16_t)sh,
+                         dw, dh, write_mode);
     free(scratch);
 }
 
@@ -376,8 +385,7 @@ static void port_set_defaults(rip_port_t *p)
  * port_flags bits (from !|2P command, 4-digit MegaNum):
  *   bit 0 (1) = clipboard/offscreen port (informational on single-framebuffer targets)
  *   bit 1 (2) = make active immediately  (handled by caller)
- *   bit 2 (4) = deactivate viewport on create (set fullscreen flag)
- *   bit 3 (8) = protect immediately
+ *   other bits are ignored by the measured driver handler
  *
  * Returns true on success.
  */
@@ -424,10 +432,10 @@ static bool rip_port_create(rip_state_t *rs, uint8_t idx,
      * the wrong half and always came out zero (D-17); with the field read
      * correctly the invented bits would start firing.
      *
-     * Wire bit 0 IS consumed -- it reaches port initialisation as a boolean
-     * -- but what it selects there is not recovered, so it is not acted on.
-     * Every '|2P' in the shipped corpus sets exactly this bit and nothing
-     * else, and those scenes render correctly without it.  D-22.
+     * D-41 recovers bit 0: it allocates an independent offscreen surface
+     * and resets its origin to zero. RIPlib still uses a shared framebuffer.
+     * D-42 records the resulting FONTS/SPECLEFX rendering boundary; passing
+     * corpus replay does not prove correct offscreen rendering.
      *
      * '|2s' bits 2 and 3 remain protect/unprotect: that handler really does
      * test bl,4 and test bl,8, and RIPlib matches it. */
@@ -531,19 +539,40 @@ static bool rip_port_switch(rip_state_t *rs, uint8_t new_idx,
     return true;
 }
 
-/*
- * rip_port_copy -- copy pixels from one port's viewport to another.
- *
- * Maps to DLL RIP_PORT_COPY (!|2C).  On RIPlib's single-framebuffer
- * architecture both source and destination reside in the same framebuffer,
- * so draw_copy_rect() provides the necessary memmove-safe blit.
- *
- * Source/dest coords of all zeros = use entire viewport of that port.
- * If dx1,dy1 = 0 -- no scaling (verbatim copy to dx0,dy0 position).
- * If the destination rectangle has a different size, scale nearest-neighbor
- * through a scratch copy so overlapping source/dest regions remain stable.
- * Input coordinates are in EGA (640x350) space; scaled to card here.
- */
+typedef struct { int32_t left, top, right, bottom; } rip2_copy_rect_t;
+
+/* Public port viewports are inclusive; the driver copy contract is exclusive. */
+static rip2_copy_rect_t rip2_port_rect(const rip_port_t *port) {
+    rip2_copy_rect_t r = {port->vp_x0, port->vp_y0,
+                         (int32_t)port->vp_x1 + 1, (int32_t)port->vp_y1 + 1};
+    return r;
+}
+
+static bool rip2_copy_rect_empty(rip2_copy_rect_t r) {
+    return r.left >= r.right || r.top >= r.bottom;
+}
+
+/* RectTrimToFit only trims far edges. Native copies shorten the corresponding
+ * destination/source edge too; scaled copies keep the other rectangle intact. */
+static bool rip2_copy_trim(rip2_copy_rect_t *r, rip2_copy_rect_t clip,
+                           rip2_copy_rect_t *paired) {
+    if (r->right < clip.left || r->bottom < clip.top ||
+        r->left >= clip.right || r->top >= clip.bottom)
+        return false;
+    if (r->right > clip.right) {
+        if (paired) paired->right -= r->right - clip.right;
+        r->right = clip.right;
+    }
+    if (r->bottom > clip.bottom) {
+        if (paired) paired->bottom -= r->bottom - clip.bottom;
+        r->bottom = clip.bottom;
+    }
+    return true;
+}
+
+/* D-42: explicit coordinates are relative to each port; all-zero rectangles
+ * mean the entire respective viewport. Position-only destination means native
+ * size. Scratch capture keeps overlapping scaled/ROP copies stable. */
 static void rip_port_copy(rip_state_t *rs,
                           uint8_t src_idx,
                           int16_t sx0, int16_t sy0,
@@ -553,54 +582,50 @@ static void rip_port_copy(rip_state_t *rs,
                           int16_t dx1, int16_t dy1,
                           uint8_t write_mode)
 {
-    if (src_idx >= RIP_MAX_PORTS || dst_idx >= RIP_MAX_PORTS)
+    if (src_idx >= RIP_MAX_PORTS || dst_idx >= RIP_MAX_PORTS ||
+        write_mode > DRAW_MODE_NOT)
         return;
     if (!rs->ports[src_idx].allocated || !rs->ports[dst_idx].allocated)
         return;
 
-    rip_port_t *sp = &rs->ports[src_idx];
-    rip_port_t *dp = &rs->ports[dst_idx];
-
-    /* Resolve source rectangle (all-zero = entire source viewport) */
-    int16_t rsx0, rsy0, rsx1, rsy1;
-    if (sx0 == 0 && sy0 == 0 && sx1 == 0 && sy1 == 0) {
-        rsx0 = sp->vp_x0; rsy0 = sp->vp_y0;
-        rsx1 = sp->vp_x1; rsy1 = sp->vp_y1;
-    } else {
-        rsx0 = sx0;         rsy0 = scale_y(sy0);
-        rsx1 = sx1;         rsy1 = scale_y1(sy1);
-    }
-
-    /* Resolve destination position/rectangle (all-zero = upper-left). */
-    int16_t rdx, rdy, rdx1, rdy1;
-    bool dest_rect = false;
-    if (dx0 == 0 && dy0 == 0 && dx1 == 0 && dy1 == 0) {
-        rdx = dp->vp_x0; rdy = dp->vp_y0;
-        rdx1 = 0; rdy1 = 0;
-    } else {
-        rdx = dx0; rdy = scale_y(dy0);
-        rdx1 = dx1; rdy1 = scale_y1(dy1);
-        dest_rect = !(dx1 == 0 && dy1 == 0);
-    }
-
-    int16_t w = (int16_t)(rsx1 - rsx0 + 1);
-    int16_t h = (int16_t)(rsy1 - rsy0 + 1);
-    int16_t dw = w;
-    int16_t dh = h;
-    if (w <= 0 || h <= 0)
+    rip2_copy_rect_t sc = rip2_port_rect(&rs->ports[src_idx]);
+    rip2_copy_rect_t dc = rip2_port_rect(&rs->ports[dst_idx]);
+    rip2_copy_rect_t source = sc, dest = dc;
+    /* Wire coordinates are unsigned. Reject values that cannot be represented
+     * by the portable signed coordinate API instead of wrapping their scale. */
+    if (sx0 < 0 || sy0 < 0 || sx1 < 0 || sy1 < 0 ||
+        dx0 < 0 || dy0 < 0 || dx1 < 0 || dy1 < 0)
         return;
-
-    if (dest_rect) {
-        if (rdx > rdx1) { int16_t t = rdx; rdx = rdx1; rdx1 = t; }
-        if (rdy > rdy1) { int16_t t = rdy; rdy = rdy1; rdy1 = t; }
-        dw = (int16_t)(rdx1 - rdx + 1);
-        dh = (int16_t)(rdy1 - rdy + 1);
+    if (sx0 || sy0 || sx1 || sy1) {
+        source = (rip2_copy_rect_t){sc.left + sx0, sc.top + (int32_t)sy0 * 8 / 7,
+                                   sc.left + sx1, sc.top + (int32_t)sy1 * 8 / 7};
     }
-
-    rip2_copy_scaled(rs, rsx0, rsy0, w, h, rdx, rdy, dw, dh, write_mode);
-
-    /* Restore active port's write mode */
-    draw_set_write_mode(rs->ports[rs->active_port].write_mode);
+    if (dx0 || dy0 || dx1 || dy1) {
+        dest.left = dc.left + dx0;
+        dest.top = dc.top + (int32_t)dy0 * 8 / 7;
+        if (!dx1 && !dy1) {
+            dest.right = dest.left + source.right - source.left;
+            dest.bottom = dest.top + source.bottom - source.top;
+        } else {
+            dest.right = dc.left + dx1;
+            dest.bottom = dc.top + (int32_t)dy1 * 8 / 7;
+        }
+    }
+    if (rip2_copy_rect_empty(source) || rip2_copy_rect_empty(dest)) return;
+    bool scaled = source.right - source.left != dest.right - dest.left ||
+                  source.bottom - source.top != dest.bottom - dest.top;
+    if (!rip2_copy_trim(&source, sc, scaled ? NULL : &dest) ||
+        !rip2_copy_trim(&dest, dc, scaled ? NULL : &source) ||
+        rip2_copy_rect_empty(source) || rip2_copy_rect_empty(dest)) return;
+    int32_t sw = source.right - source.left, sh = source.bottom - source.top;
+    int32_t dw = dest.right - dest.left, dh = dest.bottom - dest.top;
+    if (source.left < INT16_MIN || source.top < INT16_MIN ||
+        dest.left < INT16_MIN || dest.top < INT16_MIN ||
+        source.right > INT16_MAX || source.bottom > INT16_MAX ||
+        dest.right > INT16_MAX || dest.bottom > INT16_MAX ||
+        sw > INT16_MAX || sh > INT16_MAX || dw > INT16_MAX || dh > INT16_MAX) return;
+    rip2_copy_scaled(rs, (int16_t)source.left, (int16_t)source.top, (int16_t)sw, (int16_t)sh,
+                     (int16_t)dest.left, (int16_t)dest.top, (int16_t)dw, (int16_t)dh, write_mode);
 }
 
 

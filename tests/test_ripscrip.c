@@ -15,6 +15,7 @@
 #include "fixtures/affine_oval.h"
 #include "fixtures/image_rops.h"
 #include "fixtures/gdi_raster.h"
+#include "fixtures/port_copy.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -177,17 +178,17 @@ static void test_clipboard_rejects_unrepresentable_dimensions(void) {
     PASS();
 }
 
-static void test_scaled_port_copy_blanks_offscreen_source(void) {
+static void test_scaled_port_copy_trims_source(void) {
     rip_state_t s;
     comp_context_t ctx;
-    static const uint8_t expected[8] = {5,5,6,6,0,0,0,0};
-    TEST("scaled port copy blanks source pixels beyond framebuffer");
+    static const uint8_t expected[8] = {5,5,5,5,6,6,6,6};
+    TEST("scaled port copy trims source but retains destination extent");
     init_fixture(&s, &ctx);
     memset(fb, 0xA7, sizeof(fb));
     fb[638] = 5; fb[639] = 6;
-    /* Source (638,0)..(641,0); destination (10,10)..(17,10).
-     * The source's right half is offscreen; logical y=10 becomes 11. */
-    feed_script(&s, &ctx, "!|2C" "0HQ00HT00" "00A0A0H0A" "000000|");
+    /* Exclusive source (638,0)..(642,1), destination (10,10)..(18,11).
+     * The driver shrinks the source to two pixels, then stretches to eight. */
+    feed_script(&s, &ctx, "!|2C" "0HQ00HU01" "00A0A0I0B" "000000|");
     if (memcmp(&fb[11 * W + 10], expected, sizeof(expected)) ||
         fb[11 * W + 9] != 0xA7 || fb[11 * W + 18] != 0xA7) {
         FAIL("scaled copy exposed scratch bytes or changed its extent"); return;
@@ -278,8 +279,8 @@ static void test_port_copy_not_source(void) {
     memset(fb, 0xA5, sizeof(fb));
     fb[0] = 0x12; fb[1] = 0x34;
     /* Native 2x1, then scaled 4x1 copy, followed by Level 2 clipboard. */
-    feed_script(&s, &ctx, "!|2C" "000000100" "00A000B00" "400000|"
-                          "2C" "000000100" "00K000N00" "400000|");
+    feed_script(&s, &ctx, "!|2C" "000000201" "00A000C01" "400000|"
+                          "2C" "000000201" "00K000O01" "400000|");
     if (fb[10] != 0xED || fb[11] != 0xCB || fb[20] != 0xED ||
         fb[21] != 0xED || fb[22] != 0xCB || fb[23] != 0xCB) {
         FAIL("port copy inverted destination or scaled incorrectly"); return;
@@ -290,6 +291,92 @@ static void test_port_copy_not_source(void) {
         ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_CLIPBOARD, "", 0, params, 4);
     }
     if (fb[30] != 0xED || fb[31] != 0xCB) { FAIL("Level 2 paste differs"); return; }
+    PASS();
+}
+
+static void test_port_copy_driver_rectangles(void) {
+    static uint8_t original[W * H], expected[W * H];
+    static const char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    rip_state_t s; comp_context_t ctx;
+    TEST("wire port copies match 50 driver rectangles, five ROPs and invalid mode");
+    init_fixture(&s, &ctx);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+        original[y * W + x] = (uint8_t)(x * 13 + y * 29);
+    s.ports[1].allocated = true;
+    for (size_t f = 0; f < sizeof(port_copy_fixtures) / sizeof(port_copy_fixtures[0]); f++) {
+        const int16_t *p = port_copy_fixtures[f].port;
+        const int16_t *b = port_copy_fixtures[f].blit;
+        s.ports[1].vp_x0 = p[0]; s.ports[1].vp_y0 = p[1];
+        s.ports[1].vp_x1 = (int16_t)(p[2] - 1); s.ports[1].vp_y1 = (int16_t)(p[3] - 1);
+        for (int mode = 0; mode <= 5; mode++) {
+            char command[40] = "!|2C"; int n = 4;
+            memcpy(fb, original, sizeof(fb)); memcpy(expected, original, sizeof(expected));
+            for (int i = 0; i < 12; i++) {
+                int value = i == 10 ? mode : port_copy_fixtures[f].args[i];
+                int width = (i == 0 || i == 5 || i == 10) ? 1 : i == 11 ? 5 : 2;
+                for (int j = width - 1; j >= 0; j--) {
+                    command[n + j] = digits[value % 36]; value /= 36;
+                }
+                n += width;
+            }
+            command[n++] = '|'; command[n] = 0;
+            if (port_copy_fixtures[f].valid && mode <= 4) {
+                bool copy_samples = abs(b[2] - b[6]) <= 1 && abs(b[3] - b[7]) <= 1;
+                for (int y = 0; y < b[7]; y++) for (int x = 0; x < b[6]; x++) {
+                    int sx = b[0] + rip_gdi_sample((uint16_t)x, (uint16_t)b[2], (uint16_t)b[6], copy_samples);
+                    int sy = b[1] + rip_gdi_sample((uint16_t)y, (uint16_t)b[3], (uint16_t)b[7], copy_samples);
+                    int dest = (b[5] + y) * W + b[4] + x;
+                    expected[dest] = image_rop_expected(mode, original[sy * W + sx], original[dest]);
+                }
+            }
+            feed_script(&s, &ctx, command);
+            if (memcmp(fb, expected, sizeof(fb))) {
+                printf("fixture=%u mode=%d ", (unsigned)f, mode);
+                FAIL("copy pixels/extent differ from driver call"); return;
+            }
+        }
+    }
+    PASS();
+}
+
+static void test_port_copy_clip_and_overlap(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("port copies preserve active clip, overlapping samples and draw state");
+    init_fixture(&s, &ctx);
+    for (int mode = 0; mode <= 4; mode++) {
+        uint8_t before[16];
+        for (int x = 0; x < 16; x++) fb[x] = before[x] = (uint8_t)(x * 17);
+        s.write_mode = DRAW_MODE_OR; draw_set_write_mode(DRAW_MODE_OR); draw_set_color(73);
+        draw_set_clip(3, 0, 4, 0);
+        char command[] = "!|2C000000801002000A01000000|";
+        command[22] = (char)('0' + mode);
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_COPY,
+                          command + 4, 24, NULL, 0);
+        for (int x = 0; x < 16; x++) {
+            uint8_t expected = x >= 3 && x <= 4 ? image_rop_expected(mode, before[x - 2], before[x]) : before[x];
+            if (fb[x] != expected) { FAIL("overlap or viewport changed the sampled source"); return; }
+        }
+        if (draw_get_color() != 73 ||
+            draw_get_clip_x0() != 3 || draw_get_clip_x1() != 4) {
+            FAIL("copy leaked drawing state"); return;
+        }
+        uint8_t prior = fb[3];
+        draw_set_color(2); draw_pixel(3, 0);
+        if (fb[3] != (uint8_t)(prior | 2)) { FAIL("copy leaked write mode"); return; }
+    }
+    {
+        static uint8_t before[W * H];
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+            fb[y * W + x] = before[y * W + x] = (uint8_t)(x * 13 + y * 29);
+        draw_set_clip(3, 3, 4, 4);
+        ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_PORT_COPY,
+                          "000000707002020909000000", 24, NULL, 0);
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            uint8_t expected = x >= 3 && x <= 4 && y >= 3 && y <= 4
+                ? before[(y - 2) * W + x - 2] : before[y * W + x];
+            if (fb[y * W + x] != expected) { FAIL("native copy escaped a clip edge"); return; }
+        }
+    }
     PASS();
 }
 
@@ -3268,7 +3355,7 @@ static void test_l2_port_copy_scales_destination_rect(void) {
     init_fixture(&s, &ctx);
     draw_set_color(55);
     draw_rect(2, 2, 1, 2, true);
-    feed_script(&s, &ctx, "!|2C00202020200K0K0M0M0|");
+    feed_script(&s, &ctx, "!|2C00202030400K0K0N0N0|");
     if (draw_get_pixel(20, 22) == 55 &&
         draw_get_pixel(22, 25) == 55)
         PASS();
@@ -6998,10 +7085,12 @@ int main(void) {
     test_tiled_blit_intersects_viewport();
     test_clipboard_capture_clears_padding();
     test_clipboard_rejects_unrepresentable_dimensions();
-    test_scaled_port_copy_blanks_offscreen_source();
+    test_scaled_port_copy_trims_source();
     test_image_blit_driver_rops();
     test_icon_and_clipboard_not_source();
     test_port_copy_not_source();
+    test_port_copy_driver_rectangles();
+    test_port_copy_clip_and_overlap();
     test_icon_capture_native_gdi_fixtures();
     test_gdi_sampling_maps();
     test_gdi_sampling_grids();

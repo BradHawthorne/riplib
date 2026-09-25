@@ -18,6 +18,29 @@ raster = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(raster)
 IB, INST, PORTS, TABLE = raster.IB, raster.INST, raster.PORTS, raster.TABLE
 ARGS, NAME, TEMP, STATE = 0x140000, 0x141000, 0x142000, 0x143000
+COPY_EDGES = [
+    ('zero_both', [0, 0, 0, 0], [0, 0, 0, 0], False),
+    ('zero_source', [0, 0, 0, 0], [30, 28, 40, 35], False),
+    ('zero_dest', [3, 7, 5, 14], [0, 0, 0, 0], False),
+    ('position_only', [3, 7, 5, 14], [30, 28, 0, 0], False),
+    ('reverse_source_x', [5, 7, 3, 14], [30, 28, 32, 35], False),
+    ('reverse_source_y', [3, 14, 5, 7], [30, 28, 32, 35], False),
+    ('reverse_dest_x', [3, 7, 5, 14], [32, 28, 30, 35], False),
+    ('reverse_dest_y', [3, 7, 5, 14], [30, 35, 32, 28], False),
+    ('empty_source', [3, 7, 3, 14], [30, 28, 32, 35], False),
+    ('empty_dest', [3, 7, 5, 14], [30, 28, 30, 35], False),
+    ('left_top', [0, 0, 2, 7], [0, 0, 2, 7], False),
+    ('source_right_native', [98, 7, 102, 14], [30, 28, 34, 35], False),
+    ('source_right_scaled', [98, 7, 102, 14], [30, 28, 38, 35], False),
+    ('source_bottom_native', [3, 68, 5, 72], [30, 28, 32, 32], False),
+    ('source_bottom_scaled', [3, 68, 5, 72], [30, 28, 32, 36], False),
+    ('dest_right_native', [3, 7, 7, 14], [98, 28, 102, 35], True),
+    ('dest_right_scaled', [3, 7, 5, 14], [98, 28, 102, 35], True),
+    ('dest_bottom_native', [3, 7, 5, 11], [30, 68, 32, 72], True),
+    ('dest_bottom_scaled', [3, 7, 5, 14], [30, 68, 32, 72], True),
+    ('source_outside', [101, 7, 103, 14], [30, 28, 32, 35], False),
+    ('dest_outside', [3, 7, 5, 14], [101, 28, 103, 35], True),
+]
 
 
 class HandlerOracle(raster.Oracle):
@@ -102,7 +125,7 @@ class HandlerOracle(raster.Oracle):
 
 
 def generate(dll):
-    cases, copies = [], []
+    cases, copies, edges = [], [], []
     for origin in ((0, 0), (10, 20)):
         for offscreen in (0, 1):
             for stretch in (0, 1):
@@ -129,7 +152,14 @@ def generate(dll):
                         raise RuntimeError(f'port-copy fixture failed: {o.events}')
                     copies.append({'define_origin': list(origin), 'offscreen': offscreen,
                                    'port': o.port, 'args': args, 'events': o.events})
-    result = {'driver_md5': raster.MD5, 'load_icon': cases, 'port_copy': copies}
+            for name, source, dest, reverse in COPY_EDGES:
+                o = HandlerOracle(dll, origin, offscreen)
+                args = [0 if reverse else 1, *source, 1 if reverse else 0, *dest, 0, 0]
+                o.write(ARGS, args)
+                o.run(0x46372, [INST, 0, ARGS, 0])
+                edges.append({'name': name, 'define_origin': list(origin), 'offscreen': offscreen,
+                              'port': o.port, 'args': args, 'events': o.events})
+    result = {'driver_md5': raster.MD5, 'load_icon': cases, 'port_copy': copies, 'copy_edges': edges}
     validate(result)
     return result
 
@@ -180,20 +210,68 @@ def validate(data):
             require(c['events'] == expected, family + ' coordinate/DC/capture contract')
         require(len(keys) == 16, 'missing or duplicate matrix case')
 
+    edges = {name: (source, dest, reverse) for name, source, dest, reverse in COPY_EDGES}
+    require(len(data['copy_edges']) == 84, 'boundary case count')
+    keys = set()
+    for c in data['copy_edges']:
+        name, (ox, oy), off = c['name'], c['define_origin'], c['offscreen']
+        require(name in edges and (ox, oy) in ((0, 0), (10, 20)) and off in (0, 1),
+                'boundary input domain')
+        source, dest, reverse = edges[name]
+        require(c['args'] == [0 if reverse else 1, *source,
+                              1 if reverse else 0, *dest, 0, 0], 'boundary arguments')
+        keys.add((name, ox, oy, off))
+        px, py = (0, 0) if off else (ox, oy * 8 // 7)
+        dc = 201 if off else 101
+        require(c['port'] == {'kind': 4 if off else 1,
+                              'clip': [px, py, px + 100, py + 80], 'dc': dc}, 'boundary port setup')
+        rejected = name.startswith(('reverse_', 'empty_')) or name.endswith('_outside')
+        events = c['events']
+        if rejected:
+            require(bool(events) and all(e == {'error_code': 30} for e in events),
+                    'boundary rejection contract')
+        else:
+            require(len(events) == 1 and set(events[0]) in ({'BitBlt'}, {'StretchBlt'}),
+                    'boundary copy event missing or unexpected')
+            call = next(iter(events[0].values()))
+            require(len(call) == (9 if 'BitBlt' in events[0] else 11) and
+                    call[0] == (dc if reverse else 101) and
+                    call[5] == (101 if reverse else dc) and call[-1] == 0xCC0020,
+                    'boundary copy DC/ROP contract')
+    require(len(keys) == 84, 'missing or duplicate boundary case')
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('dll')
     ap.add_argument('--check', action='store_true')
     args = ap.parse_args()
-    result = json.dumps(generate(args.dll), indent=2) + '\n'
+    data = generate(args.dll)
+    result = json.dumps(data, indent=2) + '\n'
     path = ROOT / 'tests/fixtures/port_calls.json'
+    header = ['/* Generated by dll-port-fixtures.py; exclusive device rectangles. */',
+              'static const struct { int16_t port[4], args[12], blit[8]; bool valid; } port_copy_fixtures[] = {']
+    for case in data['port_copy'] + data['copy_edges']:
+        # The portable model has shared pixels: compare identical viewport inputs.
+        # Independent offscreen DC storage is not represented by these C fixtures.
+        if case['offscreen']: continue
+        call = next((e for e in case['events'] if 'BitBlt' in e or 'StretchBlt' in e), None)
+        if call:
+            a = call.get('BitBlt', call.get('StretchBlt'))
+            sw, sh = a[8:10] if 'StretchBlt' in call else a[3:5]
+            blit = [a[6], a[7], sw, sh, a[1], a[2], a[3], a[4]]
+        else: blit = [0] * 8
+        fields = ['{' + ','.join(map(str, values)) + '}' for values in (case['port']['clip'], case['args'], blit)]
+        header.append('    {' + ', '.join(fields) + ', ' + ('true' if call else 'false') + '},')
+    header = '\n'.join(header + ['};', ''])
+    header_path = path.with_name('port_copy.h')
     if args.check:
-        if path.read_text(encoding='utf-8') != result:
+        if path.read_text(encoding='utf-8') != result or header_path.read_text(encoding='utf-8') != header:
             raise SystemExit('port fixtures differ from driver execution')
-        print('16 LOAD_ICON and 16 PORT_COPY cases with native port setup match the driver')
+        print(f"16 LOAD_ICON, 16 PORT_COPY and {len(data['copy_edges'])} copy boundary cases match the driver")
     else:
         path.write_text(result, encoding='utf-8', newline='\n')
+        header_path.write_text(header, encoding='utf-8', newline='\n')
 
 
 if __name__ == '__main__': main()

@@ -641,10 +641,18 @@ rather than a slogan.
      reads (23,52). This extra offset survives actual port creation/switching;
      it is absent in the tested offscreen case because that origin is zero.
 
-     Status: OPEN. No runtime parity fix in D-41. First cover all-zero copy
-     rectangles and clipping, then correct bounded copy semantics. Choose a
-     storage/coordinate model coherently before changing every drawing path.
-     These findings do not require changing any wire field widths.
+     D-42 fixes 2C relative coordinates, exclusive extents, floor rounding,
+     all-zero destination scaling, rejection and trimming for the stored
+     viewport geometry. Fifty driver-derived shared-port fixtures pass all
+     five ROPs and invalid mode 5. Viewport setup is injected equivalently;
+     this is not proof that 2P currently creates matching viewports.
+
+     Status: PARTIAL. Independent offscreen storage, 2P definition geometry
+     and 1I's shared-origin capture quirk remain open. FONTS and SPECLEFX
+     request surfaces larger than RIPlib's display; their foreground metrics
+     change under the corrected copy semantics, with rendering parity still
+     unproven. D-42 records exact deltas and source dimensions. These fixes
+     and remaining differences do not require changing wire field widths.
 
 14.4  WHAT THIS REGISTER IS FOR
 ---------------------------------------------------------------------
