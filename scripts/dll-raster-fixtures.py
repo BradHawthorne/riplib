@@ -24,7 +24,10 @@ CASES = [
     ("single_pixel", 0, 0, 1, 1, 0, [0, 0, 640, 400]),
     ("right_bottom_clip", 638, 398, 4, 7, 0, [0, 0, 640, 400]),
     ("stretched_clip", 638, 398, 4, 7, 1, [0, 0, 640, 400]),
+    ("right_clip", 638, 20, 4, 7, 0, [0, 0, 640, 400]),
     ("outside", 650, 410, 2, 7, 0, [0, 0, 640, 400]),
+    ("left_top_clip", -1, -1, 4, 7, 0, [0, 0, 640, 400]),
+    ("port_origin", 10, 20, 2, 7, 0, [10, 20, 640, 400]),
 ]
 
 
@@ -192,7 +195,7 @@ def main():
     if args.check:
         if path.read_text(encoding='utf-8') != result or header.read_text(encoding='utf-8') != rops:
             raise SystemExit('raster call fixtures differ from driver execution')
-        print('6 capture cases and 18 ROP selections match the bounded driver oracle')
+        print(f'{len(CASES)} capture cases and 18 ROP selections match the bounded driver oracle')
     else:
         path.write_text(result, encoding='utf-8', newline='\n')
         header.write_text(rops, encoding='utf-8', newline='\n')

@@ -14,6 +14,7 @@
 #include "../src/rip_clipboard.h"
 #include "fixtures/affine_oval.h"
 #include "fixtures/image_rops.h"
+#include "fixtures/gdi_raster.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -254,7 +255,8 @@ static void test_icon_and_clipboard_not_source(void) {
     feed_script(&s, &ctx, "!|1I000004000ROP|1I040004010ROP|1P0800040|");
     for (int y = 0; y < 8; y++) {
         for (int x = 0; x < 2; x++) {
-            uint8_t scaled = image_rop_expected(4, source[(y * 7 / 8) * 2 + x], 0xA5);
+            /* Native GDI's 7->8 shortcut repeats the final sample. */
+            uint8_t scaled = image_rop_expected(4, source[(y < 7 ? y : 6) * 2 + x], 0xA5);
             uint8_t native = y < 7 ? image_rop_expected(4, source[y * 2 + x], 0xA5) : 0xA5;
             if (fb[y * W + x] != native || fb[y * W + 4 + x] != scaled ||
                 fb[y * W + 8 + x] != native) {
@@ -288,6 +290,155 @@ static void test_port_copy_not_source(void) {
         ripscrip2_execute(&s.rip2_state, &s, &ctx, RIP2_CMD_CLIPBOARD, "", 0, params, 4);
     }
     if (fb[30] != 0xED || fb[31] != 0xCB) { FAIL("Level 2 paste differs"); return; }
+    PASS();
+}
+
+static void test_icon_capture_native_gdi_fixtures(void) {
+    static const char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    TEST("wire icon capture matches native memory-DIB values");
+    for (size_t i = 0; i < sizeof(gdi_capture_fixtures) / sizeof(gdi_capture_fixtures[0]); i++) {
+        rip_state_t s; comp_context_t ctx;
+        uint8_t pixels[64]; char command[40];
+        int x = gdi_capture_fixtures[i].x, y = gdi_capture_fixtures[i].y;
+        int w = gdi_capture_fixtures[i].w, h = gdi_capture_fixtures[i].h;
+        int cw = gdi_capture_fixtures[i].cw, ch = gdi_capture_fixtures[i].ch;
+        if (x < 0 || y < 0) continue; /* signed helper cases are checked separately */
+        init_fixture(&s, &ctx);
+        memset(fb, 0xA5, sizeof(fb));
+        for (int k = 0; k < w * h; k++) pixels[k] = (uint8_t)(k * 11 + 7);
+        if (!rip_icon_cache_pixels(&s.icon_state, "GDI", 3, pixels, (uint16_t)w, (uint16_t)h)) {
+            FAIL("asset setup failed"); return;
+        }
+        y = (y * 7 + 7) / 8;
+        snprintf(command, sizeof(command), "!|1I%c%c%c%c0%d1%d0GDI|",
+                 digits[x / 36], digits[x % 36], digits[y / 36], digits[y % 36],
+                 gdi_capture_fixtures[i].mode, gdi_capture_fixtures[i].stretch);
+        feed_script(&s, &ctx, command);
+        if (!s.clipboard.valid || s.clipboard.width != cw || s.clipboard.height != ch ||
+            memcmp(s.clipboard.data, gdi_capture_fixtures[i].pixels, (size_t)cw * ch)) {
+            FAIL("clipboard dimensions, raster result or samples differ from native GDI"); return;
+        }
+    }
+    {
+        rip_state_t s; comp_context_t ctx;
+        init_fixture(&s, &ctx);
+        /* The directed fuzz seed must reach capture through the wire cache path. */
+        feed_script(&s, &ctx,
+            "!|c05|B00000A0A|1C000003060|1W0GDI|1I000001110GDI|1P0404040|");
+        if (!s.clipboard.valid || s.clipboard.width != 5 || s.clipboard.height != 10 ||
+            s.icon_state.request_count != 0 || s.clipboard.data[0] != 0) {
+            printf("valid=%d size=%dx%d requests=%d first=%d ", s.clipboard.valid,
+                   s.clipboard.width, s.clipboard.height, s.icon_state.request_count,
+                   s.clipboard.data ? s.clipboard.data[0] : -1);
+            FAIL("cached-icon fuzz seed did not reach screen capture"); return;
+        }
+    }
+    PASS();
+}
+
+static void test_gdi_sampling_maps(void) {
+    TEST("GDI sampler matches 1024 native size-pair hashes");
+    for (size_t i = 0; i < sizeof(gdi_axis_fixtures) / sizeof(gdi_axis_fixtures[0]); i++) {
+        uint32_t hash = 2166136261u;
+        for (uint16_t p = 0; p < gdi_axis_fixtures[i].dest; p++)
+            hash = (hash ^ rip_gdi_sample(p, gdi_axis_fixtures[i].source, gdi_axis_fixtures[i].dest,
+                    abs((int)gdi_axis_fixtures[i].source - gdi_axis_fixtures[i].dest) <= 1)) * 16777619u;
+        if (hash != gdi_axis_fixtures[i].hash) { FAIL("sample map differs from GDI"); return; }
+    }
+    PASS();
+}
+
+static void test_gdi_sampling_grids(void) {
+    rip_state_t s; comp_context_t ctx;
+    uint8_t source[64];
+    TEST("GDI blitter matches 360 native two-dimensional grids");
+    init_fixture(&s, &ctx);
+    for (int i = 0; i < 64; i++) source[i] = (uint8_t)i;
+    for (size_t i = 0; i < sizeof(gdi_grid_fixtures) / sizeof(gdi_grid_fixtures[0]); i++) {
+        int dw = gdi_grid_fixtures[i].dw, dh = gdi_grid_fixtures[i].dh;
+        uint32_t hash = 2166136261u;
+        memset(fb, 0xA5, sizeof(fb));
+        rip_blit_pixels_gdi(&s, 0, 0, source, gdi_grid_fixtures[i].w, gdi_grid_fixtures[i].h,
+                            (int16_t)dw, (int16_t)dh, DRAW_MODE_COPY);
+        for (int y = 0; y < dh; y++) for (int x = 0; x < dw; x++)
+            hash = (hash ^ fb[y * W + x]) * 16777619u;
+        if (hash != gdi_grid_fixtures[i].hash) { FAIL("2D sample map differs from GDI"); return; }
+    }
+    PASS();
+}
+
+static void test_icon_capture_signed_and_capacity(void) {
+    rip_state_t s; comp_context_t ctx;
+    TEST("icon capture handles negative origins and rejects excess capacity");
+    init_fixture(&s, &ctx);
+    for (size_t i = 0; i < sizeof(gdi_capture_fixtures) / sizeof(gdi_capture_fixtures[0]); i++) {
+        uint8_t pixels[64];
+        rip_image_rect_t r = {gdi_capture_fixtures[i].x, gdi_capture_fixtures[i].y,
+                             gdi_capture_fixtures[i].w, gdi_capture_fixtures[i].h};
+        if (r.x >= 0) continue;
+        memset(fb, 0xA5, sizeof(fb));
+        for (int k = 0; k < r.width * r.height; k++) pixels[k] = (uint8_t)(k * 11 + 7);
+        rip_blit_pixels_gdi(&s, r.x, r.y, pixels, (uint16_t)r.width, (uint16_t)r.height,
+                            r.width, r.height, (uint8_t)gdi_capture_fixtures[i].mode);
+        if (!rip_clipboard_capture_icon(&s, &r) ||
+            memcmp(s.clipboard.data, gdi_capture_fixtures[i].pixels,
+                   (size_t)s.clipboard.width * s.clipboard.height)) {
+            FAIL("negative source capture differs from native GDI"); return;
+        }
+    }
+    {
+        uint8_t old[64];
+        size_t bytes = (size_t)s.clipboard.width * s.clipboard.height;
+        int16_t old_w = s.clipboard.width, old_h = s.clipboard.height;
+        const rip_image_rect_t oversized = {0, 0, 641, 401};
+        const rip_image_rect_t overflow = {0, 0, INT16_MAX, 1};
+        memcpy(old, s.clipboard.data, bytes);
+        if (rip_clipboard_capture_icon(&s, &oversized) || rip_clipboard_capture_icon(&s, &overflow) ||
+            s.clipboard.width != old_w || s.clipboard.height != old_h ||
+            memcmp(old, s.clipboard.data, bytes)) { FAIL("failed capture destroyed the previous image"); return; }
+    }
+    PASS();
+}
+
+static void test_icon_capture_full_frame(void) {
+    rip_state_t s; comp_context_t ctx;
+    const rip_image_rect_t rect = {0, 0, W, H};
+    TEST("full-frame capture fits expanded clipboard capacity");
+    init_fixture(&s, &ctx);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) fb[y * W + x] = (uint8_t)(x ^ y);
+    if (!rip_clipboard_capture_icon(&s, &rect) || s.clipboard.width != W + 1 || s.clipboard.height != H + 1) {
+        FAIL("full-frame capture no longer fits"); return;
+    }
+    for (int y = 0; y <= H; y++) for (int x = 0; x <= W; x++) {
+        uint8_t expected = (uint8_t)((x < W ? x : W - 1) ^ (y < H ? y : H - 1));
+        if (s.clipboard.data[y * (W + 1) + x] != expected) { FAIL("expanded edge differs"); return; }
+    }
+    PASS();
+}
+
+static void test_icon_style_capture_bounds(void) {
+    static uint8_t pixels[4] = {0x11, 0x22, 0x33, 0x44};
+    TEST("icon-style capture uses the rendered rectangle and ROP result");
+    for (int mode = 0; mode < 4; mode++) {
+        rip_state_t s; comp_context_t ctx;
+        init_fixture(&s, &ctx); memset(fb, 0xA5, sizeof(fb));
+        (void)rip_icon_cache_pixels(&s.icon_state, "BOX", 3, pixels, 2, 2);
+        s.icon_style_active = true; s.icon_style_style = (uint16_t)mode;
+        s.icon_style_x0 = s.icon_style_y0 = 10;
+        s.icon_style_x1 = s.icon_style_y1 = 16;
+        feed_script(&s, &ctx, "!|1I000001100BOX|");
+        int extent = mode == 2 ? 2 : 7, origin = mode == 2 ? 12 : 10;
+        if (!s.clipboard.valid || s.clipboard.width != extent + 1 || s.clipboard.height != extent + 1) {
+            FAIL("capture retained source dimensions or ignored style bounds"); return;
+        }
+        for (int y = 0; y <= extent; y++) for (int x = 0; x <= extent; x++) {
+            int sx = origin + (x < extent ? x : extent - 1);
+            int sy = origin + (y < extent ? y : extent - 1);
+            if (s.clipboard.data[y * (extent + 1) + x] != draw_get_pixel((int16_t)sx, (int16_t)sy)) {
+                FAIL("capture did not contain the displayed ROP result"); return;
+            }
+        }
+    }
     PASS();
 }
 
@@ -3545,15 +3696,15 @@ static void test_font_load_resolves_path_and_case(void) {
         FAIL("1O did not strip path/lowercase to SANS font");
 }
 
-/* COVERAGE: rip_clipboard_store_pixels. 1I LOAD_ICON with the
- * clipboard flag set must mirror the loaded icon into s->clipboard. */
+/* LOAD_ICON captures the displayed rectangle into its expanded clipboard. */
 static void test_load_icon_clipboard_flag_stores_pixels(void) {
     rip_state_t s;
     comp_context_t ctx;
     static const uint8_t px[4] = { 1, 2, 3, 4 };
     uint8_t *cached;
 
-    TEST("1I clipboard flag stores icon pixels in clipboard");
+    static const uint8_t captured[9] = {1,2,2,3,4,4,3,4,4};
+    TEST("1I clipboard flag captures expanded displayed pixels");
     init_fixture(&s, &ctx);
     cached = (uint8_t *)psram_arena_alloc(&s.psram_arena, 4);
     if (!cached) { FAIL("setup: arena alloc"); return; }
@@ -3565,9 +3716,9 @@ static void test_load_icon_clipboard_flag_stores_pixels(void) {
     /* 1I  x:00 y:00 mode:00 clip:1 res:00 name:FOO */
     feed_script(&s, &ctx, "!|1I000000100FOO|");
     if (s.clipboard.valid &&
-        s.clipboard.width == 2 && s.clipboard.height == 2 &&
+        s.clipboard.width == 3 && s.clipboard.height == 3 &&
         s.clipboard.data &&
-        memcmp(s.clipboard.data, px, 4) == 0)
+        memcmp(s.clipboard.data, captured, sizeof(captured)) == 0)
         PASS();
     else
         FAIL("clipboard not populated from 1I clipboard flag");
@@ -6851,6 +7002,12 @@ int main(void) {
     test_image_blit_driver_rops();
     test_icon_and_clipboard_not_source();
     test_port_copy_not_source();
+    test_icon_capture_native_gdi_fixtures();
+    test_gdi_sampling_maps();
+    test_gdi_sampling_grids();
+    test_icon_capture_signed_and_capacity();
+    test_icon_capture_full_frame();
+    test_icon_style_capture_bounds();
     test_clipboard_op_5_capture_op_6_paste();
     test_save_icon_slot_out_of_range_is_noop();
     test_stamp_icon_unset_slot_falls_back_to_clipboard();

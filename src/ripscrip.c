@@ -84,7 +84,7 @@ extern uint16_t palette_read_rgb565(uint8_t index);
 #include "riplib_platform.h"
 
 /* Arena size for a single RIPscrip session: 1 MB covers the clipboard
- * (640×400 = 256 KB), uploaded icon cache, and file staging buffer. */
+ * (641x401 = 257041 bytes), uploaded icon cache, and file staging buffer. */
 #define RIP_PSRAM_ARENA_SIZE (1024u * 1024u)
 
 /* Fixed numeric prefixes that precede a trailing string argument.  The
@@ -3057,7 +3057,7 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
                 if (have_icon) {
                     rip_draw_icon_pixels(s, dx, dy, icon.pixels,
                                          icon.width, icon.height,
-                                         dw, dh, s->write_mode);
+                                         dw, dh, s->write_mode, NULL);
                 }
             }
             break;
@@ -3544,23 +3544,24 @@ static void execute_rip_command(rip_state_t *s, void *ctx) {
 
                     rip_icon_t icon;
                     if (rip_icon_lookup(&s->icon_state, path, fname_len, &icon)) {
+                        rip_image_rect_t rendered = {0, 0, 0, 0};
                         if (mega_digit(p[7])) {
                             /* 49340 -> 31084 scales native dimensions by
                              * device/logical resolution: here 640/640,400/350. */
                             int32_t h = (int32_t)icon.height * 8 / 7;
-                            if (icon.width <= INT16_MAX && h <= INT16_MAX)
-                                rip_blit_pixels(s, ix, iy, icon.pixels,
+                            if (icon.width <= INT16_MAX && h <= INT16_MAX) {
+                                rendered = (rip_image_rect_t){ix, iy, (int16_t)icon.width, (int16_t)h};
+                                rip_blit_pixels_gdi(s, ix, iy, icon.pixels,
                                                 icon.width, icon.height,
                                                 (int16_t)icon.width, (int16_t)h, mode);
+                            }
                         } else {
                             rip_draw_icon_pixels(s, ix, iy, icon.pixels,
                                                  icon.width, icon.height,
-                                                 0, 0, mode);
+                                                 0, 0, mode, &rendered);
                         }
                         if (copy_to_clipboard)
-                            (void)rip_clipboard_store_pixels(s, icon.pixels,
-                                                             icon.width,
-                                                             icon.height);
+                            (void)rip_clipboard_capture_icon(s, &rendered);
                     } else {
                         /* Icon not found — queue file request + draw placeholder */
                         rip_icon_request_file(&s->icon_state, path, fname_len);

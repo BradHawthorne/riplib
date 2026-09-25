@@ -27,6 +27,14 @@
 #include "rip_icons.h"
 
 /* ── Clipboard ──────────────────────────────────────────────────── */
+typedef struct { int16_t x, y, width, height; } rip_image_rect_t;
+
+/* Native memory-DIB sampling; position < destination, positive dimensions. */
+uint16_t rip_gdi_sample(uint16_t position, uint16_t source, uint16_t destination,
+                        bool copy_samples);
+
+/* Capture the rendered icon using the driver's expanded clipboard extent. */
+bool rip_clipboard_capture_icon(rip_state_t *s, const rip_image_rect_t *rect);
 
 /* Allocate the clipboard backing buffer if not already done.  Returns
  * true if the buffer is ready to use (newly allocated OR already
@@ -70,6 +78,11 @@ void rip_blit_pixels(rip_state_t *s,
                      int16_t dst_w, int16_t dst_h,
                      uint8_t write_mode);
 
+/* Standard LOAD_ICON stretch path, with measured GDI sampling. */
+void rip_blit_pixels_gdi(rip_state_t *s, int16_t x, int16_t y,
+                         const uint8_t *pixels, uint16_t sw, uint16_t sh,
+                         int16_t dw, int16_t dh, uint8_t mode);
+
 /* Tile a small source rectangle across the [x0,y0..x1,y1] region. */
 void rip_blit_pixels_tiled(rip_state_t *s,
                            int16_t x0, int16_t y0,
@@ -85,4 +98,4 @@ void rip_draw_icon_pixels(rip_state_t *s,
                           const uint8_t *pixels,
                           uint16_t src_w, uint16_t src_h,
                           int16_t requested_w, int16_t requested_h,
-                          uint8_t write_mode);
+                          uint8_t write_mode, rip_image_rect_t *rendered);

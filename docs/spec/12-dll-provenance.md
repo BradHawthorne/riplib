@@ -1,8 +1,69 @@
-CURRENT CORRECTION (2026-09-24, D-34..39): historical claims below
+CURRENT CORRECTION (2026-09-24, D-34..40): historical claims below
 about 117 keys, a duplicate |3D, or service commands at level 3 are
 superseded. Prefix bytes prove 118 distinct keys; services use level 9.
 Global radix, icon stretch/ROP, exact brush masks and query protection
-are now implemented. See ../crosswalk-audit.md for current boundaries.
+are now implemented. D-40 supersedes the source-icon clipboard limitation
+in D-38/39. See ../crosswalk-audit.md for current boundaries.
+
+D-40 NATIVE MEMORY-DIB SAMPLING AND ICON SCREEN CAPTURE (2026-09-24).
+
+     The bounded DLL oracle now includes nine rectangle cases: right-only
+     clipping, negative left/top coordinates and nonzero port origins join
+     the six D-39 cases. scripts/gdi-raster-fixtures.py replays their recorded
+     GDI arguments on native Windows memory DIBs without loading the DLL or
+     reading the desktop. Measurements ran on Windows NT 10.0.26300.0.
+     Top-down 8-bit DIBs have identical source/destination color tables, with
+     both identity and permuted grayscale palettes. GdiFlush precedes CPU
+     access, and every memory DC/bitmap is released. Three stretch modes
+     and COPY/XOR/NOTSRCCOPY produce 162 capture configurations; the tested
+     palettes/modes yield identical index values. JSON retains 27 canonical
+     results; C fixtures exclude the three port-origin boundary cases.
+
+     An additional 1,024 one-dimensional size pairs and 360 two-dimensional
+     grids distinguish the native sampling rule: when BOTH size differences
+     are within one pixel, samples copy in order and the final edge repeats
+     on expansion. Otherwise each axis uses integer center sampling:
+     (position * source + source / 2) / destination. An initial per-axis
+     shortcut hypothesis failed mixed-ratio grids; the two-dimensional
+     fixtures guard that distinction. This is measured behavior for the
+     stated DIB profile, not a claim about every Windows raster backend.
+
+     Standard 1I stretch now uses that sampler. Its clipboard flag captures
+     the displayed framebuffer after the ROP, instead of caching the source
+     asset. It uses actual rendered/style bounds and the driver's expanded
+     width+1, height+1 allocation. Right/bottom clipping shrinks the source
+     while retaining the allocation; left/top coordinates remain intact.
+     Initialized zero padding defines offscreen/disjoint results. Ordinary
+     captures use row copies and repeated edges, avoiding per-pixel division.
+     Full 640x400 capture needs 641x401 bytes: RIP_CLIPBOARD_MAX increases by
+     1,041 bytes to 257,041, allocated only on first clipboard use. Oversized
+     captures preserve the previous clipboard. Other extension blitters keep
+     their existing floor sampler. Wire syntax and structure layout do not
+     change in D-40.
+
+     Six added tests cover the native fixtures, size maps, mixed grids,
+     negative sources/capacity failure, all four icon styles and every byte
+     of a full-frame capture. The wire capture regression fails against
+     3780b18, which cached source pixels, and passes after correction. The
+     other five exercise the new helpers; no fail-before claim applies to
+     them. A directed fuzz seed draws, captures, writes a cached icon, loads
+     it with XOR/stretch/capture, then pastes with source inversion.
+
+     Boundary: with port origin (10,20), the bounded helper chain displays
+     at (10,20) but later adds that origin again, reading (20,40). Native
+     replay captures background there. Full handler/port setup has not been
+     executed, so this is a call-path discrepancy, not proof that every RIPtel
+     window behaves that way. RIPlib retains absolute framebuffer coordinates.
+     Independent port surfaces, unequal palette remapping, halftone, fonts
+     and historical display drivers remain outside this parity claim.
+
+     Reproduce with dll-raster-fixtures.py <pinned DLL> --check, followed by
+     gdi-raster-fixtures.py --check on Windows. Portable CTests consume the
+     checked-in hashes/pixels and require neither Windows GDI nor the DLL.
+     Synchronization and native API contracts:
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-createdibsection
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-setstretchbltmode
+     https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-stretchblt
 
 D-39 IMAGE NOT SOURCE AND EXECUTABLE CAPTURE RECTANGLES (2026-09-24).
 

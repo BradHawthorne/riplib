@@ -307,3 +307,39 @@ The capture discrepancy is now demonstrated at the call boundary: 2x7 is
 captured into 3x8, and right/bottom clipping shrinks the source without
 shrinking the destination allocation. Exact capture pixels, GDI palette
 remapping and resampling remain unverified. RIPlib still caches source icons.
+
+## Native memory-DIB capture iteration (D-40)
+
+This supersedes D-39's source-icon caching limitation. Standard LOAD_ICON
+stretch now follows measured native GDI sampling, and its clipboard flag
+captures the displayed pixels after the raster operation. Capture uses the
+actual rendered rectangle, expands both dimensions by one, and retains that
+allocation when right/bottom clipping shrinks its source. Ordinary captures
+use row copies with repeated edges. Full-frame capacity grows by 1,041 bytes
+to 257,041; oversized captures preserve the previous clipboard. Wire syntax,
+public structure layout and other extension sampling remain unchanged.
+
+The evidence consists of nine bounded DLL call cases, 1,024 native size-pair
+maps, 360 two-dimensional grids and 162 native capture configurations. All
+capture configurations use top-down 8-bit memory DIBs, matching palettes
+(identity or permuted grayscale), stretch modes 1/2/3, and COPY/XOR/NOT source.
+The near-size sampling shortcut requires BOTH dimensions to differ by at
+most one; mixed-ratio fixtures caught an initial per-axis hypothesis.
+
+Six new runtime tests bring the parser suite to 350, alongside 43 drawing
+and 16 audit-instrument tests. The wire capture regression fails against
+3780b18 and passes with this correction. The remaining tests exercise new
+helpers, style bounds, negative origins, capacity failure and full-frame
+capture. All six CTest groups pass under Windows GCC/MSVC and Linux Clang
+sanitizers. All 35 scene metrics remain unchanged, 70 driver/source claims
+hold, all nine coverage floors pass, GCC static analysis is clean, and the
+RP2350 archive builds. A directed seed now reaches cached-icon screen capture;
+100,000 additional seeded mutations pass under ASan/UBSan.
+
+Nonzero port origins remain a separate boundary: the bounded driver helper
+chain adds the origin again during capture. Full port setup has not been
+executed; RIPlib retains its absolute framebuffer model. This evidence also
+does not establish arbitrary palette remapping, independent port surfaces,
+halftone, historical display-driver or font parity. D-40 records the exact
+scope and reproduction commands; [iteration-state.md](iteration-state.md)
+identifies the next evidence needed.

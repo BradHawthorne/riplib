@@ -25,8 +25,8 @@ extern "C" {
 /* Maximum mouse regions (RIPscrip spec: 128) */
 #define RIP_MAX_MOUSE_REGIONS 128
 
-/* Maximum clipboard size (640×400 = 256000 bytes, stored in PSRAM) */
-#define RIP_CLIPBOARD_MAX     (640 * 400)
+/* Full 640x400 image plus the driver's capture edge (257041 PSRAM bytes). */
+#define RIP_CLIPBOARD_MAX     (641 * 401)
 
 /* Numbered icon slots used by RIPlib extensions |3J SAVE_ICON / |3. STAMP_ICON. */
 #define RIP_ICON_SLOT_MAX     36
